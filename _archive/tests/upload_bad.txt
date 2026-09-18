@@ -1,0 +1,2 @@
+this is not a spreadsheet, it is plain text garbage that cannot be parsed
+second row with no structure

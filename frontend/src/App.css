@@ -1,0 +1,299 @@
+:root {
+  --navy: #0f1f45;
+  --navy-light: #16295c;
+  --blue: #2f6feb;
+  --blue-dark: #2158cf;
+  --bg: #f4f6fb;
+  --card: #ffffff;
+  --border: #e5e9f2;
+  --text: #1c2536;
+  --text-muted: #6b7488;
+  --danger: #d64545;
+  --danger-bg: #fdecec;
+  --success: #1f9d55;
+  --success-bg: #e9f9ef;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--navy);
+  color: #cfd6ea;
+  padding: 24px 16px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 32px;
+  padding: 0 8px;
+}
+
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--blue);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.brand-name { color: white; font-weight: 700; font-size: 15px; }
+.brand-sub { font-size: 11px; color: #8b96b8; }
+
+.nav-item {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  margin-bottom: 2px;
+  cursor: default;
+  color: #b7c0dc;
+}
+
+.nav-item.active {
+  background: var(--navy-light);
+  color: white;
+  font-weight: 600;
+}
+
+/* Main content */
+.main {
+  flex: 1;
+  padding: 32px 40px 60px;
+  max-width: 1040px;
+}
+
+.breadcrumb {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.page-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0 0 24px;
+}
+
+.proposal-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px 32px 32px;
+  margin-bottom: 28px;
+}
+
+.proposal-header h2 { margin: 0 0 4px; font-size: 20px; }
+.proposal-header p { margin: 0 0 20px; color: var(--text-muted); font-size: 14px; }
+
+/* Stepper */
+.stepper {
+  display: flex;
+  align-items: center;
+  margin-bottom: 28px;
+}
+
+.step { display: flex; align-items: center; }
+
+.step-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  background: #fafbfd;
+}
+
+.step-current {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: white;
+}
+
+.step-label {
+  margin: 0 20px 0 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.step-label-current { color: var(--text); font-weight: 600; }
+
+.step-line {
+  width: 60px;
+  height: 1px;
+  background: var(--border);
+  margin-right: 8px;
+}
+
+/* Banner */
+.banner {
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.banner-success { background: var(--success-bg); color: var(--success); }
+.banner-error { background: var(--danger-bg); color: var(--danger); }
+
+/* Form */
+.section-title { font-size: 16px; margin: 0 0 2px; }
+.section-sub { font-size: 13px; color: var(--text-muted); margin: 0 0 18px; }
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 20px;
+  margin-bottom: 18px;
+}
+
+.field { display: flex; flex-direction: column; margin-bottom: 4px; }
+
+.field label {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+
+.req { color: var(--danger); }
+
+.field input[type="text"],
+.field input[type="date"],
+.field select,
+.field textarea {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text);
+  background: white;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.15);
+}
+
+.field-error { color: var(--danger); font-size: 12px; margin-top: 4px; }
+
+.char-count { align-self: flex-end; font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+.file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px dashed var(--border);
+  border-radius: 9px;
+  padding: 12px 14px;
+  gap: 12px;
+}
+
+.file-hint { font-size: 13px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.choose-file-btn {
+  border: 1px solid var(--border);
+  background: white;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.autosave-hint { font-size: 12px; color: var(--text-muted); }
+
+.form-actions { display: flex; gap: 12px; }
+
+.btn-primary,
+.btn-secondary {
+  border-radius: 9px;
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.btn-primary { background: var(--blue); color: white; }
+.btn-primary:hover { background: var(--blue-dark); }
+.btn-primary:disabled { opacity: 0.6; cursor: default; }
+
+.btn-secondary { background: white; border-color: var(--border); color: var(--text); }
+.btn-secondary:hover { background: #f4f6fb; }
+
+/* Verification panel */
+.verify-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px 28px 28px;
+}
+
+.verify-card h3 { margin: 0 0 4px; font-size: 16px; }
+
+.verify-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.verify-table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 600;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.verify-table td {
+  padding: 10px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.empty-state {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 12px 0;
+}
