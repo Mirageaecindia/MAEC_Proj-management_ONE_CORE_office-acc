@@ -18,6 +18,15 @@ pulling:
    (new virtualenv in `backend/.venv`, `npm ci` in `frontend/`).
 4. Run `backend\.venv\Scripts\pre-commit.exe install`.
 
+Forgot to back up? The files are still in git history, in the last commit
+before Phase 0. Restore them (they stay git-ignored) with:
+
+```
+git restore --source=f3dfe25 --worktree -- backend/.env frontend/.env backend/promanage.db backend/data/employee_leads.csv
+```
+
+Then run `npm ci` in `frontend/`.
+
 The Azure client secret that was committed in `backend/.env` is being rotated.
 Ask for the new value; do not reuse the old one.
 
