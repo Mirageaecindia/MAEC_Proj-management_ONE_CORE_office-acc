@@ -66,6 +66,7 @@ Set `DATABASE_URL` in `backend/.env` to use another database.
 |---|---|
 | `backend> .venv\Scripts\python.exe -m pytest` | BU Head API characterization suite |
 | `backend> .venv\Scripts\ruff.exe check .` / `ruff.exe format .` | Lint / format Python |
+| `frontend> npm test` | Vitest: unit tests + BU Head page render tests |
 | `frontend> npm run lint` | ESLint |
 | `frontend> npm run format:check` / `npm run format` | Prettier |
 | `frontend> npm run build` | Production build |

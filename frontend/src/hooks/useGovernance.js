@@ -1,0 +1,41 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { governanceApi } from '../api/governance';
+import { queryKeys } from './queryKeys';
+
+export function useExecutiveDashboard(projectId) {
+  return useQuery({
+    queryKey: queryKeys.executiveDashboard(projectId),
+    queryFn: () => governanceApi.executiveDashboard(projectId),
+    enabled: Boolean(projectId),
+  });
+}
+
+export function useWorkSummary(projectId) {
+  return useQuery({
+    queryKey: queryKeys.workSummary(projectId),
+    queryFn: () => governanceApi.workSummary(projectId),
+    enabled: Boolean(projectId),
+  });
+}
+
+function useDashboardMutation(projectId, mutationFn) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.executiveDashboard(projectId) }),
+  });
+}
+
+/** BU Head approves or rejects a Lead's extension request. */
+export function useDecideExtension(projectId) {
+  return useDashboardMutation(projectId, ({ requestId, decision, comments }) =>
+    governanceApi.decideExtension(projectId, requestId, { decision, comments }),
+  );
+}
+
+/** BU Head soft-locks the project's timesheets. */
+export function useStopExecution(projectId) {
+  return useDashboardMutation(projectId, ({ comments, discipline }) =>
+    governanceApi.stopExecution(projectId, { comments, discipline }),
+  );
+}

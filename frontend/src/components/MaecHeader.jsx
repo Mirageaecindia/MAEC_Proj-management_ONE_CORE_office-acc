@@ -5,11 +5,13 @@ import { useAuth } from '../AuthContext';
 import maecLogo from '../assets/maec-logo.png';
 
 const allTabs = [
+  { label: 'Projects', path: '/created-projects', roles: ['bu_head'] },
   { label: 'Create Project', path: '/create-project', roles: ['bu_head'] },
   { label: 'Resource Booking', path: '/resource-booking', roles: ['lead', 'bu_head'] },
   { label: 'WBS Structure', path: '/wbs-structure', roles: ['lead', 'engineer', 'bu_head'] },
   { label: 'Timeline & Logs', path: '/timeline-logs', roles: ['lead', 'engineer', 'bu_head'] },
   { label: 'Executive Dashboard', path: '/executive-dashboard', roles: ['lead', 'bu_head'] },
+  { label: 'Work Summary', path: '/project-work-summary', roles: ['bu_head'] },
   { label: 'Performance Dashboard', path: '/engineer-performance-dashboard', roles: ['engineer'] },
   { label: 'SharePoint Mirror', path: '/sharepoint-mirror', roles: ['lead', 'engineer', 'bu_head'] },
 ];

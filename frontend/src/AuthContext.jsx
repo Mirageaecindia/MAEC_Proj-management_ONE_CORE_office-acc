@@ -1,9 +1,9 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { TOKEN_KEY } from './api/client';
 
 const AuthContext = createContext(null);
 
-const TOKEN_KEY = 'maec_token';
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 async function fetchLogin(username, password) {

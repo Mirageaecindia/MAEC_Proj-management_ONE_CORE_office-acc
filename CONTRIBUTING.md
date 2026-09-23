@@ -112,16 +112,31 @@ Removed as dead code: `POST /governance/approve-extension` and
 `/governance/reject-extension` (duplicates of the extension decision endpoint,
 unused by the UI).
 
-### Frontend (planned, roadmap Phase 2)
+### Frontend layout (roadmap Phase 2)
+
+BU Head and SharePoint pages moved to `src/features/` and use the shared data
+layer below. Lead, Engineer and shared pages (`src/pages/`) are unchanged and
+can adopt it whenever their owners choose.
 
 ```
 frontend/src/
-  api/          # single HTTP client + one module per domain
-  hooks/        # data hooks (caching, refetch)
-  components/   # shared UI
-  features/bu-head/  features/lead/  features/engineer/
-  utils/        # formatting helpers
+  api/          client.js (base URL, token, ApiError) + one module per domain; queryClient.js
+  hooks/        TanStack Query hooks (useProjects, useGovernance, useSharePointMirror,
+                useProjectSelection) and queryKeys.js
+  components/   shared UI: PageHeader, ProjectSwitcher, StatCard, MonthlyHoursChart,
+                ConfirmDialog, Feedback (ErrorBanner, Notice, EmptyState)
+  constants/    currencies, SharePoint disciplines
+  utils/        format.js (hours, %, money, dates, bytes)
+  providers/    QueryProvider (cache, 401 -> logout, cleared on user change)
+  features/bu-head/     Created/Create Project, Executive Dashboard (+ governance/), Work Summary
+  features/sharepoint/  SharePoint Mirror
+  pages/        Login + Lead/Engineer/shared pages (not yet migrated)
 ```
+
+Rules for new frontend code: pages never call `fetch` directly. They use a hook
+from `hooks/`, which calls `api/`. Formatting goes through `utils/format.js`.
+Routes are lazy-loaded in `App.jsx`. Tests (`npm test`, Vitest) sit next to the
+code as `*.test.js(x)`.
 
 Each role's routers, services and feature folders are owned by that role's
 developer. `core/`, `domain/`, `repositories/`, `integrations/` and

@@ -7,8 +7,6 @@ package-lock.json
 # by) the Lead/Engineer developers. Reformatting them wholesale would cause
 # merge conflicts. Remove a file from this list when it is refactored; never
 # add to it.
-src/App.css
-src/App.jsx
 src/AuthContext.jsx
 src/main.jsx
 src/styles.css

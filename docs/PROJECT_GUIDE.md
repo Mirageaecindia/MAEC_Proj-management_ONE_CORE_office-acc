@@ -43,11 +43,9 @@ There are three roles. The role comes only from the logged-in account, never fro
 
 | Role | Responsibilities | Pages (tabs) |
 |---|---|---|
-| **BU Head** (Business Unit Head) | Creates projects and their commercial baseline. Owns SharePoint provisioning. Approves resource bookings. Monitors hours, budget and schedule. Approves or rejects extension requests. Can stop execution (soft-lock timesheets). Read-only view of WBS, tasks and timesheets. | Created Projects*, Create Project, Resource Booking, WBS Structure, Timeline & Logs, Executive Dashboard, Project Work Summary*, SharePoint Mirror |
+| **BU Head** (Business Unit Head) | Creates projects and their commercial baseline. Owns SharePoint provisioning. Approves resource bookings. Monitors hours, budget and schedule. Approves or rejects extension requests. Can stop execution (soft-lock timesheets). Read-only view of WBS, tasks and timesheets. | Projects (Created Projects), Create Project, Resource Booking, WBS Structure, Timeline & Logs, Executive Dashboard, Work Summary, SharePoint Mirror |
 | **Lead** (discipline lead: Electrical, Mechanical or BIM) | Books engineers and submits bookings for approval. Builds the WBS (manually or by CSV/XLSX upload). Assigns engineers. Moves subtasks forward. Approves submitted tasks. Approves or rejects engineers' timesheet entries. Requests extra hours from the BU Head. | Resource Booking, WBS Structure, Timeline & Logs, Executive Dashboard, SharePoint Mirror |
 | **Engineer** | Works on assigned WBS tasks and subtasks. Plans own subtasks. Moves task status forward and submits tasks for approval. Adds comments. Working time on subtasks is tracked automatically. | WBS Structure, Timeline & Logs, Performance Dashboard, SharePoint Mirror |
-
-\* Reachable only through links or buttons, not the tab bar.
 
 **How identity connects to data**
 - A **User** is a login account (`users` table).
@@ -142,7 +140,7 @@ flowchart LR
 
 | Layer | Technology | Notes |
 |---|---|---|
-| Frontend | React 19, React Router 7, Vite 8, lucide-react icons | Plain `fetch` in each page, custom CSS (`styles.css`), charts built from `<div>`s |
+| Frontend | React 19, React Router 7, TanStack Query 5, Vite 8, Vitest, lucide-react icons | BU Head pages use a shared API client + query hooks; Lead/Engineer pages still `fetch` directly. Custom CSS; charts built from `<div>`s |
 | Backend | FastAPI 0.141, Pydantic 2 (+ pydantic-settings), SQLAlchemy 2, uvicorn | Auth and BU Head code live in the layered `app/` package (routers → services → repositories). Lead/Engineer endpoints are still in `main.py` |
 | Database | SQLite (WAL mode) via `DATABASE_URL`; Postgres-ready | Schema created by `create_all` plus `ALTER TABLE` statements run at startup (no migration tool yet) |
 | Auth | PBKDF2-SHA256 password hashes, opaque bearer tokens in `login_sessions` | Tokens don't expire; logout deletes the token |
@@ -203,20 +201,29 @@ MAEC_project_management/
     ├── .env.example           VITE_API_BASE_URL
     └── src/
         ├── main.jsx           React root
-        ├── App.jsx            Router: routes, role guards, home redirect per role
+        ├── App.jsx            Router: lazy-loaded routes, role guards, home redirect per role; wraps QueryProvider
         ├── AuthContext.jsx    Login/logout/me, token in localStorage, authHeaders()
-        ├── styles.css         All application styles (App.css is unused)
+        ├── styles.css         Shared application styles
         ├── assets/maec-logo.png
-        ├── lib/hours.js       Working-day and planned-hours helpers (weekdays × 8)
-        ├── components/MaecHeader.jsx   Top bar, account menu, role-based tab bar
-        └── pages/
+        ├── api/               client.js (base URL, bearer token, ApiError), projects/governance/sharepoint.js,
+        │                      queryClient.js (TanStack Query defaults, 401 -> logout)
+        ├── hooks/             useProjects, useGovernance, useSharePointMirror, useProjectSelection, queryKeys
+        ├── components/        MaecHeader (top bar + tabs), PageHeader, ProjectSwitcher, StatCard,
+        │                      MonthlyHoursChart, ConfirmDialog, Feedback (ErrorBanner/Notice/EmptyState)
+        ├── constants/         currencies, SharePoint disciplines
+        ├── utils/format.js    Hours, %, money, dates, bytes
+        ├── providers/QueryProvider.jsx   Query cache (cleared when the user changes)
+        ├── lib/hours.js       Working-day and planned-hours helpers (weekdays × 8; Lead/Engineer)
+        ├── features/
+        │   ├── bu-head/       CreatedProjectsPage, CreateProjectPage (+ createProjectForm, useCreateProjectForm),
+        │   │                  ExecutiveDashboardPage (+ governance/ cards, controls, audit log),
+        │   │                  ProjectWorkSummaryPage, *.test.js(x)
+        │   └── sharepoint/    SharePointMirrorPage, folderTree helpers, sharepoint.css
+        └── pages/             Not yet migrated to the data layer (owned by Lead/Engineer developers)
             ├── LoginPage.jsx
-            ├── bu_head/       CreateProjectPage, CreatedProjectsPage,
-            │                  ExecutiveDashboardPage, ProjectWorkSummaryPage
             ├── lead/          ExecutiveDashboardPage (Lead variant)
             ├── engineer/      EngineerPerformanceDashboardPage
-            └── shared/        ResourceBookingPage, WbsStructurePage, TaskDetailsPage,
-                               TimelineLogsPage, SharePointMirrorPage
+            └── shared/        ResourceBookingPage, WbsStructurePage, TaskDetailsPage, TimelineLogsPage
 ```
 
 ---
@@ -506,22 +513,24 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | Route | File | Roles | What it does | Main API calls |
 |---|---|---|---|---|
 | `/login` | `pages/LoginPage.jsx` | public | Sign-in form | `auth/login` |
-| `/created-projects` | `pages/bu_head/CreatedProjectsPage.jsx` | BU Head | Project cards, search, delete with confirmation | `GET/DELETE projects` |
-| `/create-project` | `pages/bu_head/CreateProjectPage.jsx` | BU Head | Project and commercial baseline form, SharePoint discipline checkboxes, threshold slider | `project-leads`, `POST projects` |
-| `/executive-dashboard` | `pages/bu_head/ExecutiveDashboardPage.jsx` | BU Head | 4 KPI cards, monthly chart, extension review (approve/reject), Stop Execution, audit log; NEXT goes to Work Summary | `executive-dashboard`, `extension-requests/…/decision`, `governance/stop-execution` |
+| `/created-projects` | `features/bu-head/CreatedProjectsPage.jsx` | BU Head | Project cards, search, delete with confirmation | `GET/DELETE projects` |
+| `/create-project` | `features/bu-head/CreateProjectPage.jsx` | BU Head | Project and commercial baseline form, SharePoint discipline checkboxes, threshold slider | `project-leads`, `POST projects` |
+| `/executive-dashboard` | `features/bu-head/ExecutiveDashboardPage.jsx` | BU Head | 4 KPI cards, monthly chart, extension review (approve/reject), Stop Execution, audit log; NEXT goes to Work Summary | `executive-dashboard`, `extension-requests/…/decision`, `governance/stop-execution` |
 | `/executive-dashboard` | `pages/lead/ExecutiveDashboardPage.jsx` | Lead | Same KPIs, plus the extension request form and request status | `executive-dashboard`, `POST extension-requests` |
-| `/project-work-summary` | `pages/bu_head/ProjectWorkSummaryPage.jsx` | BU Head | Lead oversight table, engineer contribution per task | `work-summary` |
+| `/project-work-summary` | `features/bu-head/ProjectWorkSummaryPage.jsx` | BU Head | Lead oversight table, engineer contribution per task | `work-summary` |
 | `/resource-booking` | `pages/shared/ResourceBookingPage.jsx` | Lead, BU Head | Booking table, assign/edit/delete (Lead), Submit (Lead), Approve (BU Head), notification banner, engineer assignment timeline; refreshes every 5 s for the BU Head | `resource-bookings*`, `resource-summary`, `resource-bookings/gantt`, `employees`, `notifications` |
 | `/wbs-structure` | `pages/shared/WbsStructurePage.jsx` | all | Phase-grouped WBS table. Lead: add/edit/delete nodes, subtasks, upload, template download. BU Head: read-only. Engineer: own nodes, add subtask. Refreshes every 5 s. | `wbs-structure`, `wbs-nodes*`, `wbs-upload`, `booked-engineers` |
 | `/task-details?nodeId=&projectId=` | `pages/shared/TaskDetailsPage.jsx` | all | Status stepper, details, history and comments, role-specific actions (advance / approve), **automatic time tracking Login/Logout** for engineers on subtasks | `wbs-nodes/{id}`, `advance-status`, `approve`, `comments`, `subtask-tracking/*` |
 | `/timeline-logs` | `pages/shared/TimelineLogsPage.jsx` | all | Phase Gantt with completion % (Lead/Engineer), week navigator, weekly hours sheet (tracked subtask rows), Lead approve/reject | `wbs-structure`, `timesheet?source=tracking`, `timeline-logs`, `time-log-entries/*` |
 | `/engineer-performance-dashboard` | `pages/engineer/EngineerPerformanceDashboardPage.jsx` | Engineer | Personal consumption, threshold, SPI, monthly chart; refreshes every 15 s | `engineer-performance-dashboard` |
-| `/sharepoint-mirror` | `pages/shared/SharePointMirrorPage.jsx` | all | Target location, sync status, repository stats, folder tree, file list | `projects/{id}/sharepoint-mirror` |
+| `/sharepoint-mirror` | `features/sharepoint/SharePointMirrorPage.jsx` | all | Target location, sync status, repository stats, folder tree, file list | `projects/{id}/sharepoint-mirror` |
 
-### 10.3 Conventions (current)
-- Each page does its own `fetch` with `authHeaders()`. There's no shared API client yet.
-- `API_BASE_URL` comes from `VITE_API_BASE_URL` (default `http://localhost:8000`). Four pages still hardcode it: Create Project, Created Projects, Work Summary and Resource Booking.
-- Charts and Gantt bars are plain `<div>`s sized with CSS percentages. `recharts` is installed but unused.
+### 10.3 Conventions
+- **BU Head and SharePoint pages** (`features/`): no direct `fetch`. A page uses a hook (`hooks/`), which caches through TanStack Query and calls `api/`, which adds the base URL and token and raises `ApiError`. Data is fresh for 30 s and refetched on window focus instead of polling. SharePoint data is fetched on demand. A 401 logs the user out, and the cache is cleared when the user changes.
+- The selected project lives in the URL (`?projectId=`, via `useProjectSelection`), so links and refreshes keep the same project.
+- Routes are lazy-loaded, so each page is its own download. The initial bundle went from 400 KB to 272 KB (86 KB gzipped).
+- **Lead/Engineer/shared pages** (`pages/`) still `fetch` with `authHeaders()`, and Resource Booking still hardcodes `http://localhost:8000`. Their owners can migrate them to the same pattern.
+- Charts and Gantt bars are plain `<div>`s sized with CSS percentages. The monthly chart is the shared `MonthlyHoursChart` component.
 - Working-day maths shared by the WBS and booking forms lives in `src/lib/hours.js`, matching the server rule.
 
 ---
@@ -592,7 +601,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 |---|---|---|
 | 0 | Foundation: `.gitignore`, reproducible setup, single database config, lint/format tools, BU Head characterization tests, CONTRIBUTING | **Done** |
 | 1 | Backend restructure: `app/` package (core, domain, repositories, services, integrations, routers) for **auth + BU Head + SharePoint**; Lead/Engineer stay in `main.py` for their owners | **Done (BU Head scope)** |
-| 2 | Frontend foundation: shared API client, TanStack Query, shared components and formatters, lazy-loaded routes | |
+| 2 | Frontend foundation: shared API client, TanStack Query, shared components and formatters, lazy-loaded routes, Vitest; **BU Head + SharePoint pages** migrated | **Done (BU Head scope)** |
 | 3 | SharePoint rebuild: `DocumentStorage` interface, resilient Graph client, background provisioning + retry, folder IDs stored, lazy mirror with subfolder files | |
 | 4 | Project lifecycle: lead discipline fix, edit project, end date/scope/SOW upload, status and archive | |
 | 5 | Metrics engine: one aggregate-SQL metrics service, correct baseline (effort + extensions), status normalization, discipline mapping, rate card | |
