@@ -1,8 +1,7 @@
 """Characterization: GET /api/projects/{id}/sharepoint-mirror."""
 
-import main
 import models
-import sharepoint_service
+from app.integrations.sharepoint import SharePointError
 
 FAKE_MIRROR = {
     "provisioned": True,
@@ -35,28 +34,20 @@ def test_unprovisioned_project_reports_not_provisioned_without_calling_graph(cli
     assert body["target_location"] is None
 
 
-def test_provisioned_project_returns_mirror_payload(client, db, world, monkeypatch):
+def test_provisioned_project_returns_mirror_payload(client, db, world, storage):
     project_id = _provisioned_project(db, world)
-
-    async def fake_mirror(project):
-        assert project.id == project_id
-        return FAKE_MIRROR
-
-    monkeypatch.setattr(main, "get_sharepoint_mirror_data", fake_mirror)
+    storage.mirror_data = FAKE_MIRROR
 
     response = client.get(f"/api/projects/{project_id}/sharepoint-mirror", headers=world.bu_h)
 
     assert response.status_code == 200
     assert response.json() == FAKE_MIRROR
+    assert storage.mirrored == [project_id]
 
 
-def test_graph_errors_map_to_502(client, db, world, monkeypatch):
+def test_graph_errors_map_to_502(client, db, world, storage):
     project_id = _provisioned_project(db, world)
-
-    async def failing_mirror(project):
-        raise sharepoint_service.SharePointError("throttled")
-
-    monkeypatch.setattr(main, "get_sharepoint_mirror_data", failing_mirror)
+    storage.mirror_error = SharePointError("throttled")
 
     response = client.get(f"/api/projects/{project_id}/sharepoint-mirror", headers=world.bu_h)
 
@@ -64,17 +55,14 @@ def test_graph_errors_map_to_502(client, db, world, monkeypatch):
     assert response.json()["detail"] == "SharePoint error: throttled"
 
 
-def test_unexpected_errors_map_to_500(client, db, world, monkeypatch):
+def test_unexpected_errors_map_to_500(client, db, world, storage):
     project_id = _provisioned_project(db, world)
-
-    async def broken_mirror(project):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(main, "get_sharepoint_mirror_data", broken_mirror)
+    storage.mirror_error = RuntimeError("boom")
 
     response = client.get(f"/api/projects/{project_id}/sharepoint-mirror", headers=world.bu_h)
 
     assert response.status_code == 500
+    assert response.json()["detail"] == "Unexpected error: boom"
 
 
 def test_missing_azure_config_surfaces_as_502(client, db, world):

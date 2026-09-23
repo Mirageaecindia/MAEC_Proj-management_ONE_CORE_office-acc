@@ -232,7 +232,9 @@ def test_engineer_gains_project_access_only_after_approval(client, world, assign
     assert {row["id"] for row in rows} == {node.id}
     assert client.get(f"/api/wbs-nodes/{node.id}", headers=world.eng_h).status_code == 200
     assert _time_entry(client, world, project_id, node.id).status_code == 200
-    assert client.get("/api/engineer-performance", headers=world.eng_h).json()["projects"][0]["project_id"] == project_id
+    assert (
+        client.get("/api/engineer-performance", headers=world.eng_h).json()["projects"][0]["project_id"] == project_id
+    )
     # with a project id the dashboard resolves instead of 403ing
     assert (
         client.get(f"/api/engineer-performance-dashboard?project_id={project_id}", headers=world.eng_h).status_code

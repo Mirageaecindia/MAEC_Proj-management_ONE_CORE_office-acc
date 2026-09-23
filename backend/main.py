@@ -2,9 +2,7 @@ import logging
 import os
 import csv
 import io
-import json
 import re
-import secrets
 import shutil
 import uuid
 import zipfile
@@ -13,20 +11,34 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from sqlalchemy import and_, or_
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import models
 import schemas
-import sharepoint_service
-from auth import get_current_user, verify_password
+from auth import get_current_user
 from database import Base, SessionLocal, engine, get_db
-from sharepoint_service import get_sharepoint_mirror_data, SharePointError
+from app.api import api_router
+from app.core.errors import register_exception_handlers
+from app.core.security import require_role
+from app.domain.calendar import distribute_hours_over_months as _distribute_hours_over_months
+from app.domain.calendar import month_key as _get_month_key
+from app.domain.timesheets import entry_total as time_entry_total
+from app.services.access import (
+    engineer_approved_project_ids,
+    engineer_wbs_condition,
+    engineer_wbs_ids,
+    lead_project_ids,
+    user_can_access_project,
+)
+from app.services.booking_approval import BOOKING_APPROVAL_LABELS, booking_approval_status
+from app.services.governance import extension_request_output, find_pending_extension_request
+from app.services.metrics import executive_dashboard_data
+from app.services.notifications import create_bu_head_notification
 
 logger = logging.getLogger(__name__)
 
@@ -325,6 +337,11 @@ app.add_middleware(
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
+register_exception_handlers(app)
+# Auth and BU Head endpoints live in the app package (roadmap Phase 1, BU Head
+# only). Lead and Engineer endpoints below stay here for their owners.
+app.include_router(api_router)
+
 
 def seed_project_leads(db: Session):
     if db.query(models.ProjectLead).count() == 0:
@@ -352,46 +369,6 @@ with SessionLocal() as _db:
                         employees.append(models.Employee(employee_code=code, name=name, role_title=title, discipline=title))
                 _db.add_all(employees)
                 _db.commit()
-
-
-def require_role(role: Optional[str], allowed: set[str]):
-    if role not in allowed:
-        raise HTTPException(status_code=403, detail="This action is not allowed for the current role.")
-
-
-EXTENSION_STATUS_LABELS = {
-    "pending": "Pending BU Head Approval",
-    "approved": "Approved",
-    "rejected": "Rejected",
-}
-
-
-def extension_request_output(db: Session, request: models.ExtensionRequest) -> dict:
-    project = db.query(models.Project).filter_by(id=request.project_id).first()
-    return {
-        "id": request.id,
-        "project_id": request.project_id,
-        "project_name": project.project_name if project else "",
-        "requested_by": request.requested_by,
-        "requested_by_user_id": request.requested_by_user_id,
-        "requested_hours": request.requested_hours,
-        "justification": request.justification,
-        "status": request.status,
-        "status_label": EXTENSION_STATUS_LABELS.get(request.status, request.status),
-        "decision_comments": request.decision_comments,
-        "decided_by": request.decided_by,
-        "requested_at": request.requested_at.isoformat() if request.requested_at else None,
-        "decided_at": request.decided_at.isoformat() if request.decided_at else None,
-    }
-
-
-def find_pending_extension_request(db: Session, project_id: int) -> Optional[models.ExtensionRequest]:
-    return (
-        db.query(models.ExtensionRequest)
-        .filter_by(project_id=project_id, status="pending")
-        .order_by(models.ExtensionRequest.requested_at.desc(), models.ExtensionRequest.id.desc())
-        .first()
-    )
 
 
 def parse_legacy_requested_hours(comments: str) -> float:
@@ -447,80 +424,6 @@ def create_extension_request(
     return request
 
 
-def decide_extension_request(
-    db: Session,
-    project: models.Project,
-    request: models.ExtensionRequest,
-    decision: str,
-    comments: Optional[str],
-    user: models.User,
-) -> models.ExtensionRequest:
-    if request.status != "pending":
-        raise HTTPException(status_code=409, detail="This extension request has already been decided.")
-
-    status = "approved" if decision == "approve" else "rejected"
-    request.status = status
-    request.decision_comments = comments
-    request.decided_by = user.full_name or user.username
-    request.decided_at = datetime.now()
-    project.extension_status = status
-    if status == "approved":
-        project.extension_approved_hours = (project.extension_approved_hours or 0) + request.requested_hours
-
-    data = executive_dashboard_data(db, project)
-    action = models.GovernanceAction(
-        project_id=project.id,
-        action="approve_extension" if status == "approved" else "reject_extension",
-        discipline=data["governance_status"]["max_discipline"],
-        consumption_pct=data["governance_status"]["max_discipline_pct"],
-        threshold_pct=project.governance_threshold_pct,
-        consumption_hours=data["summary"]["logged_hours"],
-        comments=comments,
-        created_by=user.full_name or user.username,
-        extension_request_id=request.id,
-        requested_hours=request.requested_hours,
-    )
-    db.add(action)
-    db.commit()
-    db.refresh(request)
-    return request
-
-
-@app.post("/api/auth/login", response_model=schemas.LoginResponse)
-def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter_by(username=payload.username.strip()).first()
-    if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid username or password.")
-    token = secrets.token_hex(32)
-    db.add(models.LoginSession(token=token, user_id=user.id))
-    db.commit()
-    return schemas.LoginResponse(
-        token=token,
-        id=user.id,
-        role=user.role,
-        username=user.username,
-        full_name=user.full_name,
-        engineer_id=user.employee_id if user.role == "engineer" else None,
-    )
-
-
-@app.post("/api/auth/logout")
-def logout(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
-    # Idempotent: deleting a missing/already-deleted session is fine.
-    if authorization and authorization.lower().startswith("bearer "):
-        token = authorization.split(" ", 1)[1].strip()
-        session = db.query(models.LoginSession).filter_by(token=token).first()
-        if session:
-            db.delete(session)
-            db.commit()
-    return {"ok": True}
-
-
-@app.get("/api/auth/me", response_model=schemas.UserOut)
-def auth_me(user: models.User = Depends(get_current_user)):
-    return user
-
-
 def identity(user: models.User) -> dict:
     """Where do lead/engineer scoping values come from? The authenticated user."""
     return {
@@ -531,12 +434,6 @@ def identity(user: models.User) -> dict:
     }
 
 
-def engineer_wbs_condition(employee_id: int):
-    """SQL condition: WBS node assigned to an engineer by their real employee
-    (account-linked) id only. No name-based matching."""
-    return models.WbsNode.assigned_engineer_id == employee_id
-
-
 def lead_node_condition(user: models.User):
     """SQL condition: WBS node assigned to a lead by their real user id."""
     conditions = [models.WbsNode.assigned_lead_user_id == user.id]
@@ -545,86 +442,6 @@ def lead_node_condition(user: models.User):
             and_(models.WbsNode.assigned_lead_user_id.is_(None), models.WbsNode.assigned_lead == user.full_name)
         )
     return or_(*conditions)
-
-
-def engineer_wbs_ids(db: Session, employee_id: int) -> set:
-    """Projects where the engineer has a WBS node assigned by real employee id."""
-    return {
-        project_id
-        for (project_id,) in db.query(models.WbsNode.project_id)
-        .filter(engineer_wbs_condition(employee_id))
-        .distinct()
-        .all()
-    }
-
-
-def engineer_approved_project_ids(db: Session, employee_id: int) -> set:
-    """Projects where this engineer has an APPROVED resource booking.
-
-    BU Head approval of the Lead's engineer assignment is the ONLY event that
-    grants an engineer access to a project. A draft or pending booking grants
-    no access — the engineer only sees the project once a booking is
-    'approved'. No name-based matching.
-    """
-    return {
-        project_id
-        for (project_id,) in db.query(models.ResourceBooking.project_id)
-        .filter(
-            models.ResourceBooking.employee_id == employee_id,
-            models.ResourceBooking.approval_status == "approved",
-        )
-        .distinct()
-        .all()
-    }
-
-
-def lead_project_ids(db: Session, user: models.User) -> set:
-    """Projects assigned to this lead, resolved by the lead's REAL user id.
-
-    Primary matching is by users.id against the projects.project_lead_*_user_id
-    columns and wbs_nodes.assigned_lead_user_id. A name-based fallback only
-    applies to legacy rows where the user-id column is still NULL, so pre-ID
-    dev data keeps resolving without ever matching on names for new rows.
-    """
-    if not user:
-        return set()
-    name = user.full_name
-
-    id_conditions = or_(
-        models.Project.project_lead_electrical_user_id == user.id,
-        models.Project.project_lead_mechanical_user_id == user.id,
-        models.Project.project_lead_bim_user_id == user.id,
-    )
-    if name:
-        name_conditions = or_(
-            and_(models.Project.project_lead_electrical_user_id.is_(None), models.Project.project_lead_electrical == name),
-            and_(models.Project.project_lead_mechanical_user_id.is_(None), models.Project.project_lead_mechanical == name),
-            and_(models.Project.project_lead_bim_user_id.is_(None), models.Project.project_lead_bim == name),
-        )
-        condition = or_(id_conditions, name_conditions)
-    else:
-        condition = id_conditions
-
-    as_project_lead = {
-        project_id
-        for (project_id,) in db.query(models.Project.id)
-        .filter(condition)
-        .all()
-    }
-
-    node_conditions = [models.WbsNode.assigned_lead_user_id == user.id]
-    if name:
-        node_conditions.append(
-            and_(models.WbsNode.assigned_lead_user_id.is_(None), models.WbsNode.assigned_lead == name)
-        )
-    as_wbs_lead = {
-        project_id
-        for (project_id,) in db.query(models.WbsNode.project_id)
-        .filter(or_(*node_conditions))
-        .distinct()
-        .all()
-    }
-    return as_project_lead | as_wbs_lead
 
 
 def node_assigned_to_engineer(node: models.WbsNode, user: models.User) -> bool:
@@ -662,29 +479,6 @@ def subtask_gate_error(blocking: List[models.WbsNode]) -> str:
     return f"Cannot submit for approval — {len(blocking)} subtasks are still not marked Done: {names}."
 
 
-def user_can_access_project(db: Session, user: models.User, project: models.Project) -> bool:
-    """Server-side access gate for project-scoped endpoints.
-
-    BU Head sees everything. Leads see projects where their real user id is
-    recorded as an assigned lead (electrical/mechanical/BIM) or as a real WBS
-    assigned-lead. Engineers see a project only when their real employee id has
-    an APPROVED resource booking on it — a Lead assignment (draft or pending
-    booking, or a WBS task) alone never grants an engineer project access.
-    No name-based matching.
-    """
-    if user.role == "bu_head":
-        return True
-    if user.role == "lead":
-        if not user.id:
-            return False
-        return project.id in lead_project_ids(db, user)
-    if user.role == "engineer":
-        if not user.employee_id:
-            return False
-        return project.id in engineer_approved_project_ids(db, user.employee_id)
-    return False
-
-
 def task_output(db: Session, task: models.GanttTask):
     engineer = db.query(models.Employee).filter_by(id=task.assigned_engineer_id).first() if task.assigned_engineer_id else None
     return schemas.WbsTaskOut(
@@ -697,212 +491,6 @@ def task_output(db: Session, task: models.GanttTask):
         assigned_engineer_id=task.assigned_engineer_id,
         assigned_engineer_name=engineer.name if engineer else None,
     )
-
-
-@app.get("/api/project-leads", response_model=List[schemas.ProjectLeadOut])
-def list_project_leads(
-    discipline: Optional[str] = None,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Return the real Lead user accounts (role=lead), optionally filtered by
-    discipline. Each entry is a real User row: id = users.id, name = display
-    name, title = discipline. The Create Project form uses this list to build
-    its Electrical / Mechanical / BIM project-lead dropdowns."""
-    require_role(user.role, {"bu_head", "lead", "engineer"})
-    query = db.query(models.User).filter(models.User.role == "lead")
-    if discipline:
-        normalized = str(discipline).strip().lower()
-        mapping = {"electrical": "Electrical", "mechanical": "Mechanical", "bim": "BIM"}
-        target = mapping.get(normalized)
-        if target:
-            query = query.filter(models.User.discipline == target)
-    leads = query.order_by(models.User.username).all()
-    return [
-        schemas.ProjectLeadOut(
-            id=lead.id,
-            name=lead.full_name or lead.username,
-            title=lead.discipline,
-        )
-        for lead in leads
-    ]
-
-
-@app.post("/api/projects", response_model=schemas.CreateProjectOut, status_code=201)
-async def create_project(
-    payload: schemas.ProjectCreatePayload,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"bu_head"})
-    # The BU Head 'Create Project' form posts a JSON body. Map its fields onto
-    # the existing projects table (same model as GET /api/projects — no
-    # duplicate table/model). The single project_lead column keeps the primary
-    # (electrical) lead for compatibility with any existing read paths.
-    if db.query(models.Project).filter_by(project_code=payload.project_code).first():
-        raise HTTPException(status_code=409, detail="Project Code already exists")
-
-    def resolve_lead(user_id: Optional[int], display_name: str) -> "tuple[str, Optional[int]]":
-        """Resolve the selected Lead to a display name + real user id.
-
-        The Create Project dropdowns now carry real Lead user ids; when one is
-        provided the display name is taken from the real account (so scoping
-        and display always agree). Falls back to the posted name for legacy
-        callers.
-        """
-        if user_id is not None:
-            lead = db.query(models.User).filter_by(id=user_id, role="lead").first()
-            if not lead:
-                raise HTTPException(status_code=400, detail="Selected Lead is not a valid Lead account.")
-            return lead.full_name or lead.username, lead.id
-        return display_name, None
-
-    elect_name, elect_id = resolve_lead(payload.project_lead_electrical_user_id, payload.project_lead_electrical)
-    mech_name, mech_id = resolve_lead(payload.project_lead_mechanical_user_id, payload.project_lead_mechanical)
-    bim_name, bim_id = resolve_lead(payload.project_lead_bim_user_id, payload.project_lead_bim)
-
-    db_project = models.Project(
-        project_name=payload.project_name,
-        project_code=payload.project_code,
-        client_organization=payload.client_customer,
-        project_lead=elect_name,
-        start_date=payload.target_start_date,
-        project_lead_electrical=elect_name,
-        project_lead_mechanical=mech_name,
-        project_lead_bim=bim_name,
-        project_lead_electrical_user_id=elect_id,
-        project_lead_mechanical_user_id=mech_id,
-        project_lead_bim_user_id=bim_id,
-        sharepoint_disciplines=json.dumps(payload.sharepoint_disciplines) if payload.sharepoint_disciplines else None,
-        contract_value=payload.total_contract_value,
-        contract_currency=payload.contract_currency,
-        governance_threshold_pct=payload.alert_override_threshold_pct,
-        target_effort_hours=payload.target_effort_hours,
-    )
-
-    try:
-        db.add(db_project)
-        db.commit()
-        db.refresh(db_project)
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Project Code already exists")
-
-    data = schemas.ProjectOut.model_validate(db_project).model_dump()
-
-    # Provision SharePoint directory if disciplines were selected
-    if payload.sharepoint_disciplines:
-        try:
-            sharepoint_url = await sharepoint_service.provision_sharepoint_directory(db_project)
-            db_project.sharepoint_site_url = sharepoint_url
-            db.commit()
-            db.refresh(db_project)
-            data["sharepoint_status"] = "provisioned"
-            data["sharepoint_site_url"] = sharepoint_url
-        except sharepoint_service.SharePointError as e:
-            logger.error(f"SharePoint provisioning failed for project {db_project.project_code}: {e}")
-            data["sharepoint_status"] = "failed"
-            data["sharepoint_site_url"] = None
-            data["sharepoint_error"] = str(e)
-        except Exception as e:
-            logger.exception(f"Unexpected SharePoint error for project {db_project.project_code}")
-            data["sharepoint_status"] = "error"
-            data["sharepoint_site_url"] = None
-            data["sharepoint_error"] = f"Unexpected error: {str(e)}"
-    else:
-        data["sharepoint_status"] = "not_requested"
-        data["sharepoint_site_url"] = None
-
-    return data
-
-
-@app.get("/api/projects", response_model=List[schemas.ProjectOut])
-def list_projects(
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    query = db.query(models.Project)
-    # Role scoping for the Project Name selector: BU Head sees all projects;
-    # Leads see only projects where they are assigned; Engineers see only
-    # projects where their engineer assignment has been APPROVED by the BU Head
-    # (draft or pending bookings grant no access).
-    if user.role == "lead":
-        assigned_ids = lead_project_ids(db, user)
-        if not assigned_ids:
-            return []
-        query = query.filter(models.Project.id.in_(assigned_ids))
-    elif user.role == "engineer":
-        if not user.employee_id:
-            return []
-        project_ids = engineer_approved_project_ids(db, user.employee_id)
-        if not project_ids:
-            return []
-        query = query.filter(models.Project.id.in_(project_ids))
-    return query.order_by(models.Project.created_at.desc()).all()
-
-
-@app.get("/api/projects/{project_id}", response_model=schemas.ProjectOut)
-def get_project(project_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    project = db.query(models.Project).get(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
-    return project
-
-
-@app.delete("/api/projects/{project_id}")
-def delete_project(project_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    require_role(user.role, {"bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    # The dev database has no foreign-key cascade, so remove the project and
-    # every child row explicitly (children are only ever owned by this project).
-    db.query(models.WbsNode).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.WbsNodeHistory).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.GanttTask).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.ResourceBooking).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.TimeLogEntry).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.GovernanceAction).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.ExtensionRequest).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.Notification).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.delete(project)
-    db.commit()
-    return {"ok": True, "deleted_project_id": project_id}
-
-
-@app.get("/api/projects/{project_id}/sharepoint-mirror")
-async def get_sharepoint_mirror(
-    project_id: int,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Get real SharePoint mirror data for a project.
-    Accessible by BU Head, Lead, and Engineer for projects they have access to.
-    """
-    # Role-based access: all three roles can view
-    require_role(user.role, {"bu_head", "lead", "engineer"})
-
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    # Additional scoping: Lead and Engineer must have access to this project
-    if user.role in ("lead", "engineer") and not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
-
-    try:
-        data = await get_sharepoint_mirror_data(project)
-        return data
-    except SharePointError as e:
-        logger.error(f"SharePoint mirror error for project {project.project_code}: {e}")
-        raise HTTPException(status_code=502, detail=f"SharePoint error: {str(e)}")
-    except Exception as e:
-        logger.exception(f"Unexpected error fetching SharePoint mirror for project {project.project_code}")
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
 @app.get("/api/engineers", response_model=List[schemas.EngineerOut])
@@ -1037,65 +625,6 @@ def booking_output(db: Session, booking: models.ResourceBooking):
     }
 
 
-BOOKING_APPROVAL_LABELS = {
-    "draft": "Draft",
-    "pending_approval": "Pending Approval",
-    "approved": "Approved",
-}
-
-
-def booking_approval_status(db: Session, project_id: int) -> str:
-    """Project-level resource-booking approval state derived from its rows."""
-    statuses = [
-        b.approval_status
-        for b in db.query(models.ResourceBooking).filter_by(project_id=project_id).all()
-    ]
-    if not statuses:
-        return "draft"
-    if set(statuses) == {"approved"}:
-        return "approved"
-    if "pending_approval" in statuses:
-        return "pending_approval"
-    return "draft"
-
-
-def notification_output(notification: models.Notification) -> dict:
-    return {
-        "id": notification.id,
-        "recipient_role": notification.recipient_role,
-        "recipient_user_id": notification.recipient_user_id,
-        "notification_type": notification.notification_type,
-        "title": notification.title,
-        "message": notification.message,
-        "project_id": notification.project_id,
-        "actor_name": notification.actor_name,
-        "is_read": notification.is_read,
-        "created_at": notification.created_at.isoformat() if notification.created_at else None,
-    }
-
-
-def create_bu_head_notification(
-    db: Session,
-    notification_type: str,
-    title: str,
-    message: str,
-    project_id: Optional[int] = None,
-    actor_name: Optional[str] = None,
-):
-    """Persist a notification row for the BU Head role."""
-    notification = models.Notification(
-        recipient_role="bu_head",
-        notification_type=notification_type,
-        title=title,
-        message=message,
-        project_id=project_id,
-        actor_name=actor_name,
-    )
-    db.add(notification)
-    db.flush()
-    return notification
-
-
 @app.get("/api/projects/{project_id}/resource-bookings")
 def list_resource_bookings(project_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     require_role(user.role, {"lead", "bu_head", "engineer"})
@@ -1111,30 +640,6 @@ def list_resource_bookings(project_id: int, user: models.User = Depends(get_curr
         query = query.filter_by(employee_id=user.employee_id)
     bookings = query.all()
     return [booking_output(db, booking) for booking in bookings]
-
-
-@app.get("/api/projects/{project_id}/resource-summary")
-def resource_summary(project_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    require_role(user.role, {"lead", "bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    if user.role == "lead" and not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
-    bookings = db.query(models.ResourceBooking).filter_by(project_id=project_id).all()
-    total_hours = sum(booking.planned_hours for booking in bookings)
-    return {
-        "target_baseline_hours": 0,
-        "total_booked_hours": total_hours,
-        "allocated_pct": 0,
-        "planned_labor_cost": 0,
-        "contract_currency": "USD",
-        "contract_value": 0,
-        "available_bench_engineers": max(0, db.query(models.Employee).count() - len(bookings)),
-        "project_name": project.project_name if project else "",
-        "approval_status": booking_approval_status(db, project_id),
-        "approval_status_label": BOOKING_APPROVAL_LABELS.get(booking_approval_status(db, project_id)),
-    }
 
 
 @app.get("/api/resource-bookings/gantt")
@@ -1381,107 +886,6 @@ def submit_resource_bookings(
     }
 
 
-@app.post("/api/projects/{project_id}/resource-bookings/approve")
-def approve_resource_bookings(
-    project_id: int,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    bookings = db.query(models.ResourceBooking).filter_by(project_id=project_id).all()
-    if not bookings:
-        raise HTTPException(status_code=400, detail="No resource bookings have been assigned.")
-    current = booking_approval_status(db, project_id)
-    if current == "approved":
-        raise HTTPException(status_code=409, detail="This resource booking has already been approved.")
-    if current != "pending_approval":
-        raise HTTPException(status_code=409, detail="This resource booking is not pending approval.")
-
-    now = datetime.now()
-    for booking in bookings:
-        booking.approval_status = "approved"
-        booking.approved_at = now
-    for notification in db.query(models.Notification).filter_by(
-        recipient_role="bu_head",
-        notification_type="resource_booking_approval",
-        project_id=project.id,
-        is_read=False,
-    ):
-        notification.is_read = True
-    db.commit()
-    return {
-        "status": "approved",
-        "status_label": BOOKING_APPROVAL_LABELS["approved"],
-    }
-
-
-@app.post("/api/projects/{project_id}/resource-bookings/reject")
-def reject_resource_bookings(
-    project_id: int,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """BU Head sends a pending resource-booking submission back to the Lead.
-
-    Bookings return to 'draft' so the Lead can adjust and re-submit. Rejection
-    (or simply never approving) is what keeps an engineer from ever getting
-    project access: approval is the only event that grants it.
-    """
-    require_role(user.role, {"bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    bookings = db.query(models.ResourceBooking).filter_by(project_id=project_id).all()
-    if not bookings:
-        raise HTTPException(status_code=400, detail="No resource bookings have been assigned.")
-    current = booking_approval_status(db, project_id)
-    if current == "approved":
-        raise HTTPException(status_code=409, detail="This resource booking has already been approved.")
-    if current != "pending_approval":
-        raise HTTPException(status_code=409, detail="This resource booking is not pending approval.")
-
-    for booking in bookings:
-        booking.approval_status = "draft"
-        booking.submitted_at = None
-    db.commit()
-    return {
-        "status": "draft",
-        "status_label": BOOKING_APPROVAL_LABELS["draft"],
-    }
-
-
-@app.get("/api/notifications")
-def list_notifications(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    require_role(user.role, {"bu_head", "lead", "engineer"})
-    query = db.query(models.Notification).filter(
-        (models.Notification.recipient_role == user.role)
-        | (models.Notification.recipient_user_id == user.id)
-    )
-    notifications = query.order_by(
-        models.Notification.created_at.desc(), models.Notification.id.desc()
-    ).limit(50).all()
-    return [notification_output(n) for n in notifications]
-
-
-@app.post("/api/notifications/{notification_id}/read")
-def mark_notification_read(
-    notification_id: int,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    notification = db.query(models.Notification).filter_by(id=notification_id).first()
-    if not notification:
-        raise HTTPException(status_code=404, detail="Notification not found.")
-    if notification.recipient_role != user.role and notification.recipient_user_id != user.id:
-        raise HTTPException(status_code=403, detail="This notification is not for you.")
-    notification.is_read = True
-    db.commit()
-    return {"ok": True}
-
-
 def node_level(db: Session, node: models.WbsNode) -> int:
     level = 1
     parent_id = node.parent_id
@@ -1600,13 +1004,6 @@ def list_wbs_structure(
     else:
         scoped_nodes = query.order_by(models.WbsNode.wbs_code).all()
     return [node_output(db, node) for node in scoped_nodes]
-
-
-def time_entry_total(entry) -> float:
-    # Weekly totals are derived from Monday-Friday only. Automatic subtask
-    # tracking never writes Saturday/Sunday, so those columns always stay
-    # zero and never contribute to a week's total.
-    return sum(float(getattr(entry, field) or 0) for field in models.DAY_FIELDS[:5])
 
 
 def time_entry_output(db: Session, entry: models.TimeLogEntry):
@@ -2234,463 +1631,6 @@ def engineer_performance_dashboard(
     return engineer_dashboard_data(db, user.employee_id, project_id=project_id)
 
 
-@app.get("/api/projects/{project_id}/work-summary")
-def project_work_summary(
-    project_id: int,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-
-    nodes = db.query(models.WbsNode).filter_by(project_id=project_id).order_by(models.WbsNode.wbs_code).all()
-    entries = db.query(models.TimeLogEntry).filter_by(project_id=project_id).all()
-    node_by_id = {node.id: node for node in nodes}
-
-    phase_stats = defaultdict(lambda: {"total": 0, "completed": 0})
-    lead_phases = defaultdict(set)
-    lead_phase_stats = defaultdict(lambda: defaultdict(lambda: {"total": 0, "completed": 0}))
-    lead_nodes = defaultdict(int)
-    eng_tasks = defaultdict(list)
-    eng_logged = defaultdict(float)
-    eng_approved = defaultdict(float)
-    eng_pending = defaultdict(float)
-    lead_logged = defaultdict(float)
-    lead_approved = defaultdict(float)
-    lead_pending_entries = defaultdict(int)
-    task_eng_approved = defaultdict(float)
-
-    for node in nodes:
-        if node.phase:
-            phase_stats[node.phase]["total"] += 1
-            if node.deliverable_status == "Completed":
-                phase_stats[node.phase]["completed"] += 1
-        if node.assigned_lead:
-            lead_phases[node.assigned_lead].add(node.phase or "")
-            lead_nodes[node.assigned_lead] += 1
-            if node.phase:
-                lead_phase_stats[node.assigned_lead][node.phase]["total"] += 1
-                if node.deliverable_status == "Completed":
-                    lead_phase_stats[node.assigned_lead][node.phase]["completed"] += 1
-        if node.assigned_engineer_id:
-            eng_tasks[node.assigned_engineer_id].append(node)
-
-    for entry in entries:
-        total = time_entry_total(entry)
-        task = node_by_id.get(entry.task_id)
-        lead = task.assigned_lead if task else None
-        eng_logged[entry.employee_id] += total
-        if lead:
-            lead_logged[lead] += total
-        if entry.approval_status == "approved":
-            eng_approved[entry.employee_id] += total
-            task_eng_approved[(entry.task_id, entry.employee_id)] += total
-            if lead:
-                lead_approved[lead] += total
-        elif entry.approval_status == "pending_review":
-            eng_pending[entry.employee_id] += total
-            if lead:
-                lead_pending_entries[lead] += 1
-
-    engineer_ids = sorted({node.assigned_engineer_id for node in nodes if node.assigned_engineer_id})
-    employees = (
-        {employee.id: employee
-         for employee in db.query(models.Employee).filter(models.Employee.id.in_(engineer_ids)).all()}
-        if engineer_ids else {}
-    )
-
-    leads_out = []
-    for lead_name in sorted(lead_nodes):
-        phases = sorted(phase for phase in lead_phases[lead_name] if phase)
-        leads_out.append({
-            "name": lead_name,
-            "phases": phases,
-            "nodes_managed": lead_nodes[lead_name],
-            "phase_completion": {
-                phase: dict(lead_phase_stats[lead_name][phase]) for phase in phases
-            },
-            "approved_hours": round(lead_approved[lead_name], 2),
-            "logged_hours": round(lead_logged[lead_name], 2),
-            "pending_approvals": lead_pending_entries[lead_name],
-        })
-
-    engineers_out = []
-    for engineer_id in engineer_ids:
-        employee = employees.get(engineer_id)
-        if employee is None:
-            continue
-        tasks = sorted(eng_tasks.get(engineer_id, []), key=lambda task: str(task.wbs_code or ""))
-        statuses = {task.deliverable_status for task in tasks}
-        if "In Progress" in statuses:
-            progress_status = "In Progress"
-        elif "Not Started" in statuses:
-            progress_status = "Not Started"
-        elif statuses and "Completed" == list(statuses)[0]:
-            progress_status = "Completed"
-        else:
-            progress_status = "—"
-        engineers_out.append({
-            "employee_id": employee.id,
-            "name": employee.name,
-            "role_title": employee.role_title,
-            "discipline": employee.discipline,
-            "phases": sorted({task.phase for task in tasks if task.phase}),
-            "assigned_nodes": len(tasks),
-            "baseline_hours": sum(task.estimated_hours or 0 for task in tasks),
-            "approved_hours": round(eng_approved[engineer_id], 2),
-            "logged_hours": round(eng_logged[engineer_id], 2),
-            "pending_hours": round(eng_pending[engineer_id], 2),
-            "progress_status": progress_status,
-            "tasks": [
-                {
-                    "task_id": task.id,
-                    "wbs_code": task.wbs_code,
-                    "task_name": task.task_name,
-                    "phase": task.phase,
-                    "status": task.deliverable_status,
-                    "estimated_hours": task.estimated_hours,
-                    "approved_hours": round(task_eng_approved.get((task.id, engineer_id), 0.0), 2),
-                }
-                for task in tasks
-            ],
-        })
-
-    return {
-        "project": {
-            "id": project.id,
-            "project_name": project.project_name,
-            "project_code": project.project_code,
-            "client_organization": project.client_organization,
-            "project_lead": project.project_lead,
-            "start_date": project.start_date.isoformat() if project.start_date else None,
-            "target_end_date": project.target_end_date.isoformat() if project.target_end_date else None,
-        },
-        "leads": leads_out,
-        "engineers": engineers_out,
-        "phase_completion": {phase: stats for phase, stats in phase_stats.items()},
-        "summary": {
-            "total_nodes": len(nodes),
-            "completed_nodes": sum(1 for node in nodes if node.deliverable_status == "Completed"),
-            "scheduled_hours": sum(node.estimated_hours or 0 for node in nodes),
-            "approved_hours": round(sum(eng_approved.values()), 2),
-            "logged_hours": round(sum(eng_logged.values()), 2),
-            "pending_hours": round(sum(eng_pending.values()), 2),
-            "pending_entries": sum(lead_pending_entries.values()),
-        },
-    }
-
-
-def _get_month_key(dt: date) -> str:
-    """Convert a date to a YYYY-MM string for monthly grouping."""
-    return dt.strftime("%Y-%m")
-
-
-def _distribute_hours_over_months(total_hours: float, start_date: date | None, end_date: date | None) -> dict[str, float]:
-    """Distribute total hours evenly across months between start_date and end_date (inclusive)."""
-    if not start_date or not end_date or total_hours <= 0:
-        return {}
-    if start_date > end_date:
-        start_date, end_date = end_date, start_date
-
-    from calendar import monthrange
-
-    current = date(start_date.year, start_date.month, 1)
-    end_month = date(end_date.year, end_date.month, 1)
-    months = []
-    while current <= end_month:
-        months.append(current)
-        if current.month == 12:
-            current = date(current.year + 1, 1, 1)
-        else:
-            current = date(current.year, current.month + 1, 1)
-
-    if not months:
-        return {}
-
-    hours_per_month = total_hours / len(months)
-    result = {}
-    for month_start in months:
-        key = _get_month_key(month_start)
-        result[key] = round(hours_per_month, 2)
-    return result
-
-
-def executive_dashboard_data(db: Session, project: models.Project) -> dict:
-    """Roll up the real project data every governance view consumes.
-
-    Budget burn, hours consumption, threshold status and SPI are all
-    derived from stored rows (wbs_nodes, time_log_entries, employees,
-    projects) — no mock values.
-    """
-    nodes = db.query(models.WbsNode).filter_by(project_id=project.id).all()
-    entries = db.query(models.TimeLogEntry).filter_by(project_id=project.id).all()
-
-    scheduled_hours = sum(node.estimated_hours or 0 for node in nodes)
-    logged_hours = 0.0
-    approved_hours = 0.0
-    pending_hours = 0.0
-    pending_entries = 0
-    for entry in entries:
-        total = time_entry_total(entry)
-        logged_hours += total
-        if entry.approval_status == "approved":
-            approved_hours += total
-        elif entry.approval_status == "pending_review":
-            pending_hours += total
-            pending_entries += 1
-
-    consumption_pct = round(logged_hours / scheduled_hours * 100, 1) if scheduled_hours else 0.0
-
-    engineer_ids = sorted({node.assigned_engineer_id for node in nodes if node.assigned_engineer_id})
-    employees = (
-        {employee.id: employee
-         for employee in db.query(models.Employee).filter(models.Employee.id.in_(engineer_ids)).all()}
-        if engineer_ids else {}
-    )
-
-    eng_baseline = defaultdict(float)
-    eng_consumed = defaultdict(float)
-    eng_approved = defaultdict(float)
-    eng_pending = defaultdict(float)
-    eng_pending_entries = defaultdict(int)
-    for node in nodes:
-        if node.assigned_engineer_id:
-            eng_baseline[node.assigned_engineer_id] += node.estimated_hours or 0
-    for entry in entries:
-        eng_consumed[entry.employee_id] += time_entry_total(entry)
-        if entry.approval_status == "approved":
-            eng_approved[entry.employee_id] += time_entry_total(entry)
-        elif entry.approval_status == "pending_review":
-            eng_pending[entry.employee_id] += time_entry_total(entry)
-            eng_pending_entries[entry.employee_id] += 1
-
-    disciplines = defaultdict(lambda: {
-        "baseline_hours": 0.0,
-        "consumed_hours": 0.0,
-        "approved_hours": 0.0,
-        "pending_hours": 0.0,
-        "pending_entries": 0,
-        "engineer_count": 0,
-    })
-    for engineer_id in engineer_ids:
-        employee = employees.get(engineer_id)
-        if employee is None:
-            continue
-        discipline = employee.discipline or "Unassigned"
-        disc = disciplines[discipline]
-        disc["baseline_hours"] += eng_baseline.get(engineer_id, 0.0)
-        disc["consumed_hours"] += eng_consumed.get(engineer_id, 0.0)
-        disc["approved_hours"] += eng_approved.get(engineer_id, 0.0)
-        disc["pending_hours"] += eng_pending.get(engineer_id, 0.0)
-        disc["pending_entries"] += eng_pending_entries.get(engineer_id, 0)
-        disc["engineer_count"] += 1
-
-    threshold = project.governance_threshold_pct
-    threshold_active = threshold is not None
-    disciplines_out = []
-    exceptions = []
-    for name in sorted(disciplines):
-        disc = disciplines[name]
-        pct = round(disc["consumed_hours"] / disc["baseline_hours"] * 100, 1) if disc["baseline_hours"] else 0.0
-        exceeded = threshold_active and disc["baseline_hours"] > 0 and pct > threshold
-        disciplines_out.append({
-            "name": name,
-            "baseline_hours": round(disc["baseline_hours"], 1),
-            "consumed_hours": round(disc["consumed_hours"], 1),
-            "approved_hours": round(disc["approved_hours"], 1),
-            "pending_hours": round(disc["pending_hours"], 1),
-            "pending_entries": disc["pending_entries"],
-            "consumption_pct": pct,
-            "exceeded": exceeded,
-            "engineer_count": disc["engineer_count"],
-        })
-        if exceeded:
-            exceptions.append({
-                "discipline": name,
-                "consumption_pct": pct,
-                "threshold_pct": threshold,
-                "consumed_hours": round(disc["consumed_hours"], 1),
-                "baseline_hours": round(disc["baseline_hours"], 1),
-                "pending_hours": round(disc["pending_hours"], 1),
-                "pending_entries": disc["pending_entries"],
-            })
-
-    max_discipline = max(disciplines_out, key=lambda d: d["consumption_pct"], default=None)
-    max_pct = max_discipline["consumption_pct"] if max_discipline else consumption_pct
-    over_threshold = threshold_active and (bool(exceptions) or (max_discipline is not None and max_pct > threshold))
-    status = "exceeded" if over_threshold else "normal"
-
-    spi_value = round(approved_hours / scheduled_hours, 2) if scheduled_hours else None
-    if not scheduled_hours:
-        spi_note = "No baseline planned hours for this project yet."
-    elif spi_value >= 1.0:
-        spi_note = f"Earned hours ({approved_hours:g}) match or exceed the planned baseline ({scheduled_hours:g})."
-    else:
-        spi_note = f"Behind plan — {approved_hours:g} earned of {scheduled_hours:g} planned baseline hours."
-
-    currency = project.contract_currency or "USD"
-    contract_value = float(project.contract_value or 0)
-    budget_consumed = round(contract_value * (logged_hours / scheduled_hours), 2) if scheduled_hours and contract_value else 0.0
-    budget_pct = round(budget_consumed / contract_value * 100, 1) if contract_value else 0.0
-
-    # Monthly data aggregation for the vertical grouped bar chart
-    monthly_planned = defaultdict(float)
-    monthly_consumed_normal = defaultdict(float)
-    monthly_consumed_exceeded = defaultdict(float)
-
-    # Distribute planned hours (baseline) across months based on WBS node dates
-    for node in nodes:
-        if node.estimated_hours and node.estimated_hours > 0:
-            start = node.start_date
-            end = node.target_due_date or node.end_date
-            distributed = _distribute_hours_over_months(float(node.estimated_hours), start, end)
-            for month_key, hours in distributed.items():
-                monthly_planned[month_key] += hours
-
-    # Aggregate actual consumed hours by month from time log entries
-    for entry in entries:
-        total = time_entry_total(entry)
-        if total <= 0:
-            continue
-        month_key = _get_month_key(entry.week_start_date)
-        # Check if this entry's discipline exceeded threshold
-        employee = None
-        for emp in employees.values():
-            if emp.id == entry.employee_id:
-                employee = emp
-                break
-        discipline = employee.discipline if employee else "Unassigned"
-        disc_exceeded = any(d["name"] == discipline and d["exceeded"] for d in disciplines_out)
-        if disc_exceeded:
-            monthly_consumed_exceeded[month_key] += total
-        else:
-            monthly_consumed_normal[month_key] += total
-
-    # Collect all months that have data and sort them
-    all_months = sorted(set(monthly_planned.keys()) | set(monthly_consumed_normal.keys()) | set(monthly_consumed_exceeded.keys()))
-
-    monthly_data = []
-    for month_key in all_months:
-        planned = round(monthly_planned.get(month_key, 0.0), 1)
-        normal = round(monthly_consumed_normal.get(month_key, 0.0), 1)
-        exceeded = round(monthly_consumed_exceeded.get(month_key, 0.0), 1)
-        # Format month label as "MMM YYYY" (e.g., "Jun 2025")
-        try:
-            year, month = map(int, month_key.split("-"))
-            month_label = date(year, month, 1).strftime("%b %Y")
-        except Exception:
-            month_label = month_key
-        monthly_data.append({
-            "month": month_key,
-            "month_label": month_label,
-            "planned_baseline": planned,
-            "normal_consumption": normal,
-            "exceeded_threshold": exceeded,
-        })
-
-    return {
-        "project": {
-            "id": project.id,
-            "project_name": project.project_name,
-            "project_code": project.project_code,
-            "client_organization": project.client_organization,
-            "project_lead": project.project_lead,
-            "contract_value": round(contract_value, 2),
-            "contract_currency": currency,
-            "governance_threshold_pct": threshold,
-            "timesheets_soft_locked": bool(project.timesheets_soft_locked),
-            "extension_status": project.extension_status,
-            "extension_approved_hours": project.extension_approved_hours,
-        },
-        "summary": {
-            "scheduled_hours": scheduled_hours,
-            "approved_hours": round(approved_hours, 2),
-            "logged_hours": round(logged_hours, 2),
-            "pending_hours": round(pending_hours, 2),
-            "pending_entries": pending_entries,
-            "consumption_pct": consumption_pct,
-        },
-        "commercial_budget_burn": {
-            "currency": currency,
-            "total": round(contract_value, 2),
-            "consumed": budget_consumed,
-            "remaining": round(contract_value - budget_consumed, 2),
-            "percent": budget_pct,
-        },
-        "hours_consumption": {
-            "hours": round(logged_hours, 2),
-            "scheduled": scheduled_hours,
-            "approved": round(approved_hours, 2),
-            "pending": round(pending_hours, 2),
-            "percent": consumption_pct,
-        },
-        "governance_status": {
-            "status": status,
-            "threshold_pct": threshold,
-            "consumption_pct": consumption_pct,
-            "max_discipline_pct": max_pct,
-            "max_discipline": max_discipline["name"] if max_discipline else None,
-            "soft_locked": bool(project.timesheets_soft_locked),
-        },
-        "spi": {"value": spi_value, "note": spi_note},
-        "disciplines": disciplines_out,
-        "exceptions": exceptions,
-        "monthly_data": monthly_data,
-    }
-
-
-@app.get("/api/projects/{project_id}/executive-dashboard")
-def executive_dashboard(
-    project_id: int,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"lead", "bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-
-    data = executive_dashboard_data(db, project)
-    actions = (
-        db.query(models.GovernanceAction)
-        .filter_by(project_id=project_id)
-        .order_by(models.GovernanceAction.created_at.desc(), models.GovernanceAction.id.desc())
-        .all()
-    )
-    requests = (
-        db.query(models.ExtensionRequest)
-        .filter_by(project_id=project_id)
-        .order_by(models.ExtensionRequest.requested_at.desc(), models.ExtensionRequest.id.desc())
-        .all()
-    )
-    if user.role == "lead":
-        requests = [request for request in requests if request.requested_by_user_id == user.id]
-    data["extension_requests"] = [extension_request_output(db, request) for request in requests]
-    data["current_extension_request"] = next(
-        (request for request in data["extension_requests"] if request["status"] == "pending"),
-        None,
-    )
-    data["governance_actions"] = [
-        {
-            "id": action.id,
-            "action": action.action,
-            "discipline": action.discipline,
-            "consumption_pct": action.consumption_pct,
-            "threshold_pct": action.threshold_pct,
-            "consumption_hours": action.consumption_hours,
-            "comments": action.comments,
-            "created_by": action.created_by,
-            "extension_request_id": action.extension_request_id,
-            "requested_hours": action.requested_hours,
-            "created_at": action.created_at.isoformat() if action.created_at else None,
-        }
-        for action in actions
-    ]
-    return data
-
-
 @app.post("/api/projects/{project_id}/extension-requests", response_model=schemas.ExtensionRequestOut, status_code=201)
 def create_extension_request_endpoint(
     project_id: int,
@@ -2712,95 +1652,6 @@ def create_extension_request_endpoint(
     return extension_request_output(db, request)
 
 
-@app.post("/api/projects/{project_id}/extension-requests/{request_id}/decision", response_model=schemas.ExtensionRequestOut)
-def decide_extension_request_endpoint(
-    project_id: int,
-    request_id: int,
-    payload: schemas.ExtensionRequestDecision,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    request = db.query(models.ExtensionRequest).filter_by(id=request_id, project_id=project_id).first()
-    if not request:
-        raise HTTPException(status_code=404, detail="Extension request not found.")
-    request = decide_extension_request(
-        db,
-        project,
-        request,
-        payload.decision,
-        payload.comments,
-        user,
-    )
-    return extension_request_output(db, request)
-
-
-def record_governance_action(
-    db: Session,
-    project: models.Project,
-    action: str,
-    payload: schemas.GovernanceActionBase,
-    created_by_name: str,
-) -> models.GovernanceAction:
-    data = executive_dashboard_data(db, project)
-    return models.GovernanceAction(
-        project_id=project.id,
-        action=action,
-        discipline=payload.discipline or data["governance_status"]["max_discipline"],
-        consumption_pct=data["governance_status"]["max_discipline_pct"],
-        threshold_pct=project.governance_threshold_pct,
-        consumption_hours=data["summary"]["logged_hours"],
-        comments=payload.comments,
-        created_by=created_by_name,
-    )
-
-
-@app.post("/api/projects/{project_id}/governance/stop-execution", response_model=schemas.GovernanceActionOut)
-def stop_execution(
-    project_id: int,
-    payload: schemas.GovernanceActionBase,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    action = record_governance_action(db, project, "stop_execution", payload, user.full_name)
-    db.add(action)
-    project.timesheets_soft_locked = True
-    db.commit()
-    db.refresh(action)
-    return action
-
-
-@app.post("/api/projects/{project_id}/governance/reject-extension", response_model=schemas.GovernanceActionOut)
-def reject_extension(
-    project_id: int,
-    payload: schemas.GovernanceActionBase,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    request = find_pending_extension_request(db, project_id)
-    if not request:
-        raise HTTPException(status_code=409, detail="No pending extension request is available to reject.")
-    request = decide_extension_request(db, project, request, "reject", payload.comments, user)
-    action = (
-        db.query(models.GovernanceAction)
-        .filter_by(extension_request_id=request.id, action="reject_extension")
-        .order_by(models.GovernanceAction.id.desc())
-        .first()
-    )
-    return action
-
-
 @app.post("/api/projects/{project_id}/governance/request-extension", response_model=schemas.GovernanceActionOut)
 def request_extension(
     project_id: int,
@@ -2817,30 +1668,6 @@ def request_extension(
     action = (
         db.query(models.GovernanceAction)
         .filter_by(extension_request_id=request.id, action="extension_request")
-        .order_by(models.GovernanceAction.id.desc())
-        .first()
-    )
-    return action
-
-
-@app.post("/api/projects/{project_id}/governance/approve-extension", response_model=schemas.GovernanceActionOut)
-def approve_extension(
-    project_id: int,
-    payload: schemas.GovernanceActionBase,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    request = find_pending_extension_request(db, project_id)
-    if not request:
-        raise HTTPException(status_code=409, detail="No pending extension request is available to approve.")
-    request = decide_extension_request(db, project, request, "approve", payload.comments, user)
-    action = (
-        db.query(models.GovernanceAction)
-        .filter_by(extension_request_id=request.id, action="approve_extension")
         .order_by(models.GovernanceAction.id.desc())
         .first()
     )

@@ -1,7 +1,7 @@
 # MAEC Project Management — Project Guide
 
 > A complete description of the product, how it works end to end, and how the code is organised.
-> Reflects the code on `main` as of commit `d0899e2` + Lead/Engineer changes in `f3dfe25` (September 2026).
+> Reflects the code on `main` after roadmap Phase 1 (BU Head modules moved into `backend/app/`), September 2026.
 
 ## Contents
 1. [What the product is](#1-what-the-product-is)
@@ -143,7 +143,7 @@ flowchart LR
 | Layer | Technology | Notes |
 |---|---|---|
 | Frontend | React 19, React Router 7, Vite 8, lucide-react icons | Plain `fetch` in each page, custom CSS (`styles.css`), charts built from `<div>`s |
-| Backend | FastAPI 0.141, Pydantic 2, SQLAlchemy 2, uvicorn | One module (`main.py`) holds every endpoint and business rule |
+| Backend | FastAPI 0.141, Pydantic 2 (+ pydantic-settings), SQLAlchemy 2, uvicorn | Auth and BU Head code live in the layered `app/` package (routers → services → repositories). Lead/Engineer endpoints are still in `main.py` |
 | Database | SQLite (WAL mode) via `DATABASE_URL`; Postgres-ready | Schema created by `create_all` plus `ALTER TABLE` statements run at startup (no migration tool yet) |
 | Auth | PBKDF2-SHA256 password hashes, opaque bearer tokens in `login_sessions` | Tokens don't expire; logout deletes the token |
 | Integration | MSAL (app-only / client-credentials) + httpx → Microsoft Graph v1.0 | Folder provisioning and read-only mirror |
@@ -165,12 +165,18 @@ MAEC_project_management/
 ├── _archive/                  Old databases + sample WBS upload files (tests/upload_*.csv|xlsx)
 │
 ├── backend/                   FastAPI service (run from this folder)
-│   ├── main.py                App factory, startup migrations and seeding, ALL endpoints and rules (~3,960 lines)
+│   ├── main.py                App object, startup migrations and seeding, Lead/Engineer endpoints; mounts app routers (~2,800 lines)
+│   ├── app/                   Layered package (auth + BU Head + SharePoint), see §6.4
+│   │   ├── core/              config (settings), database, security (auth, role guards), roles, errors
+│   │   ├── domain/            timesheets (Mon–Fri totals), calendar (monthly spreading)
+│   │   ├── repositories/      projects, users, governance, bookings, notifications, work
+│   │   ├── services/          access, metrics, projects, documents, governance, booking_approval, notifications, work_summary
+│   │   ├── integrations/sharepoint/  DocumentStorage interface (storage.py) + Graph client (graph.py)
+│   │   └── api/               deps.py (service wiring), routers/auth.py, routers/bu_head/{projects,governance,resourcing}.py
 │   ├── models.py              SQLAlchemy models (14 tables)
 │   ├── schemas.py             Pydantic request/response models, status and phase constants
-│   ├── database.py            Engine/session from DATABASE_URL (default backend/promanage.db), SQLite WAL
-│   ├── auth.py                Password hashing + get_current_user (bearer token → User)
-│   ├── sharepoint_service.py  Microsoft Graph client, folder provisioning, mirror data
+│   ├── database.py            Shim re-exporting app.core.database (old imports keep working)
+│   ├── auth.py                Shim re-exporting app.core.security
 │   ├── create_user.py         CLI to create login accounts (the only way to add users)
 │   ├── seed_and_verify.py     Older end-to-end smoke script (TestClient)
 │   ├── seed_users.py, check_users.py, inspect_db.py, temp_*.py, leads_loader.py
@@ -223,12 +229,13 @@ MAEC_project_management/
 3. Data backfills: nodes without a phase get "Space Planning", and "Submitted for Review" becomes "Submitted for Approval".
 4. Seeding: four `project_leads` rows (legacy), and the `employees` table from `backend/data/employee_leads.csv` if it's empty (`Emp No`, `Emp Name` and `Designation` columns; designation is also stored as `discipline`).
 5. The FastAPI app is created. CORS allows `localhost` and `127.0.0.1` on any port. `/uploads` is mounted.
+6. The domain-error handler is registered, and the `app` package's routers (auth + BU Head) are included. The Lead/Engineer endpoints declared in `main.py` follow.
 
 ### 6.2 Authentication and authorization
 - **Login:** `POST /api/auth/login` checks the PBKDF2 hash and returns a random 64-character token. The token is stored in `login_sessions` and sent as `Authorization: Bearer <token>`.
-- **`get_current_user`** (in `auth.py`) resolves the token to a user on every request, or returns 401. `GET /api/auth/me` restores the session on page refresh. Logout deletes the token.
-- **Role gate:** `require_role(user.role, {...})` returns 403 for roles not allowed.
-- **Project scope:** `user_can_access_project` decides who can see a project.
+- **`get_current_user`** (in `app/core/security.py`) resolves the token to a user on every request, or returns 401. `GET /api/auth/me` restores the session on page refresh. Logout deletes the token.
+- **Role gate:** routers in `app/` use the dependency guards `require_bu_head`, `require_lead_or_bu_head` and `require_any_role`. The endpoints in `main.py` call `require_role(user.role, {...})`. Both return 403 for roles that aren't allowed.
+- **Project scope:** `user_can_access_project` (in `app/services/access.py`) decides who can see a project.
   - **BU Head:** all projects.
   - **Lead:** projects where they're one of the three project leads, or where they're the assigned lead of any WBS node.
   - **Engineer:** projects where they have a WBS assignment or a resource booking.
@@ -273,6 +280,22 @@ There are no database foreign keys. Relationships are plain integer columns and 
 | `notifications` | Role-targeted notifications | `recipient_role`, `recipient_user_id`, `notification_type` (only `resource_booking_approval` today), `title`, `message`, `project_id`, `is_read` |
 | `gantt_tasks` | **Legacy**, replaced by `wbs_nodes` | Still has endpoints; unused by the UI |
 | `project_leads` | **Legacy** lead lookup, replaced by `users` with role `lead` | Seeded, unused |
+
+### 6.4 The `app` package (auth + BU Head)
+
+Request flow: **router → service → repository → database**, with external systems behind interfaces.
+
+| Layer | Rule | Example |
+|---|---|---|
+| `api/routers/*` | HTTP only: parse the request, apply the role guard, call one service method | `routers/bu_head/projects.py` → `ProjectService.create` |
+| `api/deps.py` | Composition root: builds each service from its repositories and adapters. Tests override these | `get_project_service`, `get_document_storage` |
+| `services/*` | Business rules and the transaction (commit). Raise `app.core.errors` (`NotFoundError`, `ForbiddenError`, `ConflictError`…), never `HTTPException` | `GovernanceService.decide_extension` |
+| `repositories/*` | Queries only, never commit | `ProjectRepository.delete_with_children` |
+| `domain/*` | Pure rules with no database or HTTP | `timesheets.entry_total` (Mon–Fri) |
+| `integrations/*` | Adapters to external systems behind a protocol | `DocumentStorage` / `GraphDocumentStorage` |
+| `core/*` | Settings, engine/session, security, roles, error-to-HTTP mapping | `get_settings()`, `require_bu_head` |
+
+Shared helpers that the Lead/Engineer code in `main.py` needs (access rules, dashboard metrics, the timesheet total, booking status, BU Head notification) live in `app/` and are imported back into `main.py` under their old names. CONTRIBUTING.md has the full "where did it go" table.
 
 ---
 
@@ -427,7 +450,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | POST | `/api/projects/{id}/extension-requests` | Lead | Request +N hours |
 | POST | `/api/projects/{id}/extension-requests/{request_id}/decision` | BU Head | `{decision: approve\|reject, comments}` |
 | POST | `/api/projects/{id}/governance/stop-execution` | BU Head | Soft-lock timesheets (comment required) |
-| POST | `/api/projects/{id}/governance/request-extension` · `approve-extension` · `reject-extension` | Lead / BU Head | **Legacy** duplicates of the extension flow |
+| POST | `/api/projects/{id}/governance/request-extension` | Lead | **Legacy** duplicate of `POST extension-requests` (the BU Head legacy `approve-extension` / `reject-extension` were removed in Phase 1) |
 
 **Utility:** `GET /health` → `{status: ok}` · `GET /api/server-date` → the server's local date and time.
 
@@ -438,6 +461,8 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 **Purpose:** each project gets a standard document folder in the company SharePoint, created automatically, and the app shows a live read-only view of it.
 
 **Authentication:** an Entra ID (Azure AD) app registration with the **application** permission `Sites.ReadWrite.All` (or `Sites.Selected`), with admin consent. The backend gets a token with MSAL client credentials (`https://graph.microsoft.com/.default`). Setup steps are in [backend/SHAREPOINT_SETUP.md](../backend/SHAREPOINT_SETUP.md).
+
+**Code:** `app/integrations/sharepoint/`. Services depend on the `DocumentStorage` interface (`storage.py`: `provision_project`, `get_mirror`). `GraphDocumentStorage` implements it with the Microsoft Graph client in `graph.py`, and tests swap in an in-memory fake through `app.dependency_overrides`.
 
 **Provisioning** (`provision_sharepoint_directory`, called by `POST /api/projects`):
 ```
@@ -554,9 +579,9 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 **SharePoint:** see §9.
 
 **Engineering**
-- A ~3,960-line monolithic `main.py`. Schema changes via `ALTER TABLE` on import, no foreign keys, per-row database queries, frequent polling.
-- Legacy and dead code: `gantt_tasks`, `project_leads`, legacy governance endpoints, `leads_loader.py`, `temp_*.py`, `App.css`, the `recharts` dependency.
-- Deleting a project or WBS node doesn't remove its `time_sessions` rows.
+- `main.py` (~2,800 lines) still holds the Lead/Engineer endpoints. Schema changes happen via `ALTER TABLE` on import. There are no foreign keys, several per-row database queries, and frequent polling.
+- Legacy and dead code: `gantt_tasks`, `project_leads`, the Lead's legacy `request-extension` endpoint, `leads_loader.py`, `temp_*.py`, `App.css`, the `recharts` dependency.
+- Deleting a WBS node doesn't remove its `time_sessions` rows (Lead code). Project deletion does since Phase 1.
 - `/api/server-date` labels the server's local time as "UTC".
 
 ---
@@ -566,7 +591,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | Phase | Goal | Status |
 |---|---|---|
 | 0 | Foundation: `.gitignore`, reproducible setup, single database config, lint/format tools, BU Head characterization tests, CONTRIBUTING | **Done** |
-| 1 | Backend restructure: `app/` package (core, models, schemas, repositories, services, routers), Alembic migrations, dead-code removal | Next |
+| 1 | Backend restructure: `app/` package (core, domain, repositories, services, integrations, routers) for **auth + BU Head + SharePoint**; Lead/Engineer stay in `main.py` for their owners | **Done (BU Head scope)** |
 | 2 | Frontend foundation: shared API client, TanStack Query, shared components and formatters, lazy-loaded routes | |
 | 3 | SharePoint rebuild: `DocumentStorage` interface, resilient Graph client, background provisioning + retry, folder IDs stored, lazy mirror with subfolder files | |
 | 4 | Project lifecycle: lead discipline fix, edit project, end date/scope/SOW upload, status and archive | |

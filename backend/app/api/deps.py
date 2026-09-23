@@ -1,0 +1,56 @@
+"""Composition root: builds services from their repositories and adapters.
+
+Routers depend on these factories, so a test (or a future implementation)
+can replace any collaborator with `app.dependency_overrides`.
+"""
+
+from fastapi import Depends
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.integrations.sharepoint import DocumentStorage, get_document_storage
+from app.repositories.bookings import BookingRepository
+from app.repositories.governance import GovernanceRepository
+from app.repositories.notifications import NotificationRepository
+from app.repositories.projects import ProjectRepository
+from app.repositories.users import UserRepository
+from app.repositories.work import WorkRepository
+from app.services.booking_approval import BookingApprovalService
+from app.services.documents import ProjectDocumentService
+from app.services.governance import GovernanceService
+from app.services.metrics import ProjectMetricsService
+from app.services.notifications import NotificationService
+from app.services.projects import ProjectService
+from app.services.work_summary import WorkSummaryService
+
+
+def get_project_service(
+    db: Session = Depends(get_db), storage: DocumentStorage = Depends(get_document_storage)
+) -> ProjectService:
+    return ProjectService(db, ProjectRepository(db), UserRepository(db), storage)
+
+
+def get_document_service(
+    db: Session = Depends(get_db), storage: DocumentStorage = Depends(get_document_storage)
+) -> ProjectDocumentService:
+    return ProjectDocumentService(db, ProjectRepository(db), storage)
+
+
+def get_governance_service(db: Session = Depends(get_db)) -> GovernanceService:
+    return GovernanceService(
+        db, ProjectRepository(db), GovernanceRepository(db), ProjectMetricsService(WorkRepository(db))
+    )
+
+
+def get_booking_approval_service(db: Session = Depends(get_db)) -> BookingApprovalService:
+    return BookingApprovalService(
+        db, ProjectRepository(db), BookingRepository(db), NotificationRepository(db), WorkRepository(db)
+    )
+
+
+def get_notification_service(db: Session = Depends(get_db)) -> NotificationService:
+    return NotificationService(db, NotificationRepository(db))
+
+
+def get_work_summary_service(db: Session = Depends(get_db)) -> WorkSummaryService:
+    return WorkSummaryService(ProjectRepository(db), WorkRepository(db))

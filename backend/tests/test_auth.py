@@ -121,9 +121,18 @@ def test_new_leads_and_engineers_can_log_in(client, db, make):
 def test_new_leads_appear_in_discipline_dropdowns(client, db, make, world):
     _make_new_accounts(db, make)
 
-    electrical = {lead["name"] for lead in client.get("/api/project-leads", params={"discipline": "electrical"}, headers=world.bu_h).json()}
-    mechanical = {lead["name"] for lead in client.get("/api/project-leads", params={"discipline": "mechanical"}, headers=world.bu_h).json()}
-    bim = {lead["name"] for lead in client.get("/api/project-leads", params={"discipline": "bim"}, headers=world.bu_h).json()}
+    electrical = {
+        lead["name"]
+        for lead in client.get("/api/project-leads", params={"discipline": "electrical"}, headers=world.bu_h).json()
+    }
+    mechanical = {
+        lead["name"]
+        for lead in client.get("/api/project-leads", params={"discipline": "mechanical"}, headers=world.bu_h).json()
+    }
+    bim = {
+        lead["name"]
+        for lead in client.get("/api/project-leads", params={"discipline": "bim"}, headers=world.bu_h).json()
+    }
 
     assert "Kiran" in electrical and {"Anita Kumar", "Unassigned Lead"} <= electrical
     assert "Naveen" in mechanical and {"Priya Nair"} <= mechanical

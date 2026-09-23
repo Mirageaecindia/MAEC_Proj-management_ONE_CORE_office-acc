@@ -34,11 +34,11 @@ Ask for the new value; do not reuse the old one.
 
 | Area | Owner | Main files today |
 |---|---|---|
-| BU Head: projects, governance, resource approval, dashboards | BU Head developer | `pages/bu_head/*`, BU Head endpoints in `main.py` |
-| SharePoint / Microsoft Graph integration | BU Head developer | `sharepoint_service.py`, `pages/shared/SharePointMirrorPage.jsx` |
+| BU Head: projects, governance, resource approval, dashboards | BU Head developer | `pages/bu_head/*`, `backend/app/api/routers/bu_head/*` and the `app/services` they use |
+| SharePoint / Microsoft Graph integration | BU Head developer | `backend/app/integrations/sharepoint/*`, `pages/shared/SharePointMirrorPage.jsx` |
 | Lead workflows (WBS, bookings, timesheet review, extension requests) | Lead developer | `pages/lead/*`, Lead endpoints |
 | Engineer workflows (tasks, timesheets, performance) | Engineer developer | `pages/engineer/*`, Engineer endpoints |
-| **Shared**: `main.py`, `models.py`, `schemas.py`, `auth.py`, `database.py`, `App.jsx`, `AuthContext.jsx`, `MaecHeader.jsx`, `styles.css`, shared pages | Everyone | Announce before changing; keep diffs small |
+| **Shared**: `main.py`, `models.py`, `schemas.py`, `backend/app/core`, `app/domain`, `app/services/access.py`, `App.jsx`, `AuthContext.jsx`, `MaecHeader.jsx`, `styles.css`, shared pages | Everyone | Announce before changing; keep diffs small |
 
 If a bug in your area is caused by another owner's code, open an issue or tell
 them. Don't fix it silently in their files.
@@ -67,22 +67,54 @@ only if everyone syncs often:
    untracking files) are announced before they are pushed, with the steps the
    others need to take after pulling.
 
-## Planned module layout (for agreement, roadmap Phase 1)
+## Backend module layout (roadmap Phase 1)
 
-URLs and response shapes stay identical during the move, so the frontend keeps working.
+Only the **BU Head and SharePoint** code has moved into the `backend/app/`
+package. **Lead and Engineer endpoints stay in `main.py`**, and their owners can
+move them into `app/api/routers/lead|engineer` whenever they choose, following
+the same pattern. URLs and response shapes did not change.
 
 ```
-backend/app/
-  main.py                  # create_app(): middleware + routers only
-  core/                    # settings, database session, security (auth + require_roles), errors
-  models/  schemas/        # one module per domain
-  repositories/            # database access only (aggregate SQL, no per-row query loops)
-  services/                # business rules
-  integrations/sharepoint/ # DocumentStorage interface + Microsoft Graph implementation
-  api/routers/
-    bu_head/  lead/  engineer/  shared/
-alembic/                   # schema migrations (replaces ALTER TABLE-on-import)
+backend/
+  main.py                  # startup migrations + seeding, Lead/Engineer endpoints, mounts app routers
+  app/
+    core/                  # config (settings), database, security (auth, role guards), roles, errors
+    domain/                # pure shared rules: timesheets (Mon–Fri totals), calendar (monthly spreading)
+    repositories/          # data access only; never commit (services own the transaction)
+    services/              # business logic; raise app.core.errors, never HTTPException
+    integrations/sharepoint/ # DocumentStorage interface + Microsoft Graph client
+    api/
+      deps.py              # composition root: builds services from repositories/adapters
+      routers/auth.py      # login / logout / me
+      routers/bu_head/     # projects & SharePoint, governance, resourcing approval
+  database.py, auth.py     # compatibility shims re-exporting app.core (keep old imports working)
+```
 
+### Where did shared code go?
+
+`main.py` imports these back under their old names, so Lead/Engineer code runs
+unchanged. **Change them in their new home**, not by re-adding them to `main.py`:
+
+| Old name in `main.py` | New home |
+|---|---|
+| `require_role` | `app/core/security.py` (plus guards `require_bu_head`, `require_lead_or_bu_head`, `require_any_role`) |
+| `get_current_user`, `hash_password`, `verify_password` | `app/core/security.py` (`auth.py` re-exports them) |
+| `time_entry_total` (Mon–Fri rule) | `app/domain/timesheets.py` → `entry_total` |
+| `_get_month_key`, `_distribute_hours_over_months` | `app/domain/calendar.py` |
+| `engineer_wbs_condition`, `engineer_wbs_ids`, `lead_project_ids`, `user_can_access_project` | `app/services/access.py` |
+| `executive_dashboard_data` | `app/services/metrics.py` |
+| `extension_request_output`, `find_pending_extension_request` | `app/services/governance.py` |
+| `booking_approval_status`, `BOOKING_APPROVAL_LABELS` | `app/services/booking_approval.py` |
+| `create_bu_head_notification` | `app/services/notifications.py` |
+| `sharepoint_service.py` | `app/integrations/sharepoint/graph.py` |
+
+Removed as dead code: `POST /governance/approve-extension` and
+`/governance/reject-extension` (duplicates of the extension decision endpoint,
+unused by the UI).
+
+### Frontend (planned, roadmap Phase 2)
+
+```
 frontend/src/
   api/          # single HTTP client + one module per domain
   hooks/        # data hooks (caching, refetch)
@@ -92,7 +124,8 @@ frontend/src/
 ```
 
 Each role's routers, services and feature folders are owned by that role's
-developer. `core/`, `models/`, `integrations/` and `components/` are shared.
+developer. `core/`, `domain/`, `repositories/`, `integrations/` and
+`components/` are shared.
 
 ## Coding standards
 - **Layering:** routers and components stay thin. Business rules live in

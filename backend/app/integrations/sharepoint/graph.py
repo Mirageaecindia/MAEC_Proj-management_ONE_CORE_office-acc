@@ -1,15 +1,21 @@
+"""Microsoft Graph client for SharePoint folder provisioning and mirroring.
+
+Moved unchanged in behaviour from the former top-level `sharepoint_service.py`
+(roadmap Phase 1); configuration now comes from typed settings. The Graph
+logic itself is rebuilt in roadmap Phase 3 behind the DocumentStorage interface.
+"""
+
+import asyncio
+import json
 import logging
-import os
 import re
 from typing import Any
 
 import httpx
 import msal
-from dotenv import load_dotenv
 
+from app.core.config import Settings, get_settings
 from models import Project
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +37,17 @@ class SharePointError(Exception):
 class SharePointClient:
     """Microsoft Graph API client for SharePoint operations."""
 
-    def __init__(self):
-        self.client_id = os.getenv("AZURE_CLIENT_ID")
-        self.client_secret = os.getenv("AZURE_CLIENT_SECRET")
-        self.tenant_id = os.getenv("AZURE_TENANT_ID")
-        self.site_id = os.getenv("SHAREPOINT_SITE_ID")
-        self.drive_id = os.getenv("SHAREPOINT_DRIVE_ID")
-        self.site_url = os.getenv("SHAREPOINT_SITE_URL", "https://mirageace.sharepoint.com/sites/Automation")
-        self.target_path = os.getenv("SHAREPOINT_TARGET_PATH", "Project_Mirage_Manage/delivery/Project")
+    def __init__(self, settings: Settings | None = None):
+        settings = settings or get_settings()
+        self.client_id = settings.azure_client_id
+        self.client_secret = settings.azure_client_secret
+        self.tenant_id = settings.azure_tenant_id
+        self.site_id = settings.sharepoint_site_id
+        self.drive_id = settings.sharepoint_drive_id or None
+        self.site_url = settings.sharepoint_site_url
+        self.target_path = settings.sharepoint_target_path
 
-        if not all([self.client_id, self.client_secret, self.tenant_id, self.site_id]):
+        if not settings.sharepoint_configured:
             raise SharePointError(
                 "Missing required Azure AD / SharePoint configuration. "
                 "Set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, SHAREPOINT_SITE_ID in environment."
@@ -313,8 +320,6 @@ async def provision_sharepoint_directory(project: Project) -> str:
     if not project.sharepoint_disciplines:
         raise SharePointError("No SharePoint disciplines selected for this project")
 
-    import json
-
     disciplines = json.loads(project.sharepoint_disciplines) if project.sharepoint_disciplines else []
 
     if not disciplines:
@@ -347,20 +352,6 @@ async def provision_sharepoint_directory(project: Project) -> str:
 
     logger.info(f"Provisioned SharePoint directory for project {project.project_code}: {web_url}")
     return web_url
-
-
-# Backward-compatible synchronous wrapper for existing call sites
-def provision_sharepoint_directory_sync(project: Project) -> str:
-    """Synchronous wrapper - only works if event loop is available."""
-    import asyncio
-
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    return loop.run_until_complete(provision_sharepoint_directory(project))
 
 
 async def get_sharepoint_mirror_data(project: Project) -> dict:
@@ -407,8 +398,6 @@ async def get_sharepoint_mirror_data(project: Project) -> dict:
         }
 
     # Fetch all data in parallel
-    import asyncio
-
     connection_task = client.check_connection()
     hierarchy_task = client.get_folder_hierarchy(project_folder_id)
     files_task = client.get_files_in_folder(project_folder_id)

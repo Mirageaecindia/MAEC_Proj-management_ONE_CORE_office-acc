@@ -259,20 +259,13 @@ def test_unassigned_lead_can_file_extension_request(client, world, governed):
     assert _request_extension(client, world.other_lead_h, project_id).status_code == 201
 
 
-def test_legacy_extension_endpoints_still_decide_pending_request(client, world, governed):
-    # Legacy duplicates of the decision endpoint (roadmap 1.6: remove).
+def test_legacy_bu_extension_endpoints_are_removed(client, world, governed):
+    # Roadmap 1.6: the unused duplicates of the decision endpoint were deleted.
     project_id, *_ = governed
-    approve_url = f"/api/projects/{project_id}/governance/approve-extension"
-    reject_url = f"/api/projects/{project_id}/governance/reject-extension"
+    _request_extension(client, world.lead_h, project_id)
 
-    assert client.post(approve_url, json={"comments": "x"}, headers=world.bu_h).status_code == 409
-    request_id = _request_extension(client, world.lead_h, project_id).json()["id"]
-    approved = client.post(approve_url, json={"comments": "fine"}, headers=world.bu_h)
-    assert approved.status_code == 200
-    assert approved.json()["action"] == "approve_extension"
-    assert approved.json()["extension_request_id"] == request_id
-
-    second_id = _request_extension(client, world.lead_h, project_id).json()["id"]
-    rejected = client.post(reject_url, json={"comments": "no"}, headers=world.bu_h)
-    assert rejected.json()["action"] == "reject_extension"
-    assert rejected.json()["extension_request_id"] == second_id
+    for action in ("approve-extension", "reject-extension"):
+        response = client.post(
+            f"/api/projects/{project_id}/governance/{action}", json={"comments": "x"}, headers=world.bu_h
+        )
+        assert response.status_code in (404, 405)

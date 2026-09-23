@@ -22,14 +22,16 @@ for _key in ("AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID", "SHARE
 import pytest
 from fastapi.testclient import TestClient
 
-import auth
 import main
-from database import Base, SessionLocal, engine
+from app.core import security
+from app.core.database import Base, SessionLocal, engine
+from app.integrations.sharepoint import get_document_storage
+from fakes import FakeDocumentStorage
 
 # PBKDF2 is intentionally slow (100k rounds). Tests log in hundreds of times,
 # so use a cheap cost here; hashing and verification still go through the
 # real code path. Must be set before factories computes its shared hash.
-auth._PBKDF2_ITERATIONS = 1_000
+security.PBKDF2_ITERATIONS = 1_000
 
 from factories import Factory
 
@@ -57,6 +59,15 @@ def db():
 @pytest.fixture
 def client():
     return TestClient(main.app)
+
+
+@pytest.fixture
+def storage():
+    """Replace SharePoint with an in-memory fake for the duration of a test."""
+    fake = FakeDocumentStorage()
+    main.app.dependency_overrides[get_document_storage] = lambda: fake
+    yield fake
+    main.app.dependency_overrides.pop(get_document_storage, None)
 
 
 @pytest.fixture

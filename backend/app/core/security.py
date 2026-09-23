@@ -1,0 +1,89 @@
+"""Password hashing, bearer-token authentication and role checks.
+
+Passwords are hashed with PBKDF2-HMAC-SHA256 (stdlib). Sessions are opaque
+bearer tokens stored in `login_sessions`. Identity and role always come from
+the token, never from a client-supplied header, query parameter or storage.
+"""
+
+import hashlib
+import secrets
+
+from fastapi import Depends, Header, HTTPException
+from sqlalchemy.orm import Session
+
+import models
+from app.core.database import get_db
+from app.core.roles import ALL_ROLES, Role
+
+PBKDF2_ITERATIONS = 100_000
+_ALGO = "pbkdf2_sha256"
+
+FORBIDDEN_FOR_ROLE = "This action is not allowed for the current role."
+
+
+def hash_password(password: str) -> str:
+    """Return a salted PBKDF2-HMAC-SHA256 hash string: algo$salt$hexdigest."""
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), PBKDF2_ITERATIONS)
+    return f"{_ALGO}${salt}${digest.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        algo, salt, expected = (stored or "").split("$", 2)
+    except ValueError:
+        return False
+    if algo != _ALGO:
+        return False
+    try:
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), PBKDF2_ITERATIONS)
+    except ValueError:
+        return False
+    return secrets.compare_digest(digest.hex(), expected)
+
+
+def bearer_token(authorization: str | None) -> str | None:
+    """Extract the token from an `Authorization: Bearer <token>` header value."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    return authorization.split(" ", 1)[1].strip() or None
+
+
+def get_current_user(
+    authorization: str | None = Header(None),
+    db: Session = Depends(get_db),
+) -> models.User:
+    """FastAPI dependency returning the authenticated user, or 401."""
+    token = bearer_token(authorization)
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    session = db.query(models.LoginSession).filter_by(token=token).first()
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired or invalid.")
+    user = db.get(models.User, session.user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found.")
+    return user
+
+
+def require_role(role: str | None, allowed: set[str]) -> None:
+    """Imperative role check (used by legacy endpoints in main.py)."""
+    if role not in allowed:
+        raise HTTPException(status_code=403, detail=FORBIDDEN_FOR_ROLE)
+
+
+def require_roles(*roles: Role):
+    """Dependency factory: the authenticated user, or 403 if their role is not allowed."""
+    allowed = {str(role) for role in roles}
+
+    def dependency(user: models.User = Depends(get_current_user)) -> models.User:
+        require_role(user.role, allowed)
+        return user
+
+    return dependency
+
+
+# Named guards for routers: `user = Depends(require_bu_head)`.
+require_bu_head = require_roles(Role.BU_HEAD)
+require_lead_or_bu_head = require_roles(Role.LEAD, Role.BU_HEAD)
+require_any_role = require_roles(*ALL_ROLES)

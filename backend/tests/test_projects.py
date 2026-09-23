@@ -4,14 +4,12 @@ Assertions marked KNOWN record today's behaviour for issues scheduled in the
 roadmap; update them deliberately when that step lands.
 """
 
-import json
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
-import main
 import models
-import sharepoint_service
+from app.integrations.sharepoint import SharePointError
 
 # --- Lead dropdowns ------------------------------------------------------------
 
@@ -127,29 +125,19 @@ def test_only_bu_head_can_create_projects(client, world, role_headers):
 # --- Create: SharePoint provisioning outcome --------------------------------------
 
 
-def test_create_project_records_provisioned_sharepoint_url(client, db, world, monkeypatch):
-    url = "https://example.sharepoint.com/sites/Automation/Project/Hotel%20Tower"
-    calls = []
-
-    async def fake_provision(project):
-        calls.append(json.loads(project.sharepoint_disciplines))
-        return url
-
-    monkeypatch.setattr(sharepoint_service, "provision_sharepoint_directory", fake_provision)
+def test_create_project_records_provisioned_sharepoint_url(client, db, world, storage):
+    storage.provision_url = "https://example.sharepoint.com/sites/Automation/Project/Hotel%20Tower"
 
     body = world.create_project(sharepoint_disciplines=["HVAC Discipline", "Plumbing"])
 
     assert body["sharepoint_status"] == "provisioned"
-    assert body["sharepoint_site_url"] == url
-    assert calls == [["HVAC Discipline", "Plumbing"]]
-    assert db.get(models.Project, body["id"]).sharepoint_site_url == url
+    assert body["sharepoint_site_url"] == storage.provision_url
+    assert storage.provisioned == [["HVAC Discipline", "Plumbing"]]
+    assert db.get(models.Project, body["id"]).sharepoint_site_url == storage.provision_url
 
 
-def test_create_project_still_succeeds_when_sharepoint_fails(client, db, world, monkeypatch):
-    async def failing_provision(project):
-        raise sharepoint_service.SharePointError("403 Forbidden")
-
-    monkeypatch.setattr(sharepoint_service, "provision_sharepoint_directory", failing_provision)
+def test_create_project_still_succeeds_when_sharepoint_fails(client, db, world, storage):
+    storage.provision_error = SharePointError("403 Forbidden")
 
     body = world.create_project(sharepoint_disciplines=["Plumbing"])
 
@@ -158,16 +146,20 @@ def test_create_project_still_succeeds_when_sharepoint_fails(client, db, world, 
     assert db.get(models.Project, body["id"]).sharepoint_site_url is None
 
 
-def test_create_project_reports_unexpected_sharepoint_errors(client, world, monkeypatch):
-    async def broken_provision(project):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(sharepoint_service, "provision_sharepoint_directory", broken_provision)
+def test_create_project_reports_unexpected_sharepoint_errors(client, world, storage):
+    storage.provision_error = RuntimeError("boom")
 
     body = world.create_project(sharepoint_disciplines=["Plumbing"])
 
     assert body["sharepoint_status"] == "error"
     assert body["sharepoint_error"] == "Unexpected error: boom"
+
+
+def test_create_project_skips_sharepoint_when_no_disciplines(client, world, storage):
+    body = world.create_project(sharepoint_disciplines=[])
+
+    assert body["sharepoint_status"] == "not_requested"
+    assert storage.provisioned == []
 
 
 def test_create_project_without_azure_config_fails_fast_without_network(client, world):
@@ -248,6 +240,13 @@ def test_delete_project_removes_project_and_all_child_rows(client, db, make, wor
             models.GovernanceAction(project_id=project_id, action="stop_execution"),
             models.ExtensionRequest(project_id=project_id, requested_by="x", requested_by_user_id=1, requested_hours=5),
             models.Notification(recipient_role="bu_head", notification_type="t", title="t", project_id=project_id),
+            models.TimeSession(
+                project_id=project_id,
+                task_id=node.id,
+                subtask_id=node.id,
+                employee_id=world.emp1.id,
+                login_at=datetime(2026, 9, 7, 9, 0),
+            ),
         ]
     )
     db.commit()
@@ -264,6 +263,7 @@ def test_delete_project_removes_project_and_all_child_rows(client, db, make, wor
         models.GovernanceAction,
         models.ExtensionRequest,
         models.Notification,
+        models.TimeSession,
     )
     for model in child_models:
         assert db.query(model).filter_by(project_id=project_id).count() == 0, model.__name__
@@ -275,9 +275,3 @@ def test_delete_project_guards(client, world):
 
     assert client.delete(f"/api/projects/{project_id}", headers=world.lead_h).status_code == 403
     assert client.delete("/api/projects/999999", headers=world.bu_h).status_code == 404
-
-
-def test_app_module_exposes_sharepoint_hook_used_by_create_project():
-    # Guard for the monkeypatch seam above: create_project must keep resolving
-    # provisioning through the sharepoint_service module at call time.
-    assert main.sharepoint_service is sharepoint_service
