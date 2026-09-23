@@ -9,6 +9,10 @@ booking, WBS planning, weekly timesheets and an executive governance dashboard.
 | API | FastAPI · SQLAlchemy · SQLite (Postgres-ready) · Microsoft Graph (MSAL) | [backend/](backend/) |
 | Web app | React 19 · Vite · React Router | [frontend/](frontend/) |
 
+**New to the project?** Read the [Project Guide](docs/PROJECT_GUIDE.md) for the
+product, roles, end-to-end lifecycle, architecture, data model, business rules,
+full API reference and known issues.
+
 ## Prerequisites
 - Python 3.12+ (developed on 3.14)
 - Node.js 20+ (developed on 24) and npm
