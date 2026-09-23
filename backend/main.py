@@ -10,7 +10,7 @@ import uuid
 import zipfile
 import xml.etree.ElementTree as ElementTree
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import List, Optional
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -1255,13 +1255,16 @@ def create_resource_booking(
             detail=allocation_cap_error(employee.name, current_allocation, requested),
             headers={"X-Error-Code": "ALLOCATION_LIMIT"},
         )
+    start_date = _parse_iso_date(payload.get("start_date"))
+    end_date = _parse_iso_date(payload.get("end_date"))
+    derived_hours = estimated_hours_from_dates(start_date, end_date)
     booking = models.ResourceBooking(
         project_id=project_id,
         employee_id=employee.id,
-        planned_hours=int(payload.get("planned_hours", 0)),
+        planned_hours=derived_hours if derived_hours is not None else int(payload.get("planned_hours", 0)),
         utilization_rate=requested,
-        start_date=_parse_iso_date(payload.get("start_date")),
-        end_date=_parse_iso_date(payload.get("end_date")),
+        start_date=start_date,
+        end_date=end_date,
         approval_status="draft",
     )
     db.add(booking)
@@ -1300,12 +1303,13 @@ def update_resource_booking(
             headers={"X-Error-Code": "ALLOCATION_LIMIT"},
         )
     booking.employee_id = employee.id
-    booking.planned_hours = int(payload.get("planned_hours", booking.planned_hours or 0))
-    booking.utilization_rate = requested
     if payload.get("start_date") is not None:
         booking.start_date = _parse_iso_date(payload.get("start_date"))
     if payload.get("end_date") is not None:
         booking.end_date = _parse_iso_date(payload.get("end_date"))
+    derived_hours = estimated_hours_from_dates(booking.start_date, booking.end_date)
+    booking.planned_hours = derived_hours if derived_hours is not None else int(payload.get("planned_hours", booking.planned_hours or 0))
+    booking.utilization_rate = requested
     db.commit()
     db.refresh(booking)
     return booking_output(db, booking)
@@ -1503,8 +1507,11 @@ def validate_node_payload(db: Session, project_id: int, payload: schemas.WbsNode
         parent = db.query(models.WbsNode).filter_by(id=payload.parent_id, project_id=project_id).first()
         if not parent:
             raise HTTPException(status_code=400, detail="Parent WBS node does not belong to this project.")
-        if node_level(db, parent) >= 3:
-            raise HTTPException(status_code=400, detail="WBS hierarchy supports three levels.")
+        if parent.parent_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="A subtask cannot have its own subtasks. Only main tasks can have subtasks.",
+            )
     if payload.assigned_engineer_id is not None and not db.query(models.Employee).filter_by(id=payload.assigned_engineer_id).first():
         raise HTTPException(status_code=400, detail="Engineer not found.")
     if payload.assigned_lead_user_id is not None and not db.query(models.User).filter_by(id=payload.assigned_lead_user_id, role="lead").first():
@@ -1554,7 +1561,10 @@ def list_wbs_structure(
 
 
 def time_entry_total(entry) -> float:
-    return sum(float(getattr(entry, field) or 0) for field in models.DAY_FIELDS)
+    # Weekly totals are derived from Monday-Friday only. Automatic subtask
+    # tracking never writes Saturday/Sunday, so those columns always stay
+    # zero and never contribute to a week's total.
+    return sum(float(getattr(entry, field) or 0) for field in models.DAY_FIELDS[:5])
 
 
 def time_entry_output(db: Session, entry: models.TimeLogEntry):
@@ -1604,6 +1614,7 @@ def scoped_wbs_tasks(
 def list_timesheet_entries(
     project_id: int,
     week_start: Optional[str] = None,
+    source: Optional[str] = None,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1624,6 +1635,21 @@ def list_timesheet_entries(
         query = query.filter(models.TimeLogEntry.task_id.in_(task_ids)) if task_ids else query.filter(models.TimeLogEntry.id < 0)
     if week_start:
         query = query.filter_by(week_start_date=date.fromisoformat(week_start))
+    if source == "tracking":
+        # The Weekly Hours Logging sheet is fed exclusively by automatic
+        # subtask tracking: only engineer subtasks (never main tasks) that
+        # actually have Monday-Friday tracked working time are shown.
+        subtask_ids = [
+            node.id
+            for node in db.query(models.WbsNode)
+            .filter(models.WbsNode.project_id == project_id, models.WbsNode.parent_id.isnot(None))
+            .all()
+        ]
+        tracked = or_(*[getattr(models.TimeLogEntry, field) > 0 for field in models.DAY_FIELDS[:5]])
+        query = query.filter(
+            models.TimeLogEntry.task_id.in_(subtask_ids) if subtask_ids else models.TimeLogEntry.id < 0,
+            tracked,
+        )
     return [time_entry_output(db, entry) for entry in query.order_by(models.TimeLogEntry.week_start_date).all()]
 
 
@@ -2788,6 +2814,11 @@ def submit_time_log(
             status_code=403,
             detail="You may only log hours against tasks assigned to you.",
         )
+    if task.parent_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Subtask hours come from the automatic Login/Logout working-time tracking — manual hour entry is not allowed for subtasks.",
+        )
     entry = (
         db.query(models.TimeLogEntry)
         .filter_by(
@@ -2858,6 +2889,244 @@ def reject_time_log(
     return lead_review_time_log(db, entry_id, user, "rejected")
 
 
+# --- Automatic subtask working-time tracking ---------------------------------
+
+SUBTASK_MIN_HOURS = 1
+SUBTASK_MAX_HOURS = 4
+DAILY_WORK_HOURS = 8
+
+
+def validate_subtask_rules(estimated_hours, start_date, end_date):
+    """Enforce the subtask working-time rules that underpin automatic
+    tracking: planned hours are 1-4 only (whole hours) and a subtask is a
+    single-day unit whose Start and End dates must be identical.
+
+    Only values explicitly present on the payload are checked, so subtasks
+    that inherit dates from their parent main task keep working.
+    """
+    if estimated_hours is not None and not (SUBTASK_MIN_HOURS <= estimated_hours <= SUBTASK_MAX_HOURS):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Subtask planned hours must be between {SUBTASK_MIN_HOURS} and {SUBTASK_MAX_HOURS} hours.",
+        )
+    if start_date is not None and end_date is not None and start_date != end_date:
+        raise HTTPException(
+            status_code=400,
+            detail="A subtask must be completed within a single working day — Start Date and End Date must be identical.",
+        )
+
+
+def engineer_active_seconds_on(db: Session, employee_id: int, day: date) -> int:
+    """Committed (ended) active seconds an engineer banked on the given day."""
+    total = 0
+    for sess in db.query(models.TimeSession).filter_by(employee_id=employee_id, status="ended").all():
+        if sess.login_at is not None and sess.login_at.date() == day:
+            total += sess.active_seconds
+    return total
+
+
+def upsert_subtask_time_log(db: Session, project_id: int, task_id: int, employee_id: int, day: date, seconds: int):
+    """Fold automatic tracking seconds into the existing weekly time-log
+    system (one row per project x subtask x engineer x ISO week). The same
+    row a Lead approves from Timelines & Logs is reused, so automatic and
+    manual hours stay in one place with no duplicate time-log system.
+
+    Only Monday-Friday ever receives automatic tracked working hours: a
+    session on Saturday/Sunday is never banked, so the weekly sheet's
+    Saturday and Sunday columns always stay at zero.
+    """
+    hours = round(seconds / 3600, 2)
+    if hours <= 0:
+        return None
+    if day.weekday() >= 5:
+        return None
+    week_start = day - timedelta(days=day.weekday())
+    field = models.DAY_FIELDS[day.weekday()]
+    entry = (
+        db.query(models.TimeLogEntry)
+        .filter_by(project_id=project_id, task_id=task_id, employee_id=employee_id, week_start_date=week_start)
+        .first()
+    )
+    if entry is None:
+        entry = models.TimeLogEntry(
+            project_id=project_id,
+            task_id=task_id,
+            employee_id=employee_id,
+            week_start_date=week_start,
+            approval_status="pending_review",
+        )
+        db.add(entry)
+    current = getattr(entry, field) or 0
+    setattr(entry, field, round(current + hours, 2))
+    return entry
+
+
+def _session_output(session: models.TimeSession) -> dict:
+    return {
+        "id": session.id,
+        "project_id": session.project_id,
+        "task_id": session.task_id,
+        "subtask_id": session.subtask_id,
+        "employee_id": session.employee_id,
+        "login_at": session.login_at,
+        "logout_at": session.logout_at,
+        "active_seconds": session.active_seconds,
+        "status": session.status,
+    }
+
+
+def day_capacity_seconds(db: Session, employee_id: int, today: date) -> int:
+    return DAILY_WORK_HOURS * 3600 - engineer_active_seconds_on(db, employee_id, today)
+
+
+@app.get("/api/subtask-tracking/status")
+def subtask_tracking_status(
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user.role, {"engineer", "lead"})
+    if user.employee_id is None:
+        raise HTTPException(status_code=400, detail="Your account is not linked to an employee record.")
+    today = date.today()
+    active = db.query(models.TimeSession).filter_by(employee_id=user.employee_id, status="active").first()
+    day_start = datetime.combine(today, datetime.min.time())
+    day_end = datetime.combine(today + timedelta(days=1), datetime.min.time())
+    day_entries = (
+        db.query(models.TimeSession)
+        .filter(
+            models.TimeSession.employee_id == user.employee_id,
+            models.TimeSession.login_at >= day_start,
+            models.TimeSession.login_at < day_end,
+        )
+        .order_by(models.TimeSession.login_at)
+        .all()
+    )
+    committed = engineer_active_seconds_on(db, user.employee_id, today)
+    total = committed + (active.active_seconds if active else 0)
+    return {
+        "date": today.isoformat(),
+        "active_session": _session_output(active) if active else None,
+        "entries": [_session_output(s) for s in day_entries],
+        "today_seconds": total,
+        "today_hours": round(total / 3600, 2),
+        "remaining_hours": max(0, round((DAILY_WORK_HOURS * 3600 - total) / 3600, 2)),
+    }
+
+
+@app.post("/api/subtask-tracking/start", status_code=201)
+def start_subtask_tracking(
+    payload: schemas.SubtaskTrackingStart,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user.role, {"engineer"})
+    if user.employee_id is None:
+        raise HTTPException(status_code=400, detail="Your account is not linked to an employee record.")
+    node = db.query(models.WbsNode).filter_by(id=payload.subtask_id).first()
+    if not node:
+        raise HTTPException(status_code=404, detail="Subtask not found.")
+    if node.parent_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Working-time tracking applies to subtasks only. Main tasks do not get automatic time tracking.",
+        )
+    if not node_assigned_to_engineer(node, user):
+        raise HTTPException(status_code=403, detail="You may only track working time on subtasks assigned to you.")
+    existing = db.query(models.TimeSession).filter_by(employee_id=user.employee_id, status="active").first()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail="You already have an active tracking session. End it before starting another subtask.",
+        )
+    if engineer_active_seconds_on(db, user.employee_id, date.today()) >= DAILY_WORK_HOURS * 3600:
+        raise HTTPException(status_code=409, detail=f"You have reached your {DAILY_WORK_HOURS}-hour daily working limit.")
+    session = models.TimeSession(
+        project_id=node.project_id,
+        task_id=node.parent_id,
+        subtask_id=node.id,
+        employee_id=user.employee_id,
+        login_at=datetime.now(),
+        active_seconds=0,
+        status="active",
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return _session_output(session)
+
+
+@app.post("/api/subtask-tracking/{session_id}/sync")
+def sync_subtask_tracking(
+    session_id: int,
+    payload: schemas.SubtaskSessionSync,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user.role, {"engineer"})
+    session = db.query(models.TimeSession).filter_by(id=session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Tracking session not found.")
+    if session.employee_id != user.employee_id:
+        raise HTTPException(status_code=403, detail="You may only update your own tracking sessions.")
+    if session.status != "active":
+        raise HTTPException(status_code=409, detail="This tracking session has already ended.")
+    if payload.active_seconds < session.active_seconds:
+        raise HTTPException(status_code=409, detail="active_seconds cannot decrease.")
+    if payload.active_seconds > day_capacity_seconds(db, user.employee_id, date.today()):
+        raise HTTPException(
+            status_code=409,
+            detail=f"You have reached your {DAILY_WORK_HOURS}-hour daily working limit. The session will not count more time.",
+        )
+    session.active_seconds = payload.active_seconds
+    db.commit()
+    db.refresh(session)
+    return _session_output(session)
+
+
+@app.post("/api/subtask-tracking/{session_id}/end")
+def end_subtask_tracking(
+    session_id: int,
+    payload: schemas.SubtaskSessionSync,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user.role, {"engineer"})
+    session = db.query(models.TimeSession).filter_by(id=session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Tracking session not found.")
+    if session.employee_id != user.employee_id:
+        raise HTTPException(status_code=403, detail="You may only update your own tracking sessions.")
+    if session.status != "active":
+        return _session_output(session)
+    if payload.active_seconds < session.active_seconds:
+        raise HTTPException(status_code=409, detail="active_seconds cannot decrease.")
+    today = date.today()
+    capacity = day_capacity_seconds(db, user.employee_id, today)
+    final_seconds = payload.active_seconds
+    exceeded = final_seconds > capacity
+    if exceeded:
+        final_seconds = max(0, capacity)
+    session.active_seconds = final_seconds
+    session.logout_at = datetime.now()
+    session.status = "ended"
+    db.commit()
+    # Hours are banked to the day the session was logged in: a late-night
+    # session that crosses midnight still lands in Friday's column, and the
+    # weekend rule then keeps Saturday/Sunday at zero.
+    work_date = session.login_at.date() if session.login_at else today
+    upsert_subtask_time_log(db, session.project_id, session.subtask_id, session.employee_id, work_date, final_seconds)
+    db.commit()
+    db.refresh(session)
+    total = engineer_active_seconds_on(db, user.employee_id, today)
+    return {
+        "session": _session_output(session),
+        "exceeded": exceeded,
+        "today_hours": round(total / 3600, 2),
+        "remaining_hours": max(0, round((DAILY_WORK_HOURS * 3600 - total) / 3600, 2)),
+        "limit_reached": total >= DAILY_WORK_HOURS * 3600,
+    }
+
+
 def cascade_phase(db: Session, parent_id: int, phase: str):
     for child in db.query(models.WbsNode).filter_by(parent_id=parent_id).all():
         if child.phase != phase:
@@ -2868,17 +3137,28 @@ def cascade_phase(db: Session, parent_id: int, phase: str):
 def estimated_hours_from_dates(start_date, end_date):
     """Derive estimated hours from a Start/End date range, server-side.
 
-    Every calendar day between Start and End (inclusive) counts as a working
-    day of 8 hours — weekends are NOT excluded. Computing on the server keeps
-    the stored value authoritative and consistent with the Add WBS Node form;
-    a client-supplied hours value is never trusted when both dates are present.
-    Returns None when a full range is not available, so callers fall back to
-    the value sent by the client (e.g. legacy nodes with hours but no dates).
+    Only weekdays (Monday–Friday) count — both endpoints inclusive — at
+    8 hours/day; Saturdays and Sundays are NOT working days. Computing on
+    the server keeps the stored value authoritative and consistent with the
+    Add WBS Node form: a client-supplied hours value is never trusted when
+    both dates are present.
+
+    Returns None when a full range is not available or the range is
+    reversed, so callers fall back to the value sent by the client
+    (e.g. legacy nodes with hours but no dates). A valid range whose days
+    all fall on a weekend yields 0 hours.
     """
     if start_date is None or end_date is None:
         return None
-    days = (end_date - start_date).days + 1
-    return days * 8 if days > 0 else None
+    if end_date < start_date:
+        return None
+    weekdays = 0
+    cursor = start_date
+    while cursor <= end_date:
+        if cursor.weekday() < 5:
+            weekdays += 1
+        cursor += timedelta(days=1)
+    return weekdays * 8
 
 
 @app.post("/api/projects/{project_id}/wbs-nodes", response_model=schemas.WbsNodeOut, status_code=201)
@@ -2912,7 +3192,7 @@ def create_wbs_node(
     db.add(node)
     db.commit()
     db.refresh(node)
-    if payload.subtask and payload.subtask.strip() and node_level(db, node) < 3:
+    if payload.subtask and payload.subtask.strip() and node.parent_id is None:
         child_code = None
         if node.wbs_code:
             sibling_count = db.query(models.WbsNode).filter_by(project_id=project_id, parent_id=node.id).count()
@@ -2973,16 +3253,29 @@ def create_wbs_subtask(
     else:
         raise HTTPException(status_code=403, detail="This action is not allowed for the current role.")
 
-    if node_level(db, parent) >= 3:
-        raise HTTPException(status_code=400, detail="WBS hierarchy supports three levels.")
+    if parent.parent_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="A subtask cannot have its own subtasks. Only main tasks can have subtasks.",
+        )
 
     if payload.assigned_engineer_id is not None and not db.query(models.Employee).filter_by(
         id=payload.assigned_engineer_id
     ).first():
         raise HTTPException(status_code=400, detail="Engineer not found.")
 
+    if user.role == "engineer":
+        if payload.assigned_engineer_id is not None and payload.assigned_engineer_id != user.employee_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the Lead can assign engineers to a task — you can only plan your own subtasks.",
+            )
+        validate_subtask_rules(payload.estimated_hours, payload.start_date, payload.end_date)
+
+    if user.role == "lead":
+        validate_subtask_rules(payload.estimated_hours, payload.start_date, payload.end_date)
+
     phase = payload.phase or parent.phase or "Space Planning"
-    derived_hours = estimated_hours_from_dates(payload.start_date, payload.end_date)
     sibling_count = db.query(models.WbsNode).filter_by(project_id=parent.project_id, parent_id=parent.id).count()
     child_code = None
     if parent.wbs_code:
@@ -3002,7 +3295,7 @@ def create_wbs_subtask(
         assigned_engineer_id=payload.assigned_engineer_id
         if payload.assigned_engineer_id is not None
         else parent.assigned_engineer_id,
-        estimated_hours=derived_hours if derived_hours is not None else payload.estimated_hours,
+        estimated_hours=payload.estimated_hours,
         deliverable_status="To Do",
         start_date=payload.start_date if payload.start_date else parent.start_date,
         target_due_date=payload.target_due_date if payload.target_due_date else parent.target_due_date,
@@ -3032,11 +3325,17 @@ def update_wbs_node(
         duplicate = db.query(models.WbsNode).filter(models.WbsNode.project_id == node.project_id, models.WbsNode.wbs_code == payload.wbs_code, models.WbsNode.id != node_id).first()
     if duplicate:
         raise HTTPException(status_code=409, detail="WBS code already exists in this project.")
-    for field, value in payload.model_dump(exclude={"subtask", "phase"}).items():
+    for field, value in payload.model_dump(exclude={"subtask", "phase", "parent_id"}).items():
         setattr(node, field, value)
-    derived = estimated_hours_from_dates(payload.start_date, payload.end_date)
-    if derived is not None:
-        node.estimated_hours = derived
+    if node.parent_id is not None:
+        merged_hours = payload.estimated_hours if payload.estimated_hours is not None else node.estimated_hours
+        merged_start = payload.start_date if payload.start_date is not None else node.start_date
+        merged_end = payload.end_date if payload.end_date is not None else node.end_date
+        validate_subtask_rules(merged_hours, merged_start, merged_end)
+    else:
+        derived = estimated_hours_from_dates(payload.start_date, payload.end_date)
+        if derived is not None:
+            node.estimated_hours = derived
     if node.assigned_lead_user_id is None and node.assigned_lead is None:
         node.assigned_lead = user.full_name
         node.assigned_lead_user_id = user.id

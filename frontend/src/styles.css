@@ -1054,6 +1054,20 @@ table.wbs-lead-table:has(> thead > tr > th:nth-child(6)) th:last-child { width: 
 
 .wbs-cell-actions { display: flex; align-items: center; justify-content: center; gap: 5px; }
 .wbs-cell-actions .button { min-height: 27px; padding: 0 9px; font-size: 10px; }
+/* Reserve the '+ Subtask' position on every row (hidden placeholder with the
+   same text/padding/font as the real button), so Save/Edit/Delete always sit
+   at the same horizontal position whether or not the row has the button. */
+.wbs-subtask-slot {
+  visibility: hidden;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 27px;
+  padding: 0 9px;
+  font-size: 10px;
+  white-space: nowrap;
+}
 .wbs-icon-btn { width: 27px; height: 27px; flex: 0 0 27px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; cursor: pointer; vertical-align: middle; }
 .wbs-icon-btn:disabled { cursor: wait; opacity: .6; }
 .wbs-icon-edit { color: #2d5f86; background: #eef5fb; border: 1px solid #cfe3f2; }
@@ -1062,6 +1076,14 @@ table.wbs-lead-table:has(> thead > tr > th:nth-child(6)) th:last-child { width: 
 .wbs-icon-delete:hover { background: #ffe7e7; }
 .wbs-phase-row { background: #f1f7fc; }
 .wbs-phase-row td { font-weight: 700; }
+/* Engineer WBS rows are fully clickable — clicking anywhere on the row opens
+   the Task Details page for that task. The hover state makes that obvious. */
+.resource-table tbody tr.wbs-row-clickable { cursor: pointer; }
+.resource-table tbody tr.wbs-row-clickable:hover {
+  background: #e5f1fb;
+  box-shadow: inset 3px 0 0 #1671ad;
+}
+.resource-table tbody tr.wbs-row-clickable:hover strong { color: #0f4d78; }
 .wbs-phase-name { color: #0f4d78; text-transform: capitalize; }
 .wbs-phase-count { margin-left: 8px; padding: 2px 8px; color: #52697e; background: #e3eef7; border-radius: 10px; font-size: 10px; font-weight: 700; }
 .wbs-field-hint { color: #8598a8; font-size: 10px; }
@@ -1083,6 +1105,11 @@ table.wbs-lead-table:has(> thead > tr > th:nth-child(6)) th:last-child { width: 
 .td-pill.past { color: #237052; background: #e9f9ef; border-color: #b7e4c7; }
 .td-pill.current { color: #fff; background: #1671ad; border-color: #0f4d78; box-shadow: 0 0 0 2px #c5d9ea; }
 .td-pill.current.done-current { background: #2b9c6c; border-color: #1f7a52; box-shadow: 0 0 0 2px #c9ead8; }
+/* Engineer stepper pills are clickable — same resting design, plus a clickable
+   affordance (pointer + hover) so the status can be changed via confirm. */
+button.td-pill { font-family: inherit; cursor: pointer; }
+button.td-pill:hover { filter: brightness(1.08); }
+button.td-pill:active { transform: translateY(1px); }
 .td-connector { width: 22px; height: 2px; border-radius: 2px; background: #d3dde5; }
 .td-connector.past { background: #2b9c6c; }
 .td-card-heading { font-size: 12px; font-weight: 700; color: #2d4358; text-transform: uppercase; letter-spacing: .05em; }
@@ -1350,3 +1377,38 @@ tr.clickable-row:hover td { background: #f0f7fd !important; }
 .review-approve:hover { background: #dff4e8; }
 .review-reject { color: #8c2f3a; background: #fdf1f2; border-color: #f0c9cd; }
 .review-reject:hover { background: #fbe4e6; }
+
+/* Clickable timesheet rows — clicking a task or its logged hours opens the
+   mapped WBS task / subtask (engineer and lead). */
+.timesheet-task-link { display: block; color: #172b40; text-decoration: none; cursor: pointer; }
+.timesheet-task-link:hover .timesheet-engineer-cell strong { color: #0f4d78; text-decoration: underline; }
+.timesheet-task-link:hover .timesheet-engineer-cell small { color: #0f4d78; }
+.timesheet-task-link:hover .total-hours-blue { color: #0f4d78; text-decoration: underline; }
+.timesheet-total-link { display: inline-block; }
+
+/* Daily-total footer row on the weekly timesheet. */
+.timesheet-total-row td { padding-top: 12px; padding-bottom: 12px; background: #f3f8fc; border-top: 2px solid #cdddea; font-size: 12px; color: #1c334b; }
+.timesheet-total-row td.col-engineer { text-align: left; font-weight: 700; color: #2d4358; }
+.timesheet-total-row td strong { color: #1671ad; }
+
+/* Engineer subtask working-time Login/Logout button beside the 'To Do' step
+   in the Task Details status stepper. Style mirrors the stepper pills so the
+   rest of the stepper stays visually unchanged. */
+.td-login-btn {
+  align-self: center;
+  padding: 4px 14px;
+  border-radius: 999px;
+  border: 1px solid #b8cdde;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  white-space: nowrap;
+  color: #fff;
+  background: #1671ad;
+  cursor: pointer;
+}
+.td-login-btn:hover { background: #0f4d78; }
+.td-login-btn.logged-in { color: #8c2f3a; background: #fff; border-color: #c2453e; }
+.td-login-btn.logged-in:hover { background: #fdf1f2; }
+.td-login-btn:disabled { opacity: .55; cursor: not-allowed; }

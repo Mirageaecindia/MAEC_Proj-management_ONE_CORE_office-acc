@@ -1,13 +1,13 @@
-import { Eye, Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
+import { countWorkingDays, plannedHoursForRange } from '../../lib/hours';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const STATUSES = ['Not Started', 'In Progress', 'Completed', 'Blocked'];
 const PHASES = ['Space Planning', 'STR Coordination', 'ID Coordination', 'BoH Area RCP Coordination', 'Submission'];
-const HOURS_PER_SCHEDULED_DAY = 8;
 
 const EMPTY_NODE = {
   wbs_code: '',
@@ -160,17 +160,17 @@ export function WbsStructurePage() {
     return list;
   }, [engineers, nodeForm.assigned_engineer_id, tasks]);
 
-  // Estimated Hours preview: inclusive days between Start and End × 8 hrs per
-  // calendar day. Weekends count as working days — same rule the backend
-  // enforces, so the shown value always matches what gets saved.
+  // Estimated Hours preview: inclusive weekdays (Mon–Fri) between Start and
+  // End × 8 hrs per working day. Weekends are not working days — same rule the
+  // backend enforces, so the shown value always matches what gets saved.
   const estimatedPreview = useMemo(() => {
     if (!nodeForm.start_date || !nodeForm.end_date) return null;
     const start = new Date(`${nodeForm.start_date}T00:00:00`);
     const end = new Date(`${nodeForm.end_date}T00:00:00`);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
     if (end < start) return { error: true };
-    const days = Math.round((end - start) / 86400000) + 1;
-    return { days, hours: days * HOURS_PER_SCHEDULED_DAY };
+    const days = countWorkingDays(nodeForm.start_date, nodeForm.end_date);
+    return { days, hours: plannedHoursForRange(nodeForm.start_date, nodeForm.end_date) };
   }, [nodeForm.start_date, nodeForm.end_date]);
 
   async function saveTask(task) {
@@ -381,7 +381,7 @@ export function WbsStructurePage() {
   const phaseAggregates = useMemo(() => PHASES.map((phase) => {
     const phaseTasks = tasks.filter((task) => task.phase === phase);
     const assignedLead = [...new Set(phaseTasks.map((task) => task.assigned_lead).filter(Boolean))];
-    const assignedEngineers = [...new Set(phaseTasks.map((task) => task.assigned_engineer_name || task.assigned_lead).filter(Boolean))];
+    const assignedEngineers = [...new Set(phaseTasks.map((task) => task.assigned_engineer_name).filter(Boolean))];
     const totalHours = phaseTasks.reduce((sum, task) => sum + (Number(task.estimated_hours) || 0), 0);
     const statuses = [...new Set(phaseTasks.map((task) => task.deliverable_status).filter(Boolean))];
     const dueDates = phaseTasks.map((task) => task.target_due_date || task.end_date).filter(Boolean).sort();
@@ -436,7 +436,7 @@ export function WbsStructurePage() {
   const togglePhase = (phase) => setPhaseCollapsed(phase, phaseFilters[phase] === false);
 
   const rowTask = (task, engineerView = false, buHeadView = false) => (
-    <tr key={task.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/task-details?nodeId=${task.id}&projectId=${selectedId}`)}>
+    <tr key={task.id} className={engineerView ? 'wbs-row-clickable' : undefined} style={{ cursor: 'pointer' }} onClick={() => navigate(`/task-details?nodeId=${task.id}&projectId=${selectedId}`)}>
       <td>
         <span style={{ paddingLeft: `${(task.depth - 1) * 24}px` }}>
           {children[task.id]?.length ? (
@@ -448,11 +448,6 @@ export function WbsStructurePage() {
           )}
           <strong>{task.wbs_code}</strong> {task.task_name}
         </span>
-        {engineerView && (
-          <button className="wbs-eye" type="button" aria-label={`View ${task.task_name}`} onClick={(e) => { e.stopPropagation(); navigate(`/task-details?nodeId=${task.id}&projectId=${selectedId}`); }}>
-            <Eye size={14} />
-          </button>
-        )}
       </td>
 {engineerView ? (
           <>
@@ -462,12 +457,11 @@ export function WbsStructurePage() {
             <td><div className="wbs-readonly">{task.target_due_date || task.end_date || '\u2014'}</div></td>
             <td>
               <div className="wbs-cell-actions">
-                {task.depth < 3 && (
+                {task.depth === 1 ? (
                   <button className="button button-secondary" type="button" onClick={(e) => { e.stopPropagation(); openSubtaskForm(task); }}>+ Subtask</button>
+                ) : (
+                  <span className="wbs-subtask-slot" role="presentation">+ Subtask</span>
                 )}
-                <button className="wbs-eye" type="button" aria-label={`View ${task.task_name}`} onClick={(e) => { e.stopPropagation(); navigate(`/task-details?nodeId=${task.id}&projectId=${selectedId}`); }}>
-                  <Eye size={14} />
-                </button>
               </div>
             </td>
           </>
@@ -488,8 +482,10 @@ export function WbsStructurePage() {
           <td><div className="wbs-readonly">{task.target_due_date || task.end_date || ''}</div></td>
           <td>
             <div className="wbs-cell-actions">
-              {task.depth === 1 && (
+              {task.depth === 1 ? (
                 <button className="button button-secondary" type="button" onClick={(e) => { e.stopPropagation(); openSubtaskForm(task); }}>+ Subtask</button>
+              ) : (
+                <span className="wbs-subtask-slot" role="presentation">+ Subtask</span>
               )}
               <button className="button button-primary" type="button" disabled={savingId === task.id} onClick={(e) => { e.stopPropagation(); saveTask(task); }}>{savingId === task.id ? 'Saving...' : 'Save'}</button>
               <button className="wbs-icon-btn wbs-icon-edit" type="button" title="Edit task" aria-label={`Edit ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openEditForm(task); }}><Pencil size={14} /></button>
@@ -605,7 +601,7 @@ export function WbsStructurePage() {
             ) : estimatedPreview ? (
               <div className="wbs-hours-calc">
                 Estimated Hours: <strong>{estimatedPreview.hours} hrs</strong>
-                <em>({estimatedPreview.days} {estimatedPreview.days === 1 ? 'day' : 'days'} &times; {HOURS_PER_SCHEDULED_DAY} hrs)</em>
+                <em>({estimatedPreview.days} working {estimatedPreview.days === 1 ? 'day' : 'days'} &times; 8 hrs)</em>
               </div>
             ) : nodeForm.estimated_hours !== null && nodeForm.estimated_hours !== '' ? (
               <div className="wbs-hours-calc">

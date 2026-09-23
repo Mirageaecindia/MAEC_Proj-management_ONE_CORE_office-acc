@@ -5,6 +5,9 @@ import { useAuth } from '../../AuthContext';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const DAY_FIELDS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+// Automatic subtask tracking only ever lands on Monday-Friday; Saturday and
+// Sunday always display 0 and never contribute to a week's total.
+const WORKDAY_FIELDS = ['mon', 'tue', 'wed', 'thu', 'fri'];
 
 const WBS_PHASES = ['Space Planning', 'STR Coordination', 'ID Coordination', 'BoH Area RCP Coordination'];
 const INITIAL_VIEWPORT_START = new Date(2026, 8, 1);
@@ -84,9 +87,7 @@ export function TimelineLogsPage() {
   const [currentMonday, setCurrentMonday] = useState(() => getMonday(new Date()));
   const [serverDate, setServerDate] = useState(null);
 
-  const [rowHours, setRowHours] = useState({});
   const [error, setError] = useState('');
-  const [savingKey, setSavingKey] = useState('');
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -142,7 +143,10 @@ export function TimelineLogsPage() {
       setError('');
       const [nodesRes, timesheetRes] = await Promise.all([
         fetch(`${API_BASE_URL}/api/projects/${id}/wbs-structure`, { headers: authHeaders() }),
-        fetch(`${API_BASE_URL}/api/projects/${id}/timesheet?week_start=${weekStr}`, { headers: authHeaders() }),
+        // source=tracking feeds this sheet exclusively from automatic Engineer
+        // subtask working-time logs: only subtasks that have tracked hours are
+        // returned, each as its own row.
+        fetch(`${API_BASE_URL}/api/projects/${id}/timesheet?week_start=${weekStr}&source=tracking`, { headers: authHeaders() }),
       ]);
 
       if (!nodesRes.ok || !timesheetRes.ok) {
@@ -167,23 +171,6 @@ export function TimelineLogsPage() {
         setTimelineTasks([]);
         setTimelinePhases([]);
       }
-
-      const initialMap = {};
-      timesheetData.forEach((entry) => {
-        const key = `${entry.employee_id}_${entry.task_id}`;
-        initialMap[key] = {
-          id: entry.id,
-          mon: Number(entry.mon_hours || 0),
-          tue: Number(entry.tue_hours || 0),
-          wed: Number(entry.wed_hours || 0),
-          thu: Number(entry.thu_hours || 0),
-          fri: Number(entry.fri_hours || 0),
-          sat: Number(entry.sat_hours || 0),
-          sun: Number(entry.sun_hours || 0),
-          approval_status: entry.approval_status || 'pending_review',
-        };
-      });
-      setRowHours(initialMap);
     } catch (err) {
       setError(err.message);
     }
@@ -310,6 +297,28 @@ export function TimelineLogsPage() {
 
   const weekInfo = useMemo(() => getWeekInfo(currentMonday), [currentMonday]);
 
+  const openTaskDetails = (taskId) => {
+    if (!taskId || !projectId) return;
+    navigate(`/task-details?nodeId=${taskId}&projectId=${projectId}`);
+  };
+
+  // Daily totals of the automatic subtask tracking hours for the visible week.
+  // Only Monday-Friday contributes; Saturday and Sunday always stay 0.
+  const dailyTotals = useMemo(() => {
+    const sums = Object.fromEntries(DAY_FIELDS.map((d) => [d, 0]));
+    entries.forEach((entry) => {
+      WORKDAY_FIELDS.forEach((day) => {
+        sums[day] += Number(entry[`${day}_hours`] || 0) || 0;
+      });
+    });
+    return sums;
+  }, [entries]);
+
+  const grandTotal = useMemo(
+    () => WORKDAY_FIELDS.reduce((sum, day) => sum + dailyTotals[day], 0),
+    [dailyTotals],
+  );
+
   const handlePrevWeek = () => {
     const prev = new Date(currentMonday);
     prev.setDate(prev.getDate() - 7);
@@ -320,58 +329,6 @@ export function TimelineLogsPage() {
     const next = new Date(currentMonday);
     next.setDate(next.getDate() + 7);
     setCurrentMonday(next);
-  };
-
-  const handleHourChange = (employeeId, taskId, day, val) => {
-    const key = `${employeeId}_${taskId}`;
-    const num = Math.min(24, Math.max(0, Number(val) || 0));
-    setRowHours((prev) => ({
-      ...prev,
-      [key]: { ...prev[key], [day]: num },
-    }));
-  };
-
-  const handleBlur = async (employeeId, taskId) => {
-    const key = `${employeeId}_${taskId}`;
-    const row = rowHours[key];
-    if (!row) return;
-
-    setSavingKey(key);
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/timesheet-entries`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({
-          task_id: taskId,
-          week_start_date: weekStartStr,
-          mon_hours: row.mon || 0,
-          tue_hours: row.tue || 0,
-          wed_hours: row.wed || 0,
-          thu_hours: row.thu || 0,
-          fri_hours: row.fri || 0,
-          sat_hours: row.sat || 0,
-          sun_hours: row.sun || 0,
-        }),
-      });
-
-      const body = await response.json();
-      if (!response.ok) {
-        throw new Error(body.detail || 'Could not save timesheet entry');
-      }
-
-      setRowHours((prev) => ({
-        ...prev,
-        [key]: {
-          ...prev[key],
-          id: body.id,
-          approval_status: body.approval_status,
-        },
-      }));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSavingKey('');
-    }
   };
 
   const handleReview = async (entryId, action) => {
@@ -556,9 +513,9 @@ export function TimelineLogsPage() {
             <h2>Weekly Hours Logging (Week {weekInfo.weekNum}: {weekInfo.rangeStr})</h2>
             <p>
               {isEngineer
-                ? 'Log your daily engineering hours per assigned WBS task for this week.'
+                ? 'Your automatic subtask working-time for this week, recorded from Login/Logout tracking. Only active time counts — idle and hidden tabs are excluded.'
                 : isLead
-                  ? 'Review engineer hours for this week. Approve or reject entries in your scope.'
+                  ? 'Review engineer hours for this week, recorded automatically per subtask. Approve or reject entries in your scope.'
                   : 'Review logged engineering hours for this week.'}
             </p>
           </div>
@@ -602,32 +559,36 @@ export function TimelineLogsPage() {
               ) : (
                 entries.map((entry) => {
                   const key = `${entry.employee_id}_${entry.task_id}`;
-                  const row = rowHours[key] || {
-                    mon: Number(entry.mon_hours || 0),
-                    tue: Number(entry.tue_hours || 0),
-                    wed: Number(entry.wed_hours || 0),
-                    thu: Number(entry.thu_hours || 0),
-                    fri: Number(entry.fri_hours || 0),
-                    sat: Number(entry.sat_hours || 0),
-                    sun: Number(entry.sun_hours || 0),
-                    approval_status: entry.approval_status || 'pending_review',
-                  };
 
-                  const totalHrs = DAY_FIELDS.reduce((sum, day) => sum + Number(row[day] || 0), 0);
-                  const isSaving = savingKey === key;
-                  const isApproved = row.approval_status === 'approved';
-                  const isRejected = row.approval_status === 'rejected';
+                  const hoursOf = (day) =>
+                    day === 'sat' || day === 'sun'
+                      ? 0 // automatic tracking never writes weekend hours
+                      : Number(entry[`${day}_hours`] || 0) || 0;
+
+                  const totalHrs = WORKDAY_FIELDS.reduce((sum, day) => sum + hoursOf(day), 0);
+                  const isApproved = entry.approval_status === 'approved';
+                  const isRejected = entry.approval_status === 'rejected';
 
                   return (
                     <tr key={key}>
                       <td className="col-engineer">
-                        <div className="timesheet-engineer-cell">
-                          <strong>{entry.employee_name}</strong>
-                          <small>
-                            {entry.wbs_code ? `${entry.wbs_code} ` : ''}
-                            {entry.task_name}
-                          </small>
-                        </div>
+                        <a
+                          className="timesheet-task-link"
+                          href={`/task-details?nodeId=${entry.task_id}&projectId=${projectId}`}
+                          title="Open this task / subtask"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            openTaskDetails(entry.task_id);
+                          }}
+                        >
+                          <div className="timesheet-engineer-cell">
+                            <strong>{entry.employee_name}</strong>
+                            <small>
+                              {entry.wbs_code ? `${entry.wbs_code} ` : ''}
+                              {entry.task_name}
+                            </small>
+                          </div>
+                        </a>
                       </td>
 
                       {DAY_FIELDS.map((day) => (
@@ -638,19 +599,26 @@ export function TimelineLogsPage() {
                             max="24"
                             step="0.5"
                             className="day-hour-input"
-                            value={row[day] === 0 ? '' : row[day]}
+                            value={hoursOf(day) === 0 ? '' : hoursOf(day)}
                             placeholder="0"
-                            disabled={!isEngineer}
-                            onChange={(e) =>
-                              handleHourChange(entry.employee_id, entry.task_id, day, e.target.value)
-                            }
-                            onBlur={() => handleBlur(entry.employee_id, entry.task_id)}
+                            readOnly
+                            title="Hours come from automatic subtask Login/Logout tracking — manual entry is disabled."
                           />
                         </td>
                       ))}
 
                       <td className="col-total">
-                        <strong className="total-hours-blue">{totalHrs.toFixed(1)} hrs</strong>
+                        <a
+                          className="timesheet-task-link timesheet-total-link"
+                          href={`/task-details?nodeId=${entry.task_id}&projectId=${projectId}`}
+                          title="Open this task / subtask"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            openTaskDetails(entry.task_id);
+                          }}
+                        >
+                          <strong className="total-hours-blue">{totalHrs.toFixed(1)} hrs</strong>
+                        </a>
                       </td>
 
                       <td className="col-approval">
@@ -669,22 +637,37 @@ export function TimelineLogsPage() {
                             <button type="button" className="review-btn review-reject" onClick={() => handleReview(entry.id, 'reject')}>Reject</button>
                           </span>
                         )}
-                        {isSaving && <small className="saving-tag">Saving...</small>}
                       </td>
                     </tr>
                   );
                 })
+)}
+              </tbody>
+              {entries.length > 0 && (
+                <tfoot>
+                  <tr className="timesheet-total-row">
+                    <td className="col-engineer">Daily Total ({entries.length} task{entries.length === 1 ? '' : 's'})</td>
+                    {DAY_FIELDS.map((day) => (
+                      <td key={day} className="col-day">
+                        <strong>{dailyTotals[day].toFixed(1)}</strong>
+                      </td>
+                    ))}
+                    <td className="col-total">
+                      <strong className="total-hours-blue">{grandTotal.toFixed(1)} hrs</strong>
+                    </td>
+                    <td className="col-approval" />
+                  </tr>
+                </tfoot>
               )}
-            </tbody>
-          </table>
+            </table>
         </div>
 
         <div className="timesheet-footer">
           <div className="footer-info">
             <span>
               {isEngineer
-                ? 'Hour edits are saved automatically when you leave a field. Changes are sent to your lead for approval.'
-                : 'Hours are submitted by engineers and approved by the assigned lead.'}
+                ? 'Hours are recorded automatically per subtask via Login/Logout tracking. Active time only — idle and hidden tabs are excluded. Totals cover Monday to Friday; Saturday and Sunday always show 0.'
+                : 'Hours are tracked automatically per subtask and approved by the assigned lead.'}
             </span>
           </div>
           <button

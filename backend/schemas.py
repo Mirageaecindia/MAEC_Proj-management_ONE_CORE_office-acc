@@ -335,6 +335,35 @@ class TimeLogEntryOut(BaseModel):
     reviewed_at: Optional[datetime] = None
 
 
+class SubtaskTrackingStart(BaseModel):
+    subtask_id: int
+
+
+class SubtaskSessionSync(BaseModel):
+    active_seconds: int
+
+    @field_validator("active_seconds")
+    @classmethod
+    def non_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("active_seconds cannot be negative.")
+        return value
+
+
+class SubtaskSessionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    task_id: int
+    subtask_id: int
+    employee_id: int
+    login_at: datetime
+    logout_at: Optional[datetime] = None
+    active_seconds: int
+    status: str
+
+
 class GovernanceActionBase(BaseModel):
     comments: str
     discipline: Optional[str] = None

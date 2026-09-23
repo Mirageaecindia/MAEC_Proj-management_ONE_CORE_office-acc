@@ -273,3 +273,28 @@ class TimeLogEntry(Base):
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class TimeSession(Base):
+    """
+    An automatic working-time tracking session for a single subtask.
+
+    Engineers start/stop a session while actively working on an assigned
+    subtask. Only ACTIVE interaction is counted — idle/background time is
+    excluded by the client, which reports the cumulative active seconds on a
+    heartbeat; the backend persists them and caps the per-engineer daily
+    total at 8 hours. One row per tracking session.
+    """
+    __tablename__ = "time_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, nullable=False, index=True)
+    task_id = Column(Integer, nullable=False, index=True)
+    subtask_id = Column(Integer, nullable=False, index=True)
+    employee_id = Column(Integer, nullable=False, index=True)
+    login_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    logout_at = Column(DateTime(timezone=True), nullable=True)
+    active_seconds = Column(Integer, nullable=False, default=0)
+    status = Column(String(20), nullable=False, default="active", index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
