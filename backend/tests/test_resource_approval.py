@@ -34,7 +34,11 @@ def test_bu_head_sees_bookings_and_summary(client, world, booked_project):
 
     assert [b["employee_name"] for b in bookings] == ["Arjun Mehta"]
     assert bookings[0]["approval_status"] == "draft"
-    assert summary["total_booked_hours"] == 80
+    # Planned hours are derived server-side from the date range: weekdays x 8
+    # (1-30 Sep 2026 = 22 weekdays = 176h); the client-sent 80 is ignored.
+    # The 50% utilisation is not applied to the figure.
+    assert bookings[0]["planned_hours"] == 176
+    assert summary["total_booked_hours"] == 176
     assert summary["approval_status"] == "draft"
     assert summary["approval_status_label"] == "Draft"
 
