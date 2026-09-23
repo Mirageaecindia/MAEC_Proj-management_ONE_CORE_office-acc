@@ -1,0 +1,5 @@
+# Development & test tooling (install on top of requirements.txt).
+-r requirements.txt
+pytest==9.1.1
+ruff==0.16.8
+pre-commit==4.6.2

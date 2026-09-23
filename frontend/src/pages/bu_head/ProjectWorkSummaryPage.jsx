@@ -11,13 +11,14 @@ function completionText(phaseCompletion) {
 }
 
 function statusPill(status) {
-  const cls = status === 'Completed'
-    ? 'status-approved'
-    : status === 'In Progress'
-      ? 'status-inprogress'
-      : status === 'Not Started'
-        ? 'status-pending'
-        : 'status-none';
+  const cls =
+    status === 'Completed'
+      ? 'status-approved'
+      : status === 'In Progress'
+        ? 'status-inprogress'
+        : status === 'Not Started'
+          ? 'status-pending'
+          : 'status-none';
   return <span className={`approval-pill ${cls}`}>{status || '—'}</span>;
 }
 
@@ -32,7 +33,9 @@ function EngineerRows({ engineer }) {
           </div>
         </td>
         <td>{(engineer.phases || []).join(', ') || '—'}</td>
-        <td><strong className="total-hours-blue">{engineer.approved_hours.toFixed(1)} hrs</strong></td>
+        <td>
+          <strong className="total-hours-blue">{engineer.approved_hours.toFixed(1)} hrs</strong>
+        </td>
         <td>{engineer.baseline_hours} hrs</td>
         <td>{statusPill(engineer.progress_status)}</td>
       </tr>
@@ -74,9 +77,7 @@ export function ProjectWorkSummaryPage() {
       .then((list) => {
         setProjects(list);
         if (list.length > 0) {
-          const selected = targetProjectId
-            ? list.find((p) => p.id === targetProjectId)
-            : list[0];
+          const selected = targetProjectId ? list.find((p) => p.id === targetProjectId) : list[0];
           setSelectedId(selected ? String(selected.id) : String(list[0].id));
         }
       })
@@ -135,13 +136,12 @@ export function ProjectWorkSummaryPage() {
 
         <label className="project-switcher">
           <span>Project Name</span>
-          <select
-            value={selectedId}
-            onChange={(e) => setSelectedId(e.target.value)}
-          >
+          <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
             <option value="">Select project</option>
             {projects.map((project) => (
-              <option key={project.id} value={project.id}>{project.project_name}</option>
+              <option key={project.id} value={project.id}>
+                {project.project_name}
+              </option>
             ))}
           </select>
         </label>
@@ -205,7 +205,9 @@ export function ProjectWorkSummaryPage() {
                         <td>{lead.phases.length > 0 ? lead.phases.join(', ') : '—'}</td>
                         <td>{lead.nodes_managed}</td>
                         <td>{completionText(lead.phase_completion)}</td>
-                        <td><strong className="total-hours-blue">{lead.approved_hours.toFixed(1)} hrs</strong></td>
+                        <td>
+                          <strong className="total-hours-blue">{lead.approved_hours.toFixed(1)} hrs</strong>
+                        </td>
                         <td>{lead.logged_hours.toFixed(1)} hrs</td>
                         <td>{lead.pending_approvals}</td>
                       </tr>

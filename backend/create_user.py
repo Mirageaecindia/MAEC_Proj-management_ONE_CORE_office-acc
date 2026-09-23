@@ -13,9 +13,9 @@ For an engineer, link the account to an employee so WBS/timesheet data is
 scoped to that engineer:
     Scripts\\python.exe create_user.py --username eng.arjun --role engineer --employee-id 1
 """
+
 import argparse
 import getpass
-import sys
 
 from sqlalchemy.orm import Session
 
@@ -93,10 +93,7 @@ def main() -> None:
         user = create_user(db, username, password, full_name, role, employee_id)
     finally:
         db.close()
-    print(
-        f"Created user '{user.username}' (role={user.role}, "
-        f"employee_id={user.employee_id or '—'})."
-    )
+    print(f"Created user '{user.username}' (role={user.role}, employee_id={user.employee_id or '—'}).")
 
 
 if __name__ == "__main__":

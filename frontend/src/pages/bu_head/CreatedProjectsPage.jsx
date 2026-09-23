@@ -43,9 +43,14 @@ function ProjectCard({ project, onDelete }) {
     ],
     [
       'Target Effort Hours Baseline',
-      project.target_effort_hours != null ? `${Number(project.target_effort_hours).toLocaleString('en-US')} Hrs` : '—',
+      project.target_effort_hours != null
+        ? `${Number(project.target_effort_hours).toLocaleString('en-US')} Hrs`
+        : '—',
     ],
-    ['Governance Threshold', project.governance_threshold_pct != null ? `${project.governance_threshold_pct}%` : '—'],
+    [
+      'Governance Threshold',
+      project.governance_threshold_pct != null ? `${project.governance_threshold_pct}%` : '—',
+    ],
   ];
 
   return (
@@ -132,7 +137,9 @@ export function CreatedProjectsPage() {
         try {
           const body = await response.json();
           if (body.detail) detail = body.detail;
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
         throw new Error(detail);
       }
       setProjects((current) => current.filter((p) => p.id !== projectPendingDelete.id));
@@ -154,7 +161,9 @@ export function CreatedProjectsPage() {
             <strong>Created Projects</strong>
           </div>
           <h1>Created Projects</h1>
-          <p>Projects created under this Business Unit with their commercial baselines and governance settings.</p>
+          <p>
+            Projects created under this Business Unit with their commercial baselines and governance settings.
+          </p>
         </div>
         <button type="button" className="button button-primary" onClick={() => navigate('/create-project')}>
           <PlusCircle size={16} /> Create Project
@@ -162,11 +171,14 @@ export function CreatedProjectsPage() {
       </div>
 
       {projectsError && (
-        <div className="notice error" role="status"><AlertCircle size={18} /><div><strong>{projectsError}</strong></div></div>
+        <div className="notice error" role="status">
+          <AlertCircle size={18} />
+          <div>
+            <strong>{projectsError}</strong>
+          </div>
+        </div>
       )}
-      {!projectsError && loading && (
-        <div className="empty-state">Loading projects…</div>
-      )}
+      {!projectsError && loading && <div className="empty-state">Loading projects…</div>}
       {!projectsError && !loading && projects.length === 0 && (
         <div className="empty-state">No projects created yet — use Create Project to add one.</div>
       )}
@@ -181,43 +193,71 @@ export function CreatedProjectsPage() {
               placeholder="Search by project name, code or client…"
             />
           </label>
-          <span className="created-projects-count">{filteredProjects.length} of {projects.length} projects</span>
+          <span className="created-projects-count">
+            {filteredProjects.length} of {projects.length} projects
+          </span>
         </div>
       )}
-      {!projectsError && !loading && projects.length > 0 && (
-        filteredProjects.length > 0 ? (
+      {!projectsError &&
+        !loading &&
+        projects.length > 0 &&
+        (filteredProjects.length > 0 ? (
           <div className="created-projects-grid">
             {filteredProjects.map((project) => (
-              <ProjectCard key={project.id} project={project} onDelete={() => setProjectPendingDelete(project)} />
+              <ProjectCard
+                key={project.id}
+                project={project}
+                onDelete={() => setProjectPendingDelete(project)}
+              />
             ))}
           </div>
         ) : (
           <div className="empty-state">No projects match "{search.trim()}".</div>
-        )
-      )}
+        ))}
 
       {projectPendingDelete && (
         <div className="modal-backdrop" role="presentation">
-          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-delete-title">
+          <div
+            className="confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-delete-title"
+          >
             <div className="modal-heading">
               <h2 id="confirm-delete-title">Delete Project</h2>
-              <button type="button" aria-label="Close" disabled={deleting} onClick={() => setProjectPendingDelete(null)}>
+              <button
+                type="button"
+                aria-label="Close"
+                disabled={deleting}
+                onClick={() => setProjectPendingDelete(null)}
+              >
                 <X size={18} />
               </button>
             </div>
             <div className="confirm-modal-body">
               <p className="confirm-modal-text">Are you sure you want to delete this project?</p>
               <p className="confirm-modal-subtext">
-                <strong>{projectPendingDelete.project_name}</strong> ({projectPendingDelete.project_code || '—'}) and all of
-                its data will be permanently deleted from the backend.
+                <strong>{projectPendingDelete.project_name}</strong> (
+                {projectPendingDelete.project_code || '—'}) and all of its data will be permanently deleted
+                from the backend.
               </p>
               {deleteError && <div className="resource-error">{deleteError}</div>}
             </div>
             <div className="modal-actions">
-              <button className="button button-secondary" type="button" disabled={deleting} onClick={() => setProjectPendingDelete(null)}>
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={deleting}
+                onClick={() => setProjectPendingDelete(null)}
+              >
                 Cancel
               </button>
-              <button className="button button-danger" type="button" disabled={deleting} onClick={handleConfirmDelete}>
+              <button
+                className="button button-danger"
+                type="button"
+                disabled={deleting}
+                onClick={handleConfirmDelete}
+              >
                 {deleting ? 'Deleting…' : 'Delete'}
               </button>
             </div>

@@ -1,7 +1,7 @@
 import logging
 import os
 import re
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 import httpx
 import msal
@@ -24,6 +24,7 @@ DISCIPLINE_FOLDERS = {
 
 class SharePointError(Exception):
     """Custom exception for SharePoint/Graph API errors."""
+
     pass
 
 
@@ -50,7 +51,7 @@ class SharePointClient:
             authority=f"https://login.microsoftonline.com/{self.tenant_id}",
             client_credential=self.client_secret,
         )
-        self._token: Optional[str] = None
+        self._token: str | None = None
 
     def _get_token(self) -> str:
         """Acquire or reuse an access token for Microsoft Graph."""
@@ -141,7 +142,9 @@ class SharePointClient:
             raise SharePointError(f"Failed to check folder existence: {response.text}")
 
         # Create folder
-        create_url = f"https://graph.microsoft.com/v1.0/sites/{self.site_id}/drives/{self.drive_id}/items/{parent_id}/children"
+        create_url = (
+            f"https://graph.microsoft.com/v1.0/sites/{self.site_id}/drives/{self.drive_id}/items/{parent_id}/children"
+        )
         payload = {
             "name": folder_name,
             "folder": {},
@@ -171,7 +174,7 @@ class SharePointClient:
             "created_date_time": data.get("createdDateTime"),
         }
 
-    async def get_folder_children(self, folder_id: str) -> List[Dict[str, Any]]:
+    async def get_folder_children(self, folder_id: str) -> list[dict[str, Any]]:
         """Get all children (folders and files) of a folder."""
         url = f"https://graph.microsoft.com/v1.0/sites/{self.site_id}/drives/{self.drive_id}/items/{folder_id}/children"
         response = await self._request("GET", url)
@@ -183,7 +186,7 @@ class SharePointClient:
 
         return response.json().get("value", [])
 
-    async def get_folder_hierarchy(self, folder_id: str, max_depth: int = 3) -> List[Dict[str, Any]]:
+    async def get_folder_hierarchy(self, folder_id: str, max_depth: int = 3) -> list[dict[str, Any]]:
         """Recursively fetch folder hierarchy up to max_depth."""
         children = await self.get_folder_children(folder_id)
         folders = []
@@ -203,7 +206,7 @@ class SharePointClient:
 
         return folders
 
-    async def get_files_in_folder(self, folder_id: str) -> List[Dict[str, Any]]:
+    async def get_files_in_folder(self, folder_id: str) -> list[dict[str, Any]]:
         """Get all files in a folder with metadata."""
         children = await self.get_folder_children(folder_id)
         files = []
@@ -224,7 +227,7 @@ class SharePointClient:
 
         return files
 
-    async def get_repository_stats(self, folder_id: str) -> Dict[str, Any]:
+    async def get_repository_stats(self, folder_id: str) -> dict[str, Any]:
         """Get total file count and total size for a folder (including subfolders)."""
         total_files = 0
         total_size = 0
@@ -249,13 +252,13 @@ class SharePointClient:
     @staticmethod
     def _format_size(size_bytes: int) -> str:
         """Format bytes to human-readable string."""
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
             if size_bytes < 1024.0:
                 return f"{size_bytes:.2f} {unit}"
             size_bytes /= 1024.0
         return f"{size_bytes:.2f} PB"
 
-    async def check_connection(self) -> Dict[str, Any]:
+    async def check_connection(self) -> dict[str, Any]:
         """Check if SharePoint/Graph API is reachable and accessible."""
         try:
             if not self.drive_id:
@@ -265,13 +268,17 @@ class SharePointClient:
             if response.status_code == 200:
                 return {"connected": True, "status": "Connected", "error": None}
             else:
-                return {"connected": False, "status": "Error", "error": f"Graph API returned {response.status_code}: {response.text}"}
+                return {
+                    "connected": False,
+                    "status": "Error",
+                    "error": f"Graph API returned {response.status_code}: {response.text}",
+                }
         except SharePointError as e:
             return {"connected": False, "status": "Error", "error": str(e)}
         except Exception as e:
             return {"connected": False, "status": "Error", "error": f"Unexpected error: {str(e)}"}
 
-    async def resolve_project_folder_id(self, project_folder_name: str) -> Optional[str]:
+    async def resolve_project_folder_id(self, project_folder_name: str) -> str | None:
         """Resolve the project folder item ID by name under the target path."""
         if not self.drive_id:
             await self._resolve_drive_id()
@@ -307,6 +314,7 @@ async def provision_sharepoint_directory(project: Project) -> str:
         raise SharePointError("No SharePoint disciplines selected for this project")
 
     import json
+
     disciplines = json.loads(project.sharepoint_disciplines) if project.sharepoint_disciplines else []
 
     if not disciplines:
@@ -363,7 +371,10 @@ async def get_sharepoint_mirror_data(project: Project) -> dict:
     if not project.sharepoint_site_url:
         return {
             "provisioned": False,
-            "error": "SharePoint directory not provisioned for this project. Ask BU Head to create the project with SharePoint option enabled.",
+            "error": (
+                "SharePoint directory not provisioned for this project. "
+                "Ask BU Head to create the project with SharePoint option enabled."
+            ),
             "folder_hierarchy": [],
             "files": [],
             "stats": {"total_files": 0, "total_size_bytes": 0, "total_size_formatted": "0 B"},
@@ -387,12 +398,17 @@ async def get_sharepoint_mirror_data(project: Project) -> dict:
             "folder_hierarchy": [],
             "files": [],
             "stats": {"total_files": 0, "total_size_bytes": 0, "total_size_formatted": "0 B"},
-            "connection": {"connected": False, "status": "Folder Not Found", "error": f"Folder '{project_folder_name}' not found in SharePoint"},
+            "connection": {
+                "connected": False,
+                "status": "Folder Not Found",
+                "error": f"Folder '{project_folder_name}' not found in SharePoint",
+            },
             "target_location": project.sharepoint_site_url,
         }
 
     # Fetch all data in parallel
     import asyncio
+
     connection_task = client.check_connection()
     hierarchy_task = client.get_folder_hierarchy(project_folder_id)
     files_task = client.get_files_in_folder(project_folder_id)

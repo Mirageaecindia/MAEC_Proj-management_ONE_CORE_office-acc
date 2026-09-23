@@ -17,7 +17,7 @@ Users are created manually — none are seeded at startup. From the `backend`
 directory, run the CLI:
 
 ```
-Scripts\python.exe create_user.py
+.venv\Scripts\python.exe create_user.py
 ```
 
 It prompts for username, password, full name, and role. Engineers must be
@@ -25,15 +25,15 @@ linked to an existing `employees` row (that is what scopes their WBS tasks,
 timesheets, and performance dashboard):
 
 ```
-Scripts\python.exe create_user.py --username engineer --role engineer --employee-id 1 --full-name "Arjun Mehta"
+.venv\Scripts\python.exe create_user.py --username engineer --role engineer --employee-id 1 --full-name "Arjun Mehta"
 ```
 
 ```
-Scripts\python.exe create_user.py --username lead --role lead --full-name "Anita Kumar"
+.venv\Scripts\python.exe create_user.py --username lead --role lead --full-name "Anita Kumar"
 ```
 
 ```
-Scripts\python.exe create_user.py --username buhead --role bu_head --full-name "Test BU Head"
+.venv\Scripts\python.exe create_user.py --username buhead --role bu_head --full-name "Test BU Head"
 ```
 
 Notes:

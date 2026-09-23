@@ -1,0 +1,62 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+# Respect `exclude` even when pre-commit passes file paths explicitly.
+force-exclude = true
+extend-exclude = [
+    ".venv",
+    # Legacy virtualenv folders that used to be committed.
+    "Lib", "Include", "Scripts",
+    # --- LEGACY RATCHET -------------------------------------------------
+    # Files below predate the lint/format standard and are shared with the
+    # Lead/Engineer developers or scheduled for deletion (roadmap 1.6).
+    # Remove a file from this list when it is refactored; never add to it.
+    "main.py",
+    "models.py",
+    "schemas.py",
+    "auth.py",
+    "leads_loader.py",
+    "seed_and_verify.py",
+    "seed_users.py",
+    "check_users.py",
+    "inspect_db.py",
+    "temp_*.py",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes (real bugs: unused/undefined names)
+    "I",    # import sorting
+    "B",    # bugbear (likely bugs)
+    "UP",   # modern Python syntax
+    "SIM",  # simplifications
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The test DB/env must be configured before the app module is imported.
+"**/tests/conftest.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+# Backend modules are imported flat (e.g. `import models`). Declare them so
+# import grouping is identical whether ruff runs from backend/ or the repo
+# root (pre-commit). Becomes ["app"] once roadmap Phase 1 introduces the package.
+known-first-party = ["auth", "database", "main", "models", "schemas", "sharepoint_service", "tests", "factories", "conftest"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom uses calls in default arguments.
+extend-immutable-calls = [
+    "fastapi.Depends", "fastapi.Header", "fastapi.File", "fastapi.Form",
+    "fastapi.Query", "fastapi.Path", "fastapi.Body",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+filterwarnings = [
+    # Starlette's TestClient nags about httpx2; irrelevant to our tests.
+    "ignore::DeprecationWarning:fastapi.testclient",
+    "ignore:.*httpx2.*",
+]

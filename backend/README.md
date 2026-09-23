@@ -1,13 +1,12 @@
-# MAEC Create Project API
+# MAEC API (backend)
 
-## Run locally
+FastAPI service for MAEC Project Management. Setup and run instructions live in
+the [root README](../README.md).
 
-```powershell
-cd ..
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r backend\requirements.txt
-uvicorn backend.main:app --reload
-```
-
-The default SQLite database is `promanage.db` in the `backend/` directory. Set `DATABASE_URL` to a SQLAlchemy-compatible Postgres URL when deploying to Postgres.
+- API docs (when running): http://localhost:8000/docs
+- Database: `DATABASE_URL` in `.env`; defaults to `backend/promanage.db`,
+  resolved relative to this folder rather than the working directory.
+- SharePoint / Microsoft Graph setup: [SHAREPOINT_SETUP.md](SHAREPOINT_SETUP.md)
+- Accounts: [USERS.md](USERS.md)
+- Tests: `.venv\Scripts\python.exe -m pytest` (uses a throwaway database with
+  SharePoint disabled; never touches `promanage.db` or Microsoft Graph)

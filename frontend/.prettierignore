@@ -1,0 +1,22 @@
+dist
+node_modules
+package-lock.json
+
+# --- LEGACY RATCHET ---------------------------------------------------------
+# These files predate the formatting standard and are shared with (or owned
+# by) the Lead/Engineer developers. Reformatting them wholesale would cause
+# merge conflicts. Remove a file from this list when it is refactored; never
+# add to it.
+src/App.css
+src/App.jsx
+src/AuthContext.jsx
+src/main.jsx
+src/styles.css
+src/components/MaecHeader.jsx
+src/pages/LoginPage.jsx
+src/pages/lead/
+src/pages/engineer/
+src/pages/shared/ResourceBookingPage.jsx
+src/pages/shared/TaskDetailsPage.jsx
+src/pages/shared/TimelineLogsPage.jsx
+src/pages/shared/WbsStructurePage.jsx

@@ -66,7 +66,9 @@ function rawToNumber(rawValue) {
 function SectionTitle({ number, children }) {
   return (
     <div className="section-heading">
-      <h2><span>{number}.</span> {children}</h2>
+      <h2>
+        <span>{number}.</span> {children}
+      </h2>
     </div>
   );
 }
@@ -74,7 +76,10 @@ function SectionTitle({ number, children }) {
 function Field({ label, required = false, children, className = '' }) {
   return (
     <label className={`field ${className}`}>
-      <span className="field-label">{label}{required && <b aria-hidden="true"> *</b>}</span>
+      <span className="field-label">
+        {label}
+        {required && <b aria-hidden="true"> *</b>}
+      </span>
       {children}
     </label>
   );
@@ -94,20 +99,24 @@ export function CreateProjectPage() {
 
   useEffect(() => {
     let isMounted = true;
-    Promise.all(['electrical', 'mechanical', 'bim'].map(async (discipline) => {
-      const response = await fetch(`${API_BASE_URL}/api/project-leads?discipline=${discipline}`, {
-        headers: authHeaders(),
-      });
-      if (!response.ok) throw new Error(`Could not load ${discipline} leads.`);
-      return [discipline, await response.json()];
-    }))
+    Promise.all(
+      ['electrical', 'mechanical', 'bim'].map(async (discipline) => {
+        const response = await fetch(`${API_BASE_URL}/api/project-leads?discipline=${discipline}`, {
+          headers: authHeaders(),
+        });
+        if (!response.ok) throw new Error(`Could not load ${discipline} leads.`);
+        return [discipline, await response.json()];
+      }),
+    )
       .then((results) => {
         if (isMounted) setLeads(Object.fromEntries(results));
       })
       .catch((error) => {
         if (isMounted) setLeadError(error.message);
       });
-    return () => { isMounted = false; };
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const selectedCount = form.selectedDisciplines.length;
@@ -156,11 +165,15 @@ export function CreateProjectPage() {
     if (!currencies.some((currency) => currency.code === form.contractCurrency)) {
       nextErrors.contractCurrency = 'Select a supported currency.';
     }
-    if (!Number.isFinite(Number(form.effortHours.replace(/,/g, ''))) || Number(form.effortHours.replace(/,/g, '')) <= 0) {
+    if (
+      !Number.isFinite(Number(form.effortHours.replace(/,/g, ''))) ||
+      Number(form.effortHours.replace(/,/g, '')) <= 0
+    ) {
       nextErrors.effortHours = 'Enter effort hours greater than 0.';
     }
     if (selectedCount === 0) nextErrors.selectedDisciplines = 'Select at least one discipline.';
-    if (form.threshold < 0 || form.threshold > 100) nextErrors.threshold = 'Threshold must be between 0 and 100.';
+    if (form.threshold < 0 || form.threshold > 100)
+      nextErrors.threshold = 'Threshold must be between 0 and 100.';
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   }
@@ -249,11 +262,24 @@ export function CreateProjectPage() {
     <main className="page-shell">
       <div className="resource-heading-row">
         <div>
-          <div className="breadcrumb"><span>Projects</span><i>/</i><span>Commercial Setup</span><i>/</i><strong>New Entry</strong></div>
+          <div className="breadcrumb">
+            <span>Projects</span>
+            <i>/</i>
+            <span>Commercial Setup</span>
+            <i>/</i>
+            <strong>New Entry</strong>
+          </div>
           <h1>Create Project &amp; Commercial Baseline</h1>
-          <p>Define project parameters, commercial limits, and trigger automated SharePoint folder provisioning.</p>
+          <p>
+            Define project parameters, commercial limits, and trigger automated SharePoint folder
+            provisioning.
+          </p>
         </div>
-        <button type="button" className="button button-secondary" onClick={() => navigate('/created-projects')}>
+        <button
+          type="button"
+          className="button button-secondary"
+          onClick={() => navigate('/created-projects')}
+        >
           <ArrowLeft size={16} /> Back to Created Projects
         </button>
       </div>
@@ -261,8 +287,17 @@ export function CreateProjectPage() {
       {notice && (
         <div className={`notice ${notice.type}`} role="status">
           {notice.type === 'success' ? <Check size={18} /> : <AlertCircle size={18} />}
-          <div><strong>{notice.message}</strong>{notice.url && <a href={notice.url} target="_blank" rel="noreferrer">{notice.url}</a>}</div>
-          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss notification"><X size={17} /></button>
+          <div>
+            <strong>{notice.message}</strong>
+            {notice.url && (
+              <a href={notice.url} target="_blank" rel="noreferrer">
+                {notice.url}
+              </a>
+            )}
+          </div>
+          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss notification">
+            <X size={17} />
+          </button>
         </div>
       )}
 
@@ -272,52 +307,92 @@ export function CreateProjectPage() {
             <SectionTitle number="1">Project &amp; Commercial Identification</SectionTitle>
             <div className="field-grid one-column">
               <Field label="Project Name" required>
-                <input value={form.projectName} onChange={(event) => updateField('projectName', event.target.value)} placeholder="Enter project name" />
+                <input
+                  value={form.projectName}
+                  onChange={(event) => updateField('projectName', event.target.value)}
+                  placeholder="Enter project name"
+                />
                 {errors.projectName && <span className="field-error">{errors.projectName}</span>}
               </Field>
             </div>
             <div className="field-grid two-column">
               <Field label="Project Code" required>
-                <input value={form.projectCode} onChange={(event) => updateField('projectCode', event.target.value)} placeholder="e.g. MAEC-2026-001" />
+                <input
+                  value={form.projectCode}
+                  onChange={(event) => updateField('projectCode', event.target.value)}
+                  placeholder="e.g. MAEC-2026-001"
+                />
                 {errors.projectCode && <span className="field-error">{errors.projectCode}</span>}
               </Field>
               <Field label="Client / Customer" required>
-                <input value={form.clientCustomer} onChange={(event) => updateField('clientCustomer', event.target.value)} placeholder="Enter client or customer" />
+                <input
+                  value={form.clientCustomer}
+                  onChange={(event) => updateField('clientCustomer', event.target.value)}
+                  placeholder="Enter client or customer"
+                />
                 {errors.clientCustomer && <span className="field-error">{errors.clientCustomer}</span>}
               </Field>
             </div>
             <div className="field-grid two-column">
               <Field label="Assigned Project Lead | Electrical" required>
                 <div className="select-wrap">
-                  <select value={form.electricalLead} onChange={(event) => updateField('electricalLead', event.target.value)}>
+                  <select
+                    value={form.electricalLead}
+                    onChange={(event) => updateField('electricalLead', event.target.value)}
+                  >
                     <option value="">Select electrical lead</option>
-                    {leads.electrical.map((lead) => <option key={lead.id} value={lead.id}>{lead.name}</option>)}
-                  </select><ChevronDown size={16} />
+                    {leads.electrical.map((lead) => (
+                      <option key={lead.id} value={lead.id}>
+                        {lead.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
                 </div>
                 {leadError && <span className="field-error">{leadError}</span>}
                 {errors.electricalLead && <span className="field-error">{errors.electricalLead}</span>}
               </Field>
               <Field label="Target Start Date" required>
-                <input type="date" value={form.targetStartDate} onChange={(event) => updateField('targetStartDate', event.target.value)} />
+                <input
+                  type="date"
+                  value={form.targetStartDate}
+                  onChange={(event) => updateField('targetStartDate', event.target.value)}
+                />
                 {errors.targetStartDate && <span className="field-error">{errors.targetStartDate}</span>}
               </Field>
             </div>
             <div className="field-grid two-column">
               <Field label="Assigned Project Lead | Mechanical" required>
                 <div className="select-wrap">
-                  <select value={form.mechanicalLead} onChange={(event) => updateField('mechanicalLead', event.target.value)}>
+                  <select
+                    value={form.mechanicalLead}
+                    onChange={(event) => updateField('mechanicalLead', event.target.value)}
+                  >
                     <option value="">Select mechanical lead</option>
-                    {leads.mechanical.map((lead) => <option key={lead.id} value={lead.id}>{lead.name}</option>)}
-                  </select><ChevronDown size={16} />
+                    {leads.mechanical.map((lead) => (
+                      <option key={lead.id} value={lead.id}>
+                        {lead.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
                 </div>
                 {errors.mechanicalLead && <span className="field-error">{errors.mechanicalLead}</span>}
               </Field>
               <Field label="Assigned Project Lead | BIM" required>
                 <div className="select-wrap">
-                  <select value={form.bimLead} onChange={(event) => updateField('bimLead', event.target.value)}>
+                  <select
+                    value={form.bimLead}
+                    onChange={(event) => updateField('bimLead', event.target.value)}
+                  >
                     <option value="">Select BIM lead</option>
-                    {leads.bim.map((lead) => <option key={lead.id} value={lead.id}>{lead.name}</option>)}
-                  </select><ChevronDown size={16} />
+                    {leads.bim.map((lead) => (
+                      <option key={lead.id} value={lead.id}>
+                        {lead.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
                 </div>
                 {errors.bimLead && <span className="field-error">{errors.bimLead}</span>}
               </Field>
@@ -326,12 +401,23 @@ export function CreateProjectPage() {
 
           <section className="discipline-section">
             <SectionTitle number="2">Automated SharePoint Directory Setup</SectionTitle>
-            <p className="section-copy">Select MEP engineering disciplines to auto-create inside SharePoint site:</p>
+            <p className="section-copy">
+              Select MEP engineering disciplines to auto-create inside SharePoint site:
+            </p>
             <div className="discipline-grid">
               {disciplines.map((discipline) => (
-                <label className={`discipline-option ${form.selectedDisciplines.includes(discipline.value) ? 'checked' : ''}`} key={discipline.value}>
-                  <input type="checkbox" checked={form.selectedDisciplines.includes(discipline.value)} onChange={() => toggleDiscipline(discipline.value)} />
-                  <span className="checkmark"><Check size={13} /></span>
+                <label
+                  className={`discipline-option ${form.selectedDisciplines.includes(discipline.value) ? 'checked' : ''}`}
+                  key={discipline.value}
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.selectedDisciplines.includes(discipline.value)}
+                    onChange={() => toggleDiscipline(discipline.value)}
+                  />
+                  <span className="checkmark">
+                    <Check size={13} />
+                  </span>
                   <span>{discipline.label}</span>
                 </label>
               ))}
@@ -346,16 +432,27 @@ export function CreateProjectPage() {
             <Field label="Total Commercial Contract Value" required>
               <div className="currency-input-row">
                 <div className="select-wrap currency-select-wrap">
-                  <select value={form.contractCurrency} onChange={(event) => changeCurrency(event.target.value)} aria-label="Contract currency">
-                    {currencies.map((currency) => <option key={currency.code} value={currency.code}>{currency.code} ({currency.symbol})</option>)}
-                  </select><ChevronDown size={16} />
+                  <select
+                    value={form.contractCurrency}
+                    onChange={(event) => changeCurrency(event.target.value)}
+                    aria-label="Contract currency"
+                  >
+                    {currencies.map((currency) => (
+                      <option key={currency.code} value={currency.code}>
+                        {currency.code} ({currency.symbol})
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} />
                 </div>
                 <div className="currency-amount-wrap">
                   <span className="currency-prefix">{currencySymbol(form.contractCurrency)}</span>
                   <input
                     className="currency-amount"
                     inputMode="decimal"
-                    value={contractValueFocused ? form.contractValue : formatCurrencyNumber(form.contractValue)}
+                    value={
+                      contractValueFocused ? form.contractValue : formatCurrencyNumber(form.contractValue)
+                    }
                     onChange={(event) => {
                       // Strip everything except digits and a single decimal point
                       const raw = event.target.value.replace(/[^0-9.]/g, '');
@@ -374,24 +471,59 @@ export function CreateProjectPage() {
               {errors.contractValue && <span className="field-error">{errors.contractValue}</span>}
             </Field>
             <Field label="Target Effort Hours Baseline (Hrs)" required>
-              <div className="input-with-suffix"><input inputMode="numeric" value={form.effortHours} onChange={(event) => updateField('effortHours', event.target.value.replace(/[^0-9,]/g, ''))} placeholder="3,840" /><span>Hours</span></div>
+              <div className="input-with-suffix">
+                <input
+                  inputMode="numeric"
+                  value={form.effortHours}
+                  onChange={(event) => updateField('effortHours', event.target.value.replace(/[^0-9,]/g, ''))}
+                  placeholder="3,840"
+                />
+                <span>Hours</span>
+              </div>
               {errors.effortHours && <span className="field-error">{errors.effortHours}</span>}
             </Field>
 
             <div className="governance-box">
               <h3>Governance Threshold &amp; Exception Trigger</h3>
-              <p>When logged hours exceed this percentage threshold of baseline hours, timesheets block further logging until Business Unit Head approval.</p>
-              <div className="threshold-label"><span>Alert &amp; Override Threshold Limit:</span><strong>{form.threshold} %</strong></div>
-              <input className="range-input" type="range" min="0" max="100" value={form.threshold} style={{ '--range-position': thresholdPosition }} onChange={(event) => updateField('threshold', Number(event.target.value))} aria-label="Alert and override threshold limit" />
-              <div className="range-labels"><span>0% (Start)</span><strong>80% (Warning)</strong><span>100% (Hard Stop)</span></div>
+              <p>
+                When logged hours exceed this percentage threshold of baseline hours, timesheets block further
+                logging until Business Unit Head approval.
+              </p>
+              <div className="threshold-label">
+                <span>Alert &amp; Override Threshold Limit:</span>
+                <strong>{form.threshold} %</strong>
+              </div>
+              <input
+                className="range-input"
+                type="range"
+                min="0"
+                max="100"
+                value={form.threshold}
+                style={{ '--range-position': thresholdPosition }}
+                onChange={(event) => updateField('threshold', Number(event.target.value))}
+                aria-label="Alert and override threshold limit"
+              />
+              <div className="range-labels">
+                <span>0% (Start)</span>
+                <strong>80% (Warning)</strong>
+                <span>100% (Hard Stop)</span>
+              </div>
             </div>
           </section>
 
           <div className="action-row">
-            <button type="button" className="button button-secondary" onClick={handleReset}><X size={16} /> Cancel</button>
+            <button type="button" className="button button-secondary" onClick={handleReset}>
+              <X size={16} /> Cancel
+            </button>
             <button type="submit" className="button button-primary" disabled={submitState === 'submitting'}>
-              {submitState === 'submitting' ? <LoaderCircle className="spin" size={17} /> : <Save size={17} />}
-              {submitState === 'submitting' ? 'Creating Project...' : 'Create Project & Build SharePoint Directory'}
+              {submitState === 'submitting' ? (
+                <LoaderCircle className="spin" size={17} />
+              ) : (
+                <Save size={17} />
+              )}
+              {submitState === 'submitting'
+                ? 'Creating Project...'
+                : 'Create Project & Build SharePoint Directory'}
             </button>
           </div>
         </div>

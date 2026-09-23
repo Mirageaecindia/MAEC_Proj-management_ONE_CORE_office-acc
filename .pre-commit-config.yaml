@@ -1,0 +1,54 @@
+# Pre-commit hooks. Install once per clone:
+#   backend/.venv/Scripts/pre-commit install      (Windows)
+#   backend/.venv/bin/pre-commit install          (macOS/Linux)
+# Hooks only run on staged files, and the legacy ratchet lists in
+# backend/pyproject.toml and frontend/.prettierignore keep shared legacy
+# files from being reformatted until they are refactored.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+
+  - repo: local
+    hooks:
+      - id: block-secrets-and-data
+        name: block .env files, databases and data CSVs
+        language: fail
+        entry: "Do not commit secrets, databases or employee data. Use the *.example files instead."
+        files: '(^|/)\.env$|\.db$|^backend/data/(?!.*\.example\.csv$).*\.csv$'
+
+      - id: ruff-check
+        name: ruff check (backend)
+        language: python
+        additional_dependencies: ["ruff==0.16.8"]
+        entry: ruff check --fix --config backend/pyproject.toml
+        types: [python]
+        files: ^backend/
+
+      - id: ruff-format
+        name: ruff format (backend)
+        language: python
+        additional_dependencies: ["ruff==0.16.8"]
+        entry: ruff format --config backend/pyproject.toml
+        types: [python]
+        files: ^backend/
+
+      - id: prettier
+        name: prettier (frontend)
+        language: system
+        entry: node frontend/node_modules/prettier/bin/prettier.cjs --write --ignore-unknown --ignore-path frontend/.prettierignore
+        files: ^frontend/
+        exclude: ^frontend/package-lock\.json$
+
+      - id: eslint
+        name: eslint (frontend)
+        language: system
+        entry: node frontend/node_modules/eslint/bin/eslint.js --config frontend/eslint.config.js --no-warn-ignored
+        files: ^frontend/.*\.(js|jsx)$
