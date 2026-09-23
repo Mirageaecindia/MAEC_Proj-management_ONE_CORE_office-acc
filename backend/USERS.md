@@ -29,7 +29,15 @@ timesheets, and performance dashboard):
 ```
 
 ```
-.venv\Scripts\python.exe create_user.py --username lead --role lead --full-name "Anita Kumar"
+.venv\Scripts\python.exe create_user.py --username lead --role lead --full-name "Anita Kumar" --discipline Electrical
+```
+
+Leads **must** have a discipline (`Electrical`, `Mechanical` or `BIM`). It
+decides which Create Project dropdown they appear in, so create at least one
+lead per discipline. To set the discipline of an existing lead:
+
+```
+.venv\Scripts\python.exe create_user.py --username lead --set-discipline Electrical
 ```
 
 ```

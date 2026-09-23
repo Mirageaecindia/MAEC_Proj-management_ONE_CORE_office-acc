@@ -23,8 +23,8 @@ def test_project_leads_filters_by_discipline(client, world):
 
 
 def test_project_leads_without_discipline_are_hidden_from_filtered_dropdowns(client, make, world):
-    # KNOWN (roadmap 4.1): leads created by create_user.py have no discipline,
-    # so they never appear in the Create Project dropdowns.
+    # By design: a lead without a discipline appears only in the unfiltered list.
+    # create_user.py now requires a discipline for new leads (roadmap 4.1).
     make.user("lead.nodisc", "lead", "No Discipline Lead")
 
     filtered = client.get("/api/project-leads", params={"discipline": "electrical"}, headers=world.bu_h).json()
