@@ -170,13 +170,29 @@ export function CreateProjectPage() {
     setNotice(null);
     if (!validate()) return;
     setSubmitState('submitting');
+    const leadEntry = (value) => ({
+      id: value ? Number(value) : null,
+      name: (() => {
+        const all = [...leads.electrical, ...leads.mechanical, ...leads.bim];
+        const match = all.find((lead) => String(lead.id) === String(value));
+        return match ? match.name : '';
+      })(),
+    });
+
+    const electrical = leadEntry(form.electricalLead);
+    const mechanical = leadEntry(form.mechanicalLead);
+    const bim = leadEntry(form.bimLead);
+
     const payload = {
       project_name: form.projectName.trim(),
       project_code: form.projectCode.trim(),
       client_customer: form.clientCustomer.trim(),
-      project_lead_electrical: form.electricalLead,
-      project_lead_mechanical: form.mechanicalLead.trim(),
-      project_lead_bim: form.bimLead.trim(),
+      project_lead_electrical: electrical.name,
+      project_lead_mechanical: mechanical.name,
+      project_lead_bim: bim.name,
+      project_lead_electrical_user_id: electrical.id,
+      project_lead_mechanical_user_id: mechanical.id,
+      project_lead_bim_user_id: bim.id,
       target_start_date: form.targetStartDate,
       sharepoint_disciplines: form.selectedDisciplines,
       total_contract_value: rawToNumber(form.contractValue),
@@ -275,7 +291,7 @@ export function CreateProjectPage() {
                 <div className="select-wrap">
                   <select value={form.electricalLead} onChange={(event) => updateField('electricalLead', event.target.value)}>
                     <option value="">Select electrical lead</option>
-                    {leads.electrical.map((lead) => <option key={lead.id} value={lead.name}>{lead.name}</option>)}
+                    {leads.electrical.map((lead) => <option key={lead.id} value={lead.id}>{lead.name}</option>)}
                   </select><ChevronDown size={16} />
                 </div>
                 {leadError && <span className="field-error">{leadError}</span>}
@@ -291,7 +307,7 @@ export function CreateProjectPage() {
                 <div className="select-wrap">
                   <select value={form.mechanicalLead} onChange={(event) => updateField('mechanicalLead', event.target.value)}>
                     <option value="">Select mechanical lead</option>
-                    {leads.mechanical.map((lead) => <option key={lead.id} value={lead.name}>{lead.name}</option>)}
+                    {leads.mechanical.map((lead) => <option key={lead.id} value={lead.id}>{lead.name}</option>)}
                   </select><ChevronDown size={16} />
                 </div>
                 {errors.mechanicalLead && <span className="field-error">{errors.mechanicalLead}</span>}
@@ -300,7 +316,7 @@ export function CreateProjectPage() {
                 <div className="select-wrap">
                   <select value={form.bimLead} onChange={(event) => updateField('bimLead', event.target.value)}>
                     <option value="">Select BIM lead</option>
-                    {leads.bim.map((lead) => <option key={lead.id} value={lead.name}>{lead.name}</option>)}
+                    {leads.bim.map((lead) => <option key={lead.id} value={lead.id}>{lead.name}</option>)}
                   </select><ChevronDown size={16} />
                 </div>
                 {errors.bimLead && <span className="field-error">{errors.bimLead}</span>}

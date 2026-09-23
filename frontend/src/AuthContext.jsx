@@ -77,7 +77,7 @@ export function AuthProvider({ children }) {
     } catch { /* ignore */ }
     setToken(data.token);
     setUser({
-      id: null,
+      id: data.id ?? null,
       username: data.username,
       full_name: data.full_name || null,
       role: data.role,

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Fragment, useCallback, useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-const TASK_STATUS_STEPS = ['To Do', 'In-Progress', 'Submitted for Review', 'Approved'];
+const TASK_STATUS_STEPS = ['To Do', 'In-Progress', 'Submitted for Approval', 'Approved'];
 const SUBTASK_STATUS_STEPS = ['To Do', 'In-Progress', 'Done'];
 
 function formatDateTime(isoStr) {
@@ -28,8 +28,10 @@ function formatDate(dateStr) {
 
 export function TaskDetailsPage() {
     const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
     const { user, role, authHeaders } = useAuth();
     const isEngineer = role === 'engineer';
+    const isLead = role === 'lead';
 
     const nodeId = Number(searchParams.get('nodeId')) || null;
     const projectId = Number(searchParams.get('projectId')) || null;
@@ -110,6 +112,29 @@ export function TaskDetailsPage() {
         }
     }
 
+    async function handleApprove() {
+        if (!nodeId) return;
+        setUpdating(true);
+        setError('');
+        try {
+            const resp = await fetch(`${API_BASE_URL}/api/wbs-nodes/${nodeId}/approve`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                body: JSON.stringify({ new_status: 'Approved', comment: commentText || null }),
+            });
+            const body = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(body.detail || 'Could not approve the task.');
+            setCommentText('');
+            showToast('success', 'Task approved.');
+            loadData();
+        } catch (err) {
+            setError(err.message);
+            showToast('error', err.message);
+        } finally {
+            setUpdating(false);
+        }
+    }
+
     async function handleAddComment() {
         if (!commentText.trim() || !nodeId) return;
         try {
@@ -132,6 +157,11 @@ export function TaskDetailsPage() {
     const maxAdvance = node && currentStatusIdx >= 0 && currentStatusIdx < statusSteps.length - 1
         ? statusSteps[currentStatusIdx + 1]
         : null;
+
+    const isTask = !node || node.node_type !== 'subtask';
+    const blockingSubtasks = (node?.children || []).filter((child) => child.deliverable_status !== 'Done');
+    const submitBlocked = isTask && maxAdvance === 'Submitted for Approval' && blockingSubtasks.length > 0;
+    const awaitingLeadApproval = isTask && node && node.deliverable_status === 'Submitted for Approval';
 
     return (
         <main className="resource-page">
@@ -175,128 +205,158 @@ export function TaskDetailsPage() {
 
             {node && !loading && (
                 <>
-                    {/* Status Stepper */}
-                    <section className="allocation-card" style={{ marginBottom: 20 }}>
-                        <div className="allocation-header">
-                            <div>
-                                <h2>Status Progress</h2>
+                    <section className="allocation-card td-card">
+                        {/* Header: title (left) + compact horizontal stepper (right) */}
+                        <div className="td-head">
+                            <div className="td-title td-card-heading">Task Details</div>
+                            <div className="td-stepper">
+                                {statusSteps.map((step, idx) => {
+                                    const isCurrent = node.deliverable_status === step;
+                                    const isPast = idx < currentStatusIdx;
+                                    const isFinal = idx === statusSteps.length - 1;
+                                    return (
+                                        <Fragment key={step}>
+                                            <div
+                                                className={`td-pill${isCurrent ? ' current' : ''}${isPast ? ' past' : ''}${isCurrent && isFinal ? ' done-current' : ''}`}
+                                            >
+                                                {step}
+                                            </div>
+                                            {idx < statusSteps.length - 1 && (
+                                                <div className={`td-connector${idx < currentStatusIdx ? ' past' : ''}`} />
+                                            )}
+                                        </Fragment>
+                                    );
+                                })}
                             </div>
                         </div>
-                        <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            {statusSteps.map((step, idx) => {
-                                const isCurrent = node.deliverable_status === step;
-                                const isPast = idx < currentStatusIdx;
-                                return (
-                                    <div key={step} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <div
-                                            style={{
-                                                padding: '5px 14px',
-                                                borderRadius: 16,
-                                                fontSize: 11,
-                                                fontWeight: 700,
-                                                background: isCurrent ? '#1671ad' : isPast ? '#2b9c6c' : '#e5ebef',
-                                                color: isCurrent || isPast ? '#fff' : '#6d7e91',
-                                                border: isCurrent ? '2px solid #0f4d78' : '1px solid transparent',
-                                            }}
-                                        >
-                                            {step}
+
+                        {/* Detail fields — two-column compact block */}
+                        <div className="td-body">
+                            <div className="td-columns">
+                                <div className="td-column td-column-left">
+                                    <div className="td-field">
+                                        <span>Title* :</span>
+                                        <div>{node.wbs_code ? `${node.wbs_code} : ${node.task_name}` : node.task_name}</div>
+                                    </div>
+                                    <div className="td-field">
+                                        <span>Description* :</span>
+                                        <div>{node.description || '\u2014'}</div>
+                                    </div>
+                                    <div className="td-field">
+                                        <span>Target Start Date* :</span>
+                                        <div>{formatDate(node.start_date)}</div>
+                                    </div>
+                                    <div className="td-field">
+                                        <span>Target End Date* :</span>
+                                        <div>{formatDate(node.target_due_date || node.end_date)}</div>
+                                    </div>
+                                    <div className="td-field">
+                                        <span>Severity Scale* :</span>
+                                        <div>{node.severity || '\u2014'}</div>
+                                    </div>
+                                    <div className="td-field">
+                                        <span>Linked* :</span>
+                                        <div className="td-linked-list">
+                                            {node.node_type === 'subtask'
+                                                ? (node.linked_task_name || node.linked_code)
+                                                    ? <span className="td-linked-item">{node.linked_code ? `${node.linked_code} \u2013 ${node.linked_task_name}` : node.linked_task_name}</span>
+                                                    : <span className="td-linked-item td-linked-empty">No linked subtasks</span>
+                                                : (node.children || []).length > 0
+                                                    ? (node.children || []).map((child) => {
+                                                        const childRoute = `/task-details?nodeId=${child.id}&projectId=${child.project_id || node.project_id}`;
+                                                        return (
+                                                            <a
+                                                                key={child.id}
+                                                                className="td-linked-item td-linked-link"
+                                                                href={childRoute}
+                                                                onClick={(e) => {
+                                                                    e.preventDefault();
+                                                                    navigate(childRoute);
+                                                                }}
+                                                            >
+                                                                {child.wbs_code ? `${child.wbs_code} \u2013 ${child.task_name}` : child.task_name}
+                                                                <em className="td-linked-status">{child.deliverable_status}</em>
+                                                            </a>
+                                                        );
+                                                    })
+                                                    : <span className="td-linked-item td-linked-empty">No linked subtasks</span>}
                                         </div>
-                                        {idx < statusSteps.length - 1 && (
-                                            <div style={{
-                                                width: 28, height: 2,
-                                                background: idx < currentStatusIdx ? '#2b9c6c' : '#c5d9ea',
-                                            }} />
-                                        )}
                                     </div>
-                                );
-                            })}
-                            <span style={{ marginLeft: 12, fontSize: 11, color: '#6d7e91' }}>
-                                Current: <strong style={{ color: '#1671ad' }}>{node.deliverable_status}</strong>
-                            </span>
-                        </div>
-                    </section>
-
-                    {/* Detail Fields */}
-                    <section className="allocation-card">
-                        <div className="allocation-header">
-                            <div>
-                                <h2>
-                                    {node.wbs_code} : {node.task_name}
-                                </h2>
-                                <p>{node.node_type === 'subtask' ? 'Subtask' : 'Task'} detail</p>
+                                </div>
+                                <div className="td-column td-column-right">
+                                    <div className="td-field">
+                                        <span>Actual Start Date and Time* :</span>
+                                        <div>{formatDateTime(node.actual_start_datetime)}</div>
+                                    </div>
+                                    <div className="td-field">
+                                        <span>Actual End Date and Time* :</span>
+                                        <div>{formatDateTime(node.actual_end_datetime)}</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <div style={{ padding: '16px 20px' }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 24px' }}>
-                                <div>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d8090', textTransform: 'uppercase', letterSpacing: '.04em' }}>TITLE:</span>
-                                    <div style={{ fontSize: 14, fontWeight: 600, color: '#21334a', marginTop: 2 }}>
-                                        {node.wbs_code || ''} {node.task_name || ''}
-                                    </div>
-                                </div>
-                                <div>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d8090', textTransform: 'uppercase', letterSpacing: '.04em' }}>Linked:</span>
-                                    <div style={{ fontSize: 14, color: '#21334a', marginTop: 2 }}>
-                                        {node.linked_code ? `${node.linked_code} (parent)` : node.node_type === 'subtask' ? 'Root task' : 'N/A'}
-                                    </div>
-                                </div>
-                                <div>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d8090', textTransform: 'uppercase', letterSpacing: '.04em' }}>Description:</span>
-                                    <div style={{ fontSize: 13, color: '#21334a', marginTop: 2, whiteSpace: 'pre-wrap' }}>
-                                        {node.description || '\u2014'}
-                                    </div>
-                                </div>
-                                <div>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d8090', textTransform: 'uppercase', letterSpacing: '.04em' }}>Severity Scale:</span>
-                                    <div style={{ fontSize: 14, color: '#21334a', marginTop: 2 }}>
-                                        {node.severity || '\u2014'}
-                                    </div>
-                                </div>
-                                <div>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d8090', textTransform: 'uppercase', letterSpacing: '.04em' }}>Target Start Date:</span>
-                                    <div style={{ fontSize: 14, color: '#21334a', marginTop: 2 }}>{formatDate(node.start_date)}</div>
-                                </div>
-                                <div>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d8090', textTransform: 'uppercase', letterSpacing: '.04em' }}>Actual Start Date and Time:</span>
-                                    <div style={{ fontSize: 14, color: '#21334a', marginTop: 2 }}>{formatDateTime(node.actual_start_datetime)}</div>
-                                </div>
-                                <div>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d8090', textTransform: 'uppercase', letterSpacing: '.04em' }}>Target End Date:</span>
-                                    <div style={{ fontSize: 14, color: '#21334a', marginTop: 2 }}>{formatDate(node.target_due_date)}</div>
-                                </div>
-                                <div>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d8090', textTransform: 'uppercase', letterSpacing: '.04em' }}>Actual End Date and Time:</span>
-                                    <div style={{ fontSize: 14, color: '#21334a', marginTop: 2 }}>{formatDateTime(node.actual_end_datetime)}</div>
-                                </div>
-                                <div>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d8090', textTransform: 'uppercase', letterSpacing: '.04em' }}>Assigned Lead:</span>
-                                    <div style={{ fontSize: 14, color: '#21334a', marginTop: 2 }}>{node.assigned_lead || '\u2014'}</div>
-                                </div>
-                                <div>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d8090', textTransform: 'uppercase', letterSpacing: '.04em' }}>Estimated Hours:</span>
-                                    <div style={{ fontSize: 14, color: '#21334a', marginTop: 2 }}>{node.estimated_hours ?? '\u2014'}</div>
-                                </div>
-                                <div>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d8090', textTransform: 'uppercase', letterSpacing: '.04em' }}>Phase:</span>
-                                    <div style={{ fontSize: 14, color: '#21334a', marginTop: 2 }}>{node.phase || '\u2014'}</div>
-                                </div>
-                                <div>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#6d8090', textTransform: 'uppercase', letterSpacing: '.04em' }}>Engineer:</span>
-                                    <div style={{ fontSize: 14, color: '#21334a', marginTop: 2 }}>{node.assigned_engineer_name || '\u2014'}</div>
-                                </div>
-                            </div>
 
-                            {/* Engineer Actions */}
+                        {/* History / Comments — adjoining light panel */}
+                        <div className="td-history">
+                            <div className="td-history-title">History:</div>
+                            {(!node.history || node.history.length === 0) ? (
+                                <div className="td-history-empty">No history entries yet.</div>
+                            ) : (
+                                <div className="td-history-list">
+                                    {node.history.map((entry) => (
+                                        <div key={entry.id} className="td-history-item">
+                                            <span className="who">{entry.user_name}</span>
+                                            {entry.action === 'status_change'
+                                                ? <> : Change {entry.old_status || '\u2014'} to {entry.new_status}</>
+                                                : <> : Comment</>}
+                                            <span className="when">- {formatDateTime(entry.created_at)}</span>
+                                            {entry.comment && <div className="note">{entry.comment}</div>}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
                             {isEngineer && (
-                                <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #e5ebef' }}>
-                                    <h3 style={{ margin: '0 0 10px', fontSize: 13, color: '#243e57' }}>Your Actions</h3>
-                                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                                        {maxAdvance ? (
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                <div className="td-history-comment">
+                                    <textarea
+                                        placeholder="Add a comment to the history log..."
+                                        value={commentText}
+                                        onChange={(e) => setCommentText(e.target.value)}
+                                    />
+                                    <button
+                                        className="button button-primary"
+                                        type="button"
+                                        disabled={!commentText.trim()}
+                                        onClick={handleAddComment}
+                                    >
+                                        Add Comment
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Your Actions — role-specific */}
+                        {isEngineer && (
+                            <div className="td-actions">
+                                <h3>Your Actions</h3>
+                                {awaitingLeadApproval ? (
+                                    <div className="td-actions-note">
+                                        Task is 'Submitted for Approval' — awaiting approval from the assigned Lead.
+                                    </div>
+                                ) : maxAdvance ? (
+                                    submitBlocked ? (
+                                        <div className="td-actions-note">
+                                            Complete all subtasks before submitting:{' '}
+                                            {blockingSubtasks
+                                                .map((subtask) => `${subtask.task_name} (${subtask.deliverable_status})`)
+                                                .join(', ')}.
+                                        </div>
+                                    ) : (
+                                        <div className="td-actions-row">
+                                            <div className="td-actions-controls">
                                                 <select
                                                     value={statusSelect}
                                                     onChange={(e) => setStatusSelect(e.target.value)}
-                                                    style={{ height: 39, padding: '0 12px', border: '1px solid #cfd9e2', borderRadius: 5, fontSize: 12, minWidth: 200 }}
                                                 >
                                                     <option value="">Advance to {maxAdvance}...</option>
                                                     <option value={maxAdvance}>{maxAdvance}</option>
@@ -305,90 +365,86 @@ export function TaskDetailsPage() {
                                                     placeholder="Comment (optional)"
                                                     value={commentText}
                                                     onChange={(e) => setCommentText(e.target.value)}
-                                                    style={{ width: '100%', minHeight: 60, padding: '8px 12px', border: '1px solid #cfd9e2', borderRadius: 5, fontSize: 12, resize: 'vertical', fontFamily: 'inherit' }}
                                                 />
-                                                <button
-                                                    className="button button-primary"
-                                                    type="button"
-                                                    disabled={updating || !statusSelect}
-                                                    onClick={handleAdvanceStatus}
-                                                >
-                                                    {updating ? 'Updating...' : `Advance to ${maxAdvance}`}
-                                                </button>
                                             </div>
-                                        ) : (
-                                            <div style={{ fontSize: 12, color: '#6d7e91' }}>
-                                                {currentStatusIdx >= statusSteps.length - 1
-                                                    ? 'This task has reached its final status.'
-                                                    : 'No further status transitions available.'}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </section>
-
-                    {/* History / Comments */}
-                    <section className="allocation-card" style={{ marginTop: 20 }}>
-                        <div className="allocation-header">
-                            <div>
-                                <h2>History / Comment Log</h2>
-                            </div>
-                        </div>
-                        <div style={{ padding: '16px 20px' }}>
-                            {(!node.history || node.history.length === 0) ? (
-                                <div style={{ fontSize: 12, color: '#8898a8', fontStyle: 'italic' }}>No history entries yet.</div>
-                            ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                    {node.history.map((entry) => (
-                                        <div key={entry.id} style={{ padding: '10px 14px', background: '#f8fbfd', border: '1px solid #edf1f4', borderRadius: 6 }}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
-                                                <strong style={{ fontSize: 12, color: '#21334a' }}>
-                                                    {entry.user_name}
-                                                    {entry.action === 'status_change' && (
-                                                        <span style={{ marginLeft: 6, fontSize: 10, color: '#1671ad', fontWeight: 700 }}>
-                                                            {entry.old_status || '—'} &#8594; {entry.new_status}
-                                                        </span>
-                                                    )}
-                                                    {entry.action === 'comment' && (
-                                                        <span style={{ marginLeft: 6, fontSize: 10, color: '#6d7e91' }}>Comment</span>
-                                                    )}
-                                                </strong>
-                                                <span style={{ fontSize: 10, color: '#8a93a0' }}>
-                                                    {new Date(entry.created_at).toLocaleString('en-US', {
-                                                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', year: 'numeric',
-                                                    })}
-                                                </span>
-                                            </div>
-                                            {entry.comment && (
-                                                <div style={{ fontSize: 12, color: '#40566b', marginTop: 4 }}>{entry.comment}</div>
-                                            )}
+                                            <button
+                                                className="button button-primary"
+                                                type="button"
+                                                disabled={updating || !statusSelect}
+                                                onClick={handleAdvanceStatus}
+                                            >
+                                                {updating ? 'Updating...' : `Advance to ${maxAdvance}`}
+                                            </button>
                                         </div>
-                                    ))}
-                                </div>
-                            )}
-
-                            {isEngineer && (
-                                <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #e5ebef' }}>
-                                    <textarea
-                                        placeholder="Add a comment to the history log..."
-                                        value={commentText}
-                                        onChange={(e) => setCommentText(e.target.value)}
-                                        style={{ width: '100%', minHeight: 60, padding: '8px 12px', border: '1px solid #cfd9e2', borderRadius: 5, fontSize: 12, resize: 'vertical', fontFamily: 'inherit' }}
-                                    />
-                                    <button
-                                        className="button button-primary"
-                                        type="button"
-                                        disabled={!commentText.trim()}
-                                        onClick={handleAddComment}
-                                        style={{ marginTop: 8 }}
-                                    >
-                                        Add Comment
-                                    </button>
-                                </div>
-                            )}
-                        </div>
+                                    )
+                                ) : (
+                                    <div className="td-actions-note">
+                                        {currentStatusIdx >= statusSteps.length - 1
+                                            ? 'This task has reached its final status.'
+                                            : 'No further status transitions available.'}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        {isLead && node && (
+                            <div className="td-actions">
+                                <h3>Your Actions</h3>
+                                {node.node_type === 'subtask' ? (
+                                    maxAdvance ? (
+                                        <div className="td-actions-row">
+                                            <div className="td-actions-controls">
+                                                <select
+                                                    value={statusSelect}
+                                                    onChange={(e) => setStatusSelect(e.target.value)}
+                                                >
+                                                    <option value="">Advance to {maxAdvance}...</option>
+                                                    <option value={maxAdvance}>{maxAdvance}</option>
+                                                </select>
+                                                <textarea
+                                                    placeholder="Comment (optional)"
+                                                    value={commentText}
+                                                    onChange={(e) => setCommentText(e.target.value)}
+                                                />
+                                            </div>
+                                            <button
+                                                className="button button-primary"
+                                                type="button"
+                                                disabled={updating || !statusSelect}
+                                                onClick={handleAdvanceStatus}
+                                            >
+                                                {updating ? 'Updating...' : `Advance to ${maxAdvance}`}
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="td-actions-note">This subtask has reached its final status.</div>
+                                    )
+                                ) : node.deliverable_status === 'Submitted for Approval' ? (
+                                    <div className="td-actions-row">
+                                        <div className="td-actions-controls">
+                                            <textarea
+                                                placeholder="Approval comment (optional)"
+                                                value={commentText}
+                                                onChange={(e) => setCommentText(e.target.value)}
+                                            />
+                                        </div>
+                                        <button
+                                            className="button button-primary"
+                                            type="button"
+                                            disabled={updating}
+                                            onClick={handleApprove}
+                                        >
+                                            {updating ? 'Approving...' : 'Approve Task'}
+                                        </button>
+                                    </div>
+                                ) : currentStatusIdx >= statusSteps.length - 1 ? (
+                                    <div className="td-actions-note">This task has reached its final status.</div>
+                                ) : (
+                                    <div className="td-actions-note">
+                                        Task requires engineer submission; once submitted you can approve it here.
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </section>
                 </>
             )}

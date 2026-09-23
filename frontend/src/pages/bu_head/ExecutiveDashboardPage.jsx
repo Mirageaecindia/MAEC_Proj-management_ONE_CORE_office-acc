@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, ChevronDown, ChevronUp, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ArrowRight, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
@@ -33,15 +33,14 @@ export function ExecutiveDashboardPage() {
   const targetProjectId = searchParams.get('projectId') ? Number(searchParams.get('projectId')) : null;
 
   const [projects, setProjects] = useState([]);
-  const [projectIndex, setProjectIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState('');
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [comments, setComments] = useState('');
   const [actionError, setActionError] = useState('');
   const [submitting, setSubmitting] = useState('');
 
-  const safeProjectIndex = Math.min(projectIndex, Math.max(0, projects.length - 1));
-  const project = projects[safeProjectIndex];
+  const project = projects.find((p) => String(p.id) === String(selectedId));
   const projectId = project?.id;
   const governance = data?.governance_status;
   const threshold = governance?.threshold_pct;
@@ -57,8 +56,12 @@ export function ExecutiveDashboardPage() {
       })
       .then((list) => {
         setProjects(list);
-        const index = targetProjectId ? list.findIndex((item) => item.id === targetProjectId) : -1;
-        setProjectIndex(index >= 0 ? index : 0);
+        const selected = targetProjectId
+          ? list.find((item) => item.id === targetProjectId)
+          : list.length > 0
+            ? list[0]
+            : null;
+        setSelectedId(selected ? String(selected.id) : '');
       })
       .catch((loadError) => setError(loadError.message));
   }, [authHeaders, targetProjectId]);
@@ -189,32 +192,18 @@ export function ExecutiveDashboardPage() {
           </p>
         </div>
 
-        <div className="project-switcher">
+        <label className="project-switcher">
           <span>Project Name</span>
-          <div className="project-pill-box">
-            <span className="project-pill-name" title={project?.project_name}>
-              {project?.project_name || 'No projects available'}
-            </span>
-            <div className="project-stepper-arrows">
-              <button
-                type="button"
-                aria-label="Previous project"
-                disabled={safeProjectIndex === 0}
-                onClick={() => setProjectIndex((index) => index - 1)}
-              >
-                <ChevronUp size={12} />
-              </button>
-              <button
-                type="button"
-                aria-label="Next project"
-                disabled={safeProjectIndex >= projects.length - 1}
-                onClick={() => setProjectIndex((index) => index + 1)}
-              >
-                <ChevronDown size={12} />
-              </button>
-            </div>
-          </div>
-        </div>
+          <select
+            value={selectedId}
+            onChange={(e) => setSelectedId(e.target.value)}
+          >
+            <option value="">Select project</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>{project.project_name}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {error && <div className="resource-error">{error}</div>}

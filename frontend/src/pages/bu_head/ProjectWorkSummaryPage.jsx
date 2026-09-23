@@ -1,4 +1,3 @@
-import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
@@ -59,12 +58,11 @@ export function ProjectWorkSummaryPage() {
   const targetProjectId = searchParams.get('projectId') ? Number(searchParams.get('projectId')) : null;
 
   const [projects, setProjects] = useState([]);
-  const [projectIndex, setProjectIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState('');
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState('');
 
-  const safeProjectIndex = Math.min(projectIndex, Math.max(0, projects.length - 1));
-  const project = projects[safeProjectIndex];
+  const project = projects.find((p) => String(p.id) === String(selectedId));
   const projectId = project?.id;
 
   useEffect(() => {
@@ -76,8 +74,10 @@ export function ProjectWorkSummaryPage() {
       .then((list) => {
         setProjects(list);
         if (list.length > 0) {
-          const index = targetProjectId ? list.findIndex((p) => p.id === targetProjectId) : -1;
-          setProjectIndex(index >= 0 ? index : 0);
+          const selected = targetProjectId
+            ? list.find((p) => p.id === targetProjectId)
+            : list[0];
+          setSelectedId(selected ? String(selected.id) : String(list[0].id));
         }
       })
       .catch((loadError) => setError(loadError.message));
@@ -133,32 +133,18 @@ export function ProjectWorkSummaryPage() {
           </p>
         </div>
 
-        <div className="project-switcher">
+        <label className="project-switcher">
           <span>Project Name</span>
-          <div className="project-pill-box">
-            <span className="project-pill-name" title={project?.project_name}>
-              {project?.project_name || 'No projects yet — create one first'}
-            </span>
-            <div className="project-stepper-arrows">
-              <button
-                type="button"
-                aria-label="Previous project"
-                disabled={safeProjectIndex === 0}
-                onClick={() => setProjectIndex((index) => index - 1)}
-              >
-                <ChevronUp size={12} />
-              </button>
-              <button
-                type="button"
-                aria-label="Next project"
-                disabled={safeProjectIndex >= projects.length - 1}
-                onClick={() => setProjectIndex((index) => index + 1)}
-              >
-                <ChevronDown size={12} />
-              </button>
-            </div>
-          </div>
-        </div>
+          <select
+            value={selectedId}
+            onChange={(e) => setSelectedId(e.target.value)}
+          >
+            <option value="">Select project</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>{project.project_name}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {error && <div className="resource-error">{error}</div>}

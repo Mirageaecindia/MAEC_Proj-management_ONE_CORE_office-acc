@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, ShieldCheck } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
@@ -27,12 +27,11 @@ export function EngineerPerformanceDashboardPage() {
   const targetProjectId = searchParams.get('projectId') ? Number(searchParams.get('projectId')) : null;
 
   const [projects, setProjects] = useState([]);
-  const [projectIndex, setProjectIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState('');
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
 
-  const safeProjectIndex = Math.min(projectIndex, Math.max(0, projects.length - 1));
-  const project = projects[safeProjectIndex];
+  const project = projects.find((p) => String(p.id) === String(selectedId));
   const projectId = project?.id;
 
   useEffect(() => {
@@ -43,8 +42,12 @@ export function EngineerPerformanceDashboardPage() {
       })
       .then((list) => {
         setProjects(list);
-        const index = targetProjectId ? list.findIndex((item) => item.id === targetProjectId) : -1;
-        setProjectIndex(index >= 0 ? index : 0);
+        const selected = targetProjectId
+          ? list.find((item) => item.id === targetProjectId)
+          : list.length > 0
+            ? list[0]
+            : null;
+        setSelectedId(selected ? String(selected.id) : '');
       })
       .catch((loadError) => setError(loadError.message));
   }, [authHeaders, targetProjectId]);
@@ -55,11 +58,11 @@ export function EngineerPerformanceDashboardPage() {
       return;
     }
     setError('');
-    setData(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/engineer-performance-dashboard`, {
-        headers: authHeaders(),
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/engineer-performance-dashboard?project_id=${projectId}`,
+        { headers: authHeaders() }
+      );
       if (!response.ok) throw new Error(`Failed to load dashboard (${response.status})`);
       setData(await response.json());
     } catch (loadError) {
@@ -69,6 +72,33 @@ export function EngineerPerformanceDashboardPage() {
 
   useEffect(() => {
     fetchDashboard();
+  }, [fetchDashboard]);
+
+  // Clear stale data immediately when the selected project changes so a
+  // different project never shows another project's numbers mid-fetch.
+  useEffect(() => {
+    setData(null);
+  }, [projectId]);
+
+  // Real-time freshness: every fetch recomputes the cards/chart from the live
+  // backend DB. Re-fetch on an interval while the tab is visible, and
+  // immediately when the Engineer returns to the tab (e.g. after logging hours
+  // or advancing a task in another tab), so saved task activity shows up
+  // without any manual value entry.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible') {
+        fetchDashboard();
+      }
+    };
+    const interval = window.setInterval(refresh, 15000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, [fetchDashboard]);
 
   const summary = data?.summary;
@@ -108,33 +138,23 @@ export function EngineerPerformanceDashboardPage() {
         </div>
 
         {projects.length > 0 && (
-          <div className="project-switcher">
+          <label className="project-switcher">
             <span>Project Name</span>
-            <div className="project-pill-box">
-              <span className="project-pill-name" title={project?.project_name}>
-                {project?.project_name || 'No projects available'}
-              </span>
-              <div className="project-stepper-arrows">
-                <button
-                  type="button"
-                  aria-label="Previous project"
-                  disabled={safeProjectIndex === 0}
-                  onClick={() => setProjectIndex((index) => index - 1)}
-                >
-                  <ChevronUp size={12} />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Next project"
-                  disabled={safeProjectIndex >= projects.length - 1}
-                  onClick={() => setProjectIndex((index) => index + 1)}
-                >
-                  <ChevronDown size={12} />
-                </button>
-              </div>
-            </div>
-          </div>
+            <select
+              value={selectedId}
+              onChange={(e) => setSelectedId(e.target.value)}
+            >
+              <option value="">Select project</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>{project.project_name}</option>
+              ))}
+            </select>
+          </label>
         )}
+
+        <button type="button" className="button button-secondary" onClick={fetchDashboard}>
+          Refresh
+        </button>
       </div>
 
       {error && <div className="resource-error">{error}</div>}

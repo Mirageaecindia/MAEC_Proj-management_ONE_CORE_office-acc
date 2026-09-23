@@ -30,7 +30,7 @@ export function MaecHeader({ subtitle }) {
 
   const visibleTabs = allTabs.filter((tab) => tab.roles.includes(role));
 
-  const displayName = ROLE_LABELS[role] || user?.username || 'User';
+  const displayName = user?.full_name || user?.username || 'User';
   const roleLabel = ROLE_LABELS[role] || '';
 
   const initials = displayName
@@ -75,7 +75,10 @@ export function MaecHeader({ subtitle }) {
               onClick={() => setAccountOpen((open) => !open)}
             >
               <span className="avatar">{initials}</span>
-              <span className="account-name">{displayName}</span>
+              <span className="account-name">
+                <span className="account-name-text">{displayName}</span>
+                {roleLabel && <small className="account-role">{roleLabel}</small>}
+              </span>
             </button>
             {accountOpen && (
               <div className="account-menu" role="menu">

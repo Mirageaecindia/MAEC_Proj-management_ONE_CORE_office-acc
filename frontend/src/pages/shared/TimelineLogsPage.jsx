@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
@@ -63,6 +63,12 @@ function getQuarterFromMonth(dateObj) {
   return `Q${q} ${dateObj.getFullYear()}`;
 }
 
+const COMPLETE_STATUSES = ['Done', 'Approved', 'Completed'];
+
+function clampPct(value) {
+  return Math.max(0, Math.min(100, value));
+}
+
 export function TimelineLogsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -70,9 +76,11 @@ export function TimelineLogsPage() {
   const targetProjectId = searchParams.get('projectId') ? Number(searchParams.get('projectId')) : null;
 
   const [projects, setProjects] = useState([]);
-  const [projectIndex, setProjectIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState('');
   const [nodes, setNodes] = useState([]);
   const [entries, setEntries] = useState([]);
+  const [timelineTasks, setTimelineTasks] = useState([]);
+  const [timelinePhases, setTimelinePhases] = useState([]);
   const [currentMonday, setCurrentMonday] = useState(() => getMonday(new Date()));
   const [serverDate, setServerDate] = useState(null);
 
@@ -104,7 +112,7 @@ export function TimelineLogsPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const project = projects[projectIndex];
+  const project = projects.find((p) => String(p.id) === String(selectedId));
   const projectId = project?.id;
   const isEngineer = role === 'engineer';
   const isLead = role === 'lead';
@@ -118,14 +126,10 @@ export function TimelineLogsPage() {
       .then((data) => {
         setProjects(data);
         if (Array.isArray(data) && data.length > 0) {
-          if (targetProjectId) {
-            const matchIdx = data.findIndex((p) => p.id === targetProjectId);
-            if (matchIdx >= 0) {
-              setProjectIndex(matchIdx);
-              return;
-            }
-          }
-          setProjectIndex(0);
+          const selected = targetProjectId
+            ? data.find((p) => p.id === targetProjectId)
+            : data[0];
+          setSelectedId(selected ? String(selected.id) : '');
         }
       })
       .catch((err) => setError(err.message));
@@ -150,6 +154,19 @@ export function TimelineLogsPage() {
 
       setNodes(nodesData);
       setEntries(timesheetData);
+
+      if (isEngineer || isLead) {
+        const timelineRes = await fetch(`${API_BASE_URL}/api/projects/${id}/timeline-logs`, { headers: authHeaders() });
+        if (!timelineRes.ok) {
+          throw new Error('Failed to load task timeline data.');
+        }
+        const timelineData = await timelineRes.json();
+        setTimelineTasks(Array.isArray(timelineData.tasks) ? timelineData.tasks : []);
+        setTimelinePhases(Array.isArray(timelineData.phases) ? timelineData.phases : []);
+      } else {
+        setTimelineTasks([]);
+        setTimelinePhases([]);
+      }
 
       const initialMap = {};
       timesheetData.forEach((entry) => {
@@ -178,23 +195,48 @@ export function TimelineLogsPage() {
     }
   }, [projectId, weekStartStr]);
 
+  useEffect(() => {
+    const onFocus = () => {
+      if (projectId) {
+        loadProjectData(projectId, weekStartStr);
+      }
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [projectId, weekStartStr]);
+
   const phaseRows = useMemo(() => {
     const phaseMap = {};
     WBS_PHASES.forEach((phase) => {
       phaseMap[phase] = { phase, count: 0 };
     });
-    if (nodes && nodes.length > 0) {
-      nodes.forEach((node) => {
+    const source = isEngineer
+      ? (timelineTasks.length > 0 ? timelineTasks : nodes)
+      : (isLead ? timelineTasks : nodes);
+    if (source && source.length > 0) {
+      source.forEach((node) => {
         const phaseName = node.phase || 'Space Planning';
-        if (phaseMap[phaseName]) {
-          phaseMap[phaseName].count += 1;
-        } else {
-          phaseMap[phaseName] = { phase: phaseName, count: 1 };
+        if (!phaseMap[phaseName]) {
+          phaseMap[phaseName] = { phase: phaseName, count: 0, doneCount: 0, start_date: null, end_date: null };
         }
+        const row = phaseMap[phaseName];
+        if (isEngineer || isLead) {
+          if (row.doneCount === undefined) row.doneCount = 0;
+          if (COMPLETE_STATUSES.includes(node.deliverable_status)) row.doneCount += 1;
+          const s = node.start_date ? new Date(node.start_date) : null;
+          const e = node.end_date
+            ? new Date(node.end_date)
+            : node.target_due_date
+              ? new Date(node.target_due_date)
+              : s;
+          if (s && (!row.start_date || s < row.start_date)) row.start_date = s;
+          if (e && (!row.end_date || e > row.end_date)) row.end_date = e;
+        }
+        row.count += 1;
       });
     }
     return Object.values(phaseMap).map((p) => ({ ...p, isRealData: p.count > 0 }));
-  }, [nodes]);
+  }, [nodes, timelineTasks, isEngineer]);
 
   const { monthColumns, timelineStart, timelineEnd, quarterTitle } = useMemo(() => {
     let minDate = null;
@@ -348,8 +390,6 @@ export function TimelineLogsPage() {
     }
   };
 
-  const totalSpan = timelineEnd.getTime() - timelineStart.getTime();
-
   return (
     <main className="timeline-page">
       <div className="resource-heading-row">
@@ -369,32 +409,18 @@ export function TimelineLogsPage() {
           </p>
         </div>
 
-        <div className="project-switcher">
+        <label className="project-switcher">
           <span>Project Name</span>
-          <div className="project-pill-box">
-            <span className="project-pill-name" title={project?.project_name}>
-              {project?.project_name || 'No projects yet — create one first'}
-            </span>
-            <div className="project-stepper-arrows">
-              <button
-                type="button"
-                aria-label="Previous project"
-                disabled={projectIndex === 0}
-                onClick={() => setProjectIndex((index) => index - 1)}
-              >
-                <ChevronUp size={12} />
-              </button>
-              <button
-                type="button"
-                aria-label="Next project"
-                disabled={projectIndex >= projects.length - 1}
-                onClick={() => setProjectIndex((index) => index + 1)}
-              >
-                <ChevronDown size={12} />
-              </button>
-            </div>
-          </div>
-        </div>
+          <select
+            value={selectedId}
+            onChange={(e) => setSelectedId(e.target.value)}
+          >
+            <option value="">Select project</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>{project.project_name}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {error && <div className="resource-error">{error}</div>}
@@ -441,14 +467,39 @@ export function TimelineLogsPage() {
               phaseRows.map((row) => {
                 let leftPct = 0;
                 let widthPct = 100;
-                if (row.isRealData && row.start_date && row.end_date && totalSpan > 0) {
-                  const tStart = new Date(row.start_date);
-                  const tEnd = new Date(row.end_date);
-                  if (!isNaN(tStart)) {
-                    leftPct = Math.max(0, ((tStart.getTime() - timelineStart.getTime()) / totalSpan) * 100);
-                  }
-                  if (!isNaN(tEnd)) {
-                    widthPct = Math.max(4, Math.min(100, ((tEnd.getTime() - timelineStart.getTime()) / totalSpan) * 100) - leftPct);
+                let barTone = 'gantt-bar-empty';
+                let barLabel = null;
+                let fillPct = 0;
+                let showFill = false;
+
+                const phaseStat = timelinePhases.find((p) => p.phase === row.phase);
+                const totalCount = phaseStat ? phaseStat.total_tasks : row.count;
+                const doneCount = phaseStat ? phaseStat.completed_tasks : row.doneCount || 0;
+                const percent =
+                  phaseStat ? phaseStat.percent_complete
+                  : totalCount > 0
+                    ? Math.round((doneCount / totalCount) * 100)
+                    : null;
+
+                if (isEngineer || isLead) {
+                const fixedTotal = INITIAL_VIEWPORT_END.getTime() - INITIAL_VIEWPORT_START.getTime();
+                  if (totalCount > 0) {
+                    if (row.start_date && row.end_date && fixedTotal > 0) {
+                      const tStart = row.start_date.getTime();
+                      const tEnd = Math.max(tStart, row.end_date.getTime());
+                      leftPct = clampPct(((tStart - INITIAL_VIEWPORT_START.getTime()) / fixedTotal) * 100);
+                      widthPct = Math.max(4, clampPct(((tEnd - INITIAL_VIEWPORT_START.getTime()) / fixedTotal) * 100) - leftPct);
+                    }
+                    if (doneCount >= totalCount) {
+                      barTone = 'gantt-bar-completed';
+                    } else if (doneCount > 0) {
+                      barTone = 'gantt-bar-in_progress';
+                      fillPct = percent;
+                      showFill = true;
+                    } else {
+                      barTone = 'gantt-bar-scheduled';
+                    }
+                    barLabel = `${percent}%`;
                   }
                 }
 
@@ -456,6 +507,13 @@ export function TimelineLogsPage() {
                   <div key={row.phase} className="gantt-row">
                     <div className="gantt-task-info">
                       <strong>{row.phase}</strong>
+                      {(isEngineer || isLead) && (
+                        <em className="gantt-phase-status">
+                          {totalCount > 0
+                            ? `${doneCount}/${totalCount} task${totalCount === 1 ? '' : 's'} complete · ${percent}%`
+                            : 'No tasks yet'}
+                        </em>
+                      )}
                     </div>
                     <div className="gantt-row-timeline">
                       <div className="gantt-month-grid">
@@ -466,7 +524,13 @@ export function TimelineLogsPage() {
                       {todayPct !== null && (
                         <div className="gantt-today-line-segment" style={{ left: `${todayPct}%` }} />
                       )}
-                      <div className="gantt-bar gantt-bar-empty" style={{ left: `${leftPct}%`, width: `${widthPct}%` }}>
+                      <div className={`gantt-bar ${barTone}`} style={{ left: `${leftPct}%`, width: `${widthPct}%` }}>
+                        {(isEngineer || isLead) && showFill && (
+                          <div className="gantt-progress-wrapper">
+                            <div className="gantt-progress-fill" style={{ width: `${fillPct}%` }} />
+                          </div>
+                        )}
+                        {(isEngineer || isLead) && barLabel && <span className="gantt-bar-label">{barLabel}</span>}
                       </div>
                     </div>
                   </div>
@@ -474,6 +538,15 @@ export function TimelineLogsPage() {
               })
             )}
           </div>
+
+          {(isEngineer || isLead) && (
+            <div className="gantt-legend">
+              <span className="gantt-legend-item"><i className="gantt-legend-dot gantt-legend-done" /> Done</span>
+              <span className="gantt-legend-item"><i className="gantt-legend-dot gantt-legend-inprog" /> In progress</span>
+              <span className="gantt-legend-item"><i className="gantt-legend-dot gantt-legend-scheduled" /> Scheduled</span>
+              <span className="gantt-legend-note">Status reflects the current database state for each of your assigned tasks.</span>
+            </div>
+          )}
         </div>
       </section>
 

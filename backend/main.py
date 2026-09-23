@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadF
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -160,6 +160,22 @@ def add_extension_workflow_columns():
 add_extension_workflow_columns()
 
 
+def add_resource_booking_date_columns():
+    """Add allocation date-range columns to existing development databases."""
+    inspector = __import__("sqlalchemy").inspect(engine)
+    if "resource_bookings" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("resource_bookings")}
+    with engine.begin() as connection:
+        if "start_date" not in columns:
+            connection.exec_driver_sql("ALTER TABLE resource_bookings ADD COLUMN start_date DATE")
+        if "end_date" not in columns:
+            connection.exec_driver_sql("ALTER TABLE resource_bookings ADD COLUMN end_date DATE")
+
+
+add_resource_booking_date_columns()
+
+
 def add_project_creation_columns():
     """Add the BU Head 'Create Project' form columns to the existing projects
     table. They back the same Project model (no separate table/model) so the
@@ -187,6 +203,39 @@ def add_project_creation_columns():
 add_project_creation_columns()
 
 
+def add_lead_identity_columns():
+    """Add real-identity scoping columns.
+
+    - users.discipline: discipline attribute for Lead accounts (used to filter
+      the real Lead dropdowns by Electrical / Mechanical / BIM).
+    - projects.project_lead_*_user_id: the real Lead user id backing each
+      display-name column, so project scoping is enforced by user ID matching.
+    - wbs_nodes.assigned_lead_user_id: the real Lead user id behind a WBS
+      node's assigned-lead name, so lead scoping is ID-based end to end.
+    """
+    inspector = __import__("sqlalchemy").inspect(engine)
+    with engine.begin() as connection:
+        if "users" in inspector.get_table_names():
+            columns = {column["name"] for column in inspector.get_columns("users")}
+            if "discipline" not in columns:
+                connection.exec_driver_sql("ALTER TABLE users ADD COLUMN discipline VARCHAR(100)")
+        if "projects" in inspector.get_table_names():
+            columns = {column["name"] for column in inspector.get_columns("projects")}
+            if "project_lead_electrical_user_id" not in columns:
+                connection.exec_driver_sql("ALTER TABLE projects ADD COLUMN project_lead_electrical_user_id INTEGER")
+            if "project_lead_mechanical_user_id" not in columns:
+                connection.exec_driver_sql("ALTER TABLE projects ADD COLUMN project_lead_mechanical_user_id INTEGER")
+            if "project_lead_bim_user_id" not in columns:
+                connection.exec_driver_sql("ALTER TABLE projects ADD COLUMN project_lead_bim_user_id INTEGER")
+        if "wbs_nodes" in inspector.get_table_names():
+            columns = {column["name"] for column in inspector.get_columns("wbs_nodes")}
+            if "assigned_lead_user_id" not in columns:
+                connection.exec_driver_sql("ALTER TABLE wbs_nodes ADD COLUMN assigned_lead_user_id INTEGER")
+
+
+add_lead_identity_columns()
+
+
 def add_wbs_detail_columns():
     """Add description, severity, and actual datetime columns to wbs_nodes
     for the Task Details view."""
@@ -206,6 +255,23 @@ def add_wbs_detail_columns():
 
 
 add_wbs_detail_columns()
+
+
+def backfill_task_approval_status():
+    """Align legacy 'Submitted for Review' rows with the approved workflow
+    label 'Submitted for Approval' so flow validation and the UI stepper stay
+    in sync for existing data."""
+    inspector = __import__("sqlalchemy").inspect(engine)
+    if "wbs_nodes" not in inspector.get_table_names():
+        return
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "UPDATE wbs_nodes SET deliverable_status = ? WHERE deliverable_status = ?",
+            ("Submitted for Approval", "Submitted for Review"),
+        )
+
+
+backfill_task_approval_status()
 
 
 def add_resource_booking_approval_columns():
@@ -254,6 +320,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Error-Code"],
 )
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
@@ -429,6 +496,7 @@ def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)):
     db.commit()
     return schemas.LoginResponse(
         token=token,
+        id=user.id,
         role=user.role,
         username=user.username,
         full_name=user.full_name,
@@ -463,31 +531,143 @@ def identity(user: models.User) -> dict:
     }
 
 
-def engineer_wbs_condition(employee_id: int, full_name: str | None):
-    """SQL condition: WBS node assigned to an engineer by employee id OR by name."""
-    conditions = [models.WbsNode.assigned_engineer_id == employee_id]
-    if full_name:
-        conditions.append(models.WbsNode.assigned_lead == full_name)
+def engineer_wbs_condition(employee_id: int):
+    """SQL condition: WBS node assigned to an engineer by their real employee
+    (account-linked) id only. No name-based matching."""
+    return models.WbsNode.assigned_engineer_id == employee_id
+
+
+def lead_node_condition(user: models.User):
+    """SQL condition: WBS node assigned to a lead by their real user id."""
+    conditions = [models.WbsNode.assigned_lead_user_id == user.id]
+    if user.full_name:
+        conditions.append(
+            and_(models.WbsNode.assigned_lead_user_id.is_(None), models.WbsNode.assigned_lead == user.full_name)
+        )
     return or_(*conditions)
 
 
-def engineer_wbs_ids(db: Session, employee_id: int, full_name: str | None) -> set:
-    """Projects where the engineer has a WBS node assigned by employee id OR by name."""
+def engineer_wbs_ids(db: Session, employee_id: int) -> set:
+    """Projects where the engineer has a WBS node assigned by real employee id."""
     return {
         project_id
         for (project_id,) in db.query(models.WbsNode.project_id)
-        .filter(engineer_wbs_condition(employee_id, full_name))
+        .filter(engineer_wbs_condition(employee_id))
         .distinct()
         .all()
     }
 
 
+def lead_project_ids(db: Session, user: models.User) -> set:
+    """Projects assigned to this lead, resolved by the lead's REAL user id.
+
+    Primary matching is by users.id against the projects.project_lead_*_user_id
+    columns and wbs_nodes.assigned_lead_user_id. A name-based fallback only
+    applies to legacy rows where the user-id column is still NULL, so pre-ID
+    dev data keeps resolving without ever matching on names for new rows.
+    """
+    if not user:
+        return set()
+    name = user.full_name
+
+    id_conditions = or_(
+        models.Project.project_lead_electrical_user_id == user.id,
+        models.Project.project_lead_mechanical_user_id == user.id,
+        models.Project.project_lead_bim_user_id == user.id,
+    )
+    if name:
+        name_conditions = or_(
+            and_(models.Project.project_lead_electrical_user_id.is_(None), models.Project.project_lead_electrical == name),
+            and_(models.Project.project_lead_mechanical_user_id.is_(None), models.Project.project_lead_mechanical == name),
+            and_(models.Project.project_lead_bim_user_id.is_(None), models.Project.project_lead_bim == name),
+        )
+        condition = or_(id_conditions, name_conditions)
+    else:
+        condition = id_conditions
+
+    as_project_lead = {
+        project_id
+        for (project_id,) in db.query(models.Project.id)
+        .filter(condition)
+        .all()
+    }
+
+    node_conditions = [models.WbsNode.assigned_lead_user_id == user.id]
+    if name:
+        node_conditions.append(
+            and_(models.WbsNode.assigned_lead_user_id.is_(None), models.WbsNode.assigned_lead == name)
+        )
+    as_wbs_lead = {
+        project_id
+        for (project_id,) in db.query(models.WbsNode.project_id)
+        .filter(or_(*node_conditions))
+        .distinct()
+        .all()
+    }
+    return as_project_lead | as_wbs_lead
+
+
 def node_assigned_to_engineer(node: models.WbsNode, user: models.User) -> bool:
-    """True if the engineer owns this WBS node by employee id OR by matching full name."""
-    if node.assigned_engineer_id == user.employee_id:
+    """True if the engineer owns this WBS node by their real employee id only."""
+    return bool(user.employee_id and node.assigned_engineer_id == user.employee_id)
+
+
+def node_assigned_to_lead(node: models.WbsNode, user: models.User) -> bool:
+    """True if this lead account is the assigned lead for a WBS node.
+
+    Primary matching is by the real user id (assigned_lead_user_id); a
+    name-based fallback only applies to legacy rows where that id is NULL.
+    """
+    if node.assigned_lead_user_id is not None:
+        return node.assigned_lead_user_id == user.id
+    return bool(user.full_name and node.assigned_lead == user.full_name)
+
+
+def incomplete_subtasks(db: Session, node: models.WbsNode) -> List[models.WbsNode]:
+    """Direct child subtasks of a node whose deliverable_status is not 'Done'."""
+    return (
+        db.query(models.WbsNode)
+        .filter_by(parent_id=node.id)
+        .filter(models.WbsNode.deliverable_status != "Done")
+        .order_by(models.WbsNode.wbs_code, models.WbsNode.id)
+        .all()
+    )
+
+
+def subtask_gate_error(blocking: List[models.WbsNode]) -> str:
+    """Clear message naming which subtask(s) still block task submission."""
+    if len(blocking) == 1:
+        return f"Cannot submit for approval — 1 subtask ('{blocking[0].task_name}') is still not marked Done."
+    names = ", ".join(f"'{subtask.task_name}'" for subtask in blocking)
+    return f"Cannot submit for approval — {len(blocking)} subtasks are still not marked Done: {names}."
+
+
+def user_can_access_project(db: Session, user: models.User, project: models.Project) -> bool:
+    """Server-side access gate for project-scoped endpoints.
+
+    BU Head sees everything. Leads see projects where their real user id is
+    recorded as an assigned lead (electrical/mechanical/BIM) or as a real WBS
+    assigned-lead. Engineers see projects where their real employee id appears
+    in a WBS assignment or resource booking. No name-based matching.
+    """
+    if user.role == "bu_head":
         return True
-    if user.full_name and node.assigned_lead == user.full_name:
-        return True
+    if user.role == "lead":
+        if not user.id:
+            return False
+        return project.id in lead_project_ids(db, user)
+    if user.role == "engineer":
+        if not user.employee_id:
+            return False
+        wbs_ids = engineer_wbs_ids(db, user.employee_id)
+        booked_ids = {
+            pid
+            for (pid,) in db.query(models.ResourceBooking.project_id)
+            .filter_by(employee_id=user.employee_id)
+            .distinct()
+            .all()
+        }
+        return project.id in (wbs_ids | booked_ids)
     return False
 
 
@@ -506,8 +686,32 @@ def task_output(db: Session, task: models.GanttTask):
 
 
 @app.get("/api/project-leads", response_model=List[schemas.ProjectLeadOut])
-def list_project_leads(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.query(models.ProjectLead).order_by(models.ProjectLead.name).all()
+def list_project_leads(
+    discipline: Optional[str] = None,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the real Lead user accounts (role=lead), optionally filtered by
+    discipline. Each entry is a real User row: id = users.id, name = display
+    name, title = discipline. The Create Project form uses this list to build
+    its Electrical / Mechanical / BIM project-lead dropdowns."""
+    require_role(user.role, {"bu_head", "lead", "engineer"})
+    query = db.query(models.User).filter(models.User.role == "lead")
+    if discipline:
+        normalized = str(discipline).strip().lower()
+        mapping = {"electrical": "Electrical", "mechanical": "Mechanical", "bim": "BIM"}
+        target = mapping.get(normalized)
+        if target:
+            query = query.filter(models.User.discipline == target)
+    leads = query.order_by(models.User.username).all()
+    return [
+        schemas.ProjectLeadOut(
+            id=lead.id,
+            name=lead.full_name or lead.username,
+            title=lead.discipline,
+        )
+        for lead in leads
+    ]
 
 
 @app.post("/api/projects", response_model=schemas.CreateProjectOut, status_code=201)
@@ -524,15 +728,37 @@ async def create_project(
     if db.query(models.Project).filter_by(project_code=payload.project_code).first():
         raise HTTPException(status_code=409, detail="Project Code already exists")
 
+    def resolve_lead(user_id: Optional[int], display_name: str) -> "tuple[str, Optional[int]]":
+        """Resolve the selected Lead to a display name + real user id.
+
+        The Create Project dropdowns now carry real Lead user ids; when one is
+        provided the display name is taken from the real account (so scoping
+        and display always agree). Falls back to the posted name for legacy
+        callers.
+        """
+        if user_id is not None:
+            lead = db.query(models.User).filter_by(id=user_id, role="lead").first()
+            if not lead:
+                raise HTTPException(status_code=400, detail="Selected Lead is not a valid Lead account.")
+            return lead.full_name or lead.username, lead.id
+        return display_name, None
+
+    elect_name, elect_id = resolve_lead(payload.project_lead_electrical_user_id, payload.project_lead_electrical)
+    mech_name, mech_id = resolve_lead(payload.project_lead_mechanical_user_id, payload.project_lead_mechanical)
+    bim_name, bim_id = resolve_lead(payload.project_lead_bim_user_id, payload.project_lead_bim)
+
     db_project = models.Project(
         project_name=payload.project_name,
         project_code=payload.project_code,
         client_organization=payload.client_customer,
-        project_lead=payload.project_lead_electrical,
+        project_lead=elect_name,
         start_date=payload.target_start_date,
-        project_lead_electrical=payload.project_lead_electrical,
-        project_lead_mechanical=payload.project_lead_mechanical,
-        project_lead_bim=payload.project_lead_bim,
+        project_lead_electrical=elect_name,
+        project_lead_mechanical=mech_name,
+        project_lead_bim=bim_name,
+        project_lead_electrical_user_id=elect_id,
+        project_lead_mechanical_user_id=mech_id,
+        project_lead_bim_user_id=bim_id,
         sharepoint_disciplines=json.dumps(payload.sharepoint_disciplines) if payload.sharepoint_disciplines else None,
         contract_value=payload.total_contract_value,
         contract_currency=payload.contract_currency,
@@ -582,8 +808,29 @@ def list_projects(
     db: Session = Depends(get_db),
 ):
     query = db.query(models.Project)
-    # NOTE: Engineers see the full project list (all BU Head-created projects).
-    # Task/record access remains scoped per-engineer inside each endpoint.
+    # Role scoping for the Project Name selector: BU Head sees all projects;
+    # Leads see only projects where they are assigned; Engineers see only projects
+    # where they have real WBS task assignments or resource bookings.
+    if user.role == "lead":
+        assigned_ids = lead_project_ids(db, user)
+        if not assigned_ids:
+            return []
+        query = query.filter(models.Project.id.in_(assigned_ids))
+    elif user.role == "engineer":
+        if not user.employee_id:
+            return []
+        wbs_ids = engineer_wbs_ids(db, user.employee_id)
+        booked_ids = {
+            project_id
+            for (project_id,) in db.query(models.ResourceBooking.project_id)
+            .filter_by(employee_id=user.employee_id)
+            .distinct()
+            .all()
+        }
+        project_ids = wbs_ids | booked_ids
+        if not project_ids:
+            return []
+        query = query.filter(models.Project.id.in_(project_ids))
     return query.order_by(models.Project.created_at.desc()).all()
 
 
@@ -592,6 +839,8 @@ def get_project(project_id: int, user: models.User = Depends(get_current_user), 
     project = db.query(models.Project).get(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    if not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
     return project
 
 
@@ -635,26 +884,8 @@ async def get_sharepoint_mirror(
         raise HTTPException(status_code=404, detail="Project not found")
 
     # Additional scoping: Lead and Engineer must have access to this project
-    if user.role == "engineer":
-        if not user.employee_id:
-            raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
-        assigned_projects = engineer_wbs_ids(db, user.employee_id, user.full_name)
-        booked_projects = {
-            project_id for (project_id,) in db.query(models.ResourceBooking.project_id)
-            .filter_by(employee_id=user.employee_id).distinct().all()
-        }
-        project_ids = assigned_projects | booked_projects
-        if project_id not in project_ids:
-            raise HTTPException(status_code=403, detail="You do not have access to this project.")
-    elif user.role == "lead":
-        if not user.full_name:
-            raise HTTPException(status_code=400, detail="Lead identity is required.")
-        lead_projects = db.query(models.WbsNode.project_id).filter_by(assigned_lead=user.full_name).distinct().all()
-        lead_project_ids = {p[0] for p in lead_projects}
-        if not lead_project_ids:
-            raise HTTPException(status_code=403, detail="You are not assigned to any projects.")
-        if project_id not in lead_project_ids:
-            raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    if user.role in ("lead", "engineer") and not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
 
     try:
         data = await get_sharepoint_mirror_data(project)
@@ -679,6 +910,102 @@ def list_employees(user: models.User = Depends(get_current_user), db: Session = 
     return db.query(models.Employee).order_by(models.Employee.name).all()
 
 
+@app.get("/api/projects/{project_id}/booked-engineers", response_model=List[schemas.EngineerOut])
+def list_project_booked_engineers(
+    project_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Engineers actually booked onto this project via Resource Booking.
+
+    This powers the WBS 'Assign Engineer' dropdown: only these engineers are
+    eligible for NEW task/subtask assignments, not the global employee list.
+    Existing WBS assignments are never touched by booking changes — removing a
+    booking does not auto-unassign tasks already handed out.
+    """
+    require_role(user.role, {"lead", "bu_head"})
+    project = db.query(models.Project).filter_by(id=project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if user.role == "lead" and not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    booked = (
+        db.query(models.Employee)
+        .join(models.ResourceBooking, models.ResourceBooking.employee_id == models.Employee.id)
+        .filter(models.ResourceBooking.project_id == project_id)
+        .order_by(models.Employee.name)
+        .all()
+    )
+    return booked
+
+
+def _parse_iso_date(value) -> Optional[date]:
+    """Parse an ISO 'YYYY-MM-DD' string (or date) into a date instance; None-safe."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def engineer_total_allocation(db: Session, employee_id: int, exclude_booking_id: Optional[int] = None) -> int:
+    """Sum an engineer's real booking percentage across ALL projects.
+
+    Optionally excludes one booking from the total (used when validating an
+    edit so the booking's own old value does not count against the cap).
+    """
+    query = db.query(models.ResourceBooking).filter_by(employee_id=employee_id)
+    if exclude_booking_id is not None:
+        query = query.filter(models.ResourceBooking.id != exclude_booking_id)
+    return sum(booking.utilization_rate or 0 for booking in query.all())
+
+
+def allocation_cap_error(employee_name: str, current: int, requested: int) -> str:
+    """Human-readable rejection message with the real numbers for the UI."""
+    remaining = max(0, 100 - current)
+    return (
+        f"{employee_name} is already allocated {current}% across other projects — "
+        f"only {remaining}% remaining, cannot book at {requested}%."
+    )
+
+
+def booking_effective_dates(db: Session, booking: models.ResourceBooking):
+    """Return (start, end) for a booking, preferring the stored allocation
+    date range and backfilling from the engineer's WBS node dates on the same
+    project where determinable. Never fabricates a range."""
+    start = booking.start_date
+    end = booking.end_date
+    if start and end:
+        return start, end
+
+    node_start = None
+    node_end = None
+    nodes = (
+        db.query(models.WbsNode)
+        .filter(
+            models.WbsNode.project_id == booking.project_id,
+            models.WbsNode.assigned_engineer_id == booking.employee_id,
+        )
+        .all()
+    )
+    for node in nodes:
+        if node.start_date and (node_start is None or node.start_date < node_start):
+            node_start = node.start_date
+        bound = node.end_date or node.target_due_date
+        if bound and (node_end is None or bound > node_end):
+            node_end = bound
+
+    return start or node_start, end or node_end
+
+
+def last_day_of_month(value: date) -> date:
+    import calendar
+    return date(value.year, value.month, calendar.monthrange(value.year, value.month)[1])
+
+
 def booking_output(db: Session, booking: models.ResourceBooking):
     employee = db.query(models.Employee).filter_by(id=booking.employee_id).first()
     utilization = float(booking.utilization_rate or 0)
@@ -690,9 +1017,12 @@ def booking_output(db: Session, booking: models.ResourceBooking):
         "discipline": employee.discipline if employee else "",
         "role_title": employee.role_title if employee else "",
         "planned_hours": booking.planned_hours,
+        "utilization_rate": utilization,
+        "start_date": booking.start_date.isoformat() if booking.start_date else None,
+        "end_date": booking.end_date.isoformat() if booking.end_date else None,
+        "total_allocation_pct": float(engineer_total_allocation(db, booking.employee_id)),
         "cost_per_hour": 0,
         "total_cost": 0,
-        "utilization_rate": utilization,
         "bench_status": "Fully Booked" if utilization >= 100 else "Near Capacity" if utilization >= 80 else "Available Bench",
         "approval_status": booking.approval_status,
         "submitted_at": booking.submitted_at.isoformat() if booking.submitted_at else None,
@@ -765,6 +1095,8 @@ def list_resource_bookings(project_id: int, user: models.User = Depends(get_curr
     project = db.query(models.Project).filter_by(id=project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found.")
+    if user.role in ("lead", "engineer") and not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
     query = db.query(models.ResourceBooking).filter_by(project_id=project_id)
     if user.role == "engineer":
         if not user.employee_id:
@@ -778,6 +1110,10 @@ def list_resource_bookings(project_id: int, user: models.User = Depends(get_curr
 def resource_summary(project_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     require_role(user.role, {"lead", "bu_head"})
     project = db.query(models.Project).filter_by(id=project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if user.role == "lead" and not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
     bookings = db.query(models.ResourceBooking).filter_by(project_id=project_id).all()
     total_hours = sum(booking.planned_hours for booking in bookings)
     return {
@@ -794,6 +1130,107 @@ def resource_summary(project_id: int, user: models.User = Depends(get_current_us
     }
 
 
+@app.get("/api/resource-bookings/gantt")
+def resource_booking_gantt(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Engineer assignment timeline for the Resource Booking page.
+
+    One entry per engineer who has at least one real booking. A lead sees the
+    engineers booked on any project they lead, each shown with their FULL
+    commitment across all projects (so overlapping assignments across
+    projects are visible). Date ranges come from the booking record, falling
+    back to the engineer's WBS node dates on that project where determinable.
+    """
+    require_role(user.role, {"lead", "bu_head"})
+
+    if user.role == "lead":
+        lead_ids = lead_project_ids(db, user)
+        if not lead_ids:
+            return {"engineers": [], "date_range": {"start": None, "end": None}, "count": 0}
+        scoped_bookings = (
+            db.query(models.ResourceBooking)
+            .filter(models.ResourceBooking.project_id.in_(lead_ids))
+            .all()
+        )
+    else:
+        scoped_bookings = db.query(models.ResourceBooking).all()
+
+    employee_ids = {booking.employee_id for booking in scoped_bookings}
+    if not employee_ids:
+        return {"engineers": [], "date_range": {"start": None, "end": None}, "count": 0}
+
+    # A lead sees each scoped engineer's full commitment across every project.
+    all_bookings = (
+        db.query(models.ResourceBooking)
+        .filter(models.ResourceBooking.employee_id.in_(employee_ids))
+        .order_by(models.ResourceBooking.employee_id, models.ResourceBooking.start_date)
+        .all()
+    )
+
+    employees = {
+        employee.id: employee
+        for employee in db.query(models.Employee).filter(models.Employee.id.in_(employee_ids)).all()
+    }
+    project_ids = {booking.project_id for booking in all_bookings}
+    projects = {
+        project.id: project
+        for project in db.query(models.Project).filter(models.Project.id.in_(project_ids or {-1})).all()
+    }
+
+    engineers_out = []
+    earliest = None
+    latest = None
+    for employee_id in sorted(employee_ids):
+        employee = employees.get(employee_id)
+        if employee is None:
+            continue
+        assignments = []
+        for booking in (booking for booking in all_bookings if booking.employee_id == employee_id):
+            start, end = booking_effective_dates(db, booking)
+            project = projects.get(booking.project_id)
+            assignments.append({
+                "booking_id": booking.id,
+                "project_id": booking.project_id,
+                "project_name": project.project_name if project else f"Project #{booking.project_id}",
+                "start_date": start.isoformat() if start else None,
+                "end_date": end.isoformat() if end else None,
+                "has_date_range": bool(start and end),
+                "utilization_rate": booking.utilization_rate or 0,
+                "planned_hours": booking.planned_hours or 0,
+                "approval_status": booking.approval_status,
+            })
+            if start and end:
+                if earliest is None or start < earliest:
+                    earliest = start
+                if latest is None or end > latest:
+                    latest = end
+        engineers_out.append({
+            "employee_id": employee.id,
+            "name": employee.name,
+            "employee_code": employee.employee_code,
+            "role_title": employee.role_title,
+            "discipline": employee.discipline,
+            "total_allocation_pct": engineer_total_allocation(db, employee.id),
+            "assignments": assignments,
+        })
+
+    engineers_out.sort(key=lambda row: row["name"])
+
+    date_range = {"start": None, "end": None}
+    if earliest and latest:
+        today = date.today()
+        start, end = earliest, latest
+        if today < start:
+            start = today
+        if today > end:
+            end = today
+        date_range = {
+            "start": date(start.year, start.month, 1).isoformat(),
+            "end": last_day_of_month(end).isoformat(),
+        }
+
+    return {"engineers": engineers_out, "date_range": date_range, "count": len(engineers_out)}
+
+
 @app.post("/api/projects/{project_id}/resource-bookings")
 def create_resource_booking(
     project_id: int,
@@ -802,19 +1239,97 @@ def create_resource_booking(
     db: Session = Depends(get_db),
 ):
     require_role(user.role, {"lead"})
-    if not db.query(models.Employee).filter_by(id=payload.get("employee_id")).first():
+    project = db.query(models.Project).filter_by(id=project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    employee = db.query(models.Employee).filter_by(id=payload.get("employee_id")).first()
+    if not employee:
         raise HTTPException(status_code=400, detail="Engineer not found.")
+    requested = int(payload.get("utilization_rate", 0))
+    current_allocation = engineer_total_allocation(db, employee.id)
+    if current_allocation + requested > 100:
+        raise HTTPException(
+            status_code=400,
+            detail=allocation_cap_error(employee.name, current_allocation, requested),
+            headers={"X-Error-Code": "ALLOCATION_LIMIT"},
+        )
     booking = models.ResourceBooking(
         project_id=project_id,
-        employee_id=int(payload["employee_id"]),
+        employee_id=employee.id,
         planned_hours=int(payload.get("planned_hours", 0)),
-        utilization_rate=int(payload.get("utilization_rate", 0)),
+        utilization_rate=requested,
+        start_date=_parse_iso_date(payload.get("start_date")),
+        end_date=_parse_iso_date(payload.get("end_date")),
         approval_status="draft",
     )
     db.add(booking)
     db.commit()
     db.refresh(booking)
     return booking_output(db, booking)
+
+
+@app.put("/api/projects/{project_id}/resource-bookings/{booking_id}")
+def update_resource_booking(
+    project_id: int,
+    booking_id: int,
+    payload: dict,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user.role, {"lead"})
+    booking = db.query(models.ResourceBooking).filter_by(id=booking_id, project_id=project_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Resource booking not found.")
+    project = db.query(models.Project).filter_by(id=project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    employee_id = int(payload.get("employee_id", booking.employee_id))
+    employee = db.query(models.Employee).filter_by(id=employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=400, detail="Engineer not found.")
+    requested = int(payload.get("utilization_rate", booking.utilization_rate or 0))
+    current_allocation = engineer_total_allocation(db, employee.id, exclude_booking_id=booking.id)
+    if current_allocation + requested > 100:
+        raise HTTPException(
+            status_code=400,
+            detail=allocation_cap_error(employee.name, current_allocation, requested),
+            headers={"X-Error-Code": "ALLOCATION_LIMIT"},
+        )
+    booking.employee_id = employee.id
+    booking.planned_hours = int(payload.get("planned_hours", booking.planned_hours or 0))
+    booking.utilization_rate = requested
+    if payload.get("start_date") is not None:
+        booking.start_date = _parse_iso_date(payload.get("start_date"))
+    if payload.get("end_date") is not None:
+        booking.end_date = _parse_iso_date(payload.get("end_date"))
+    db.commit()
+    db.refresh(booking)
+    return booking_output(db, booking)
+
+
+@app.delete("/api/projects/{project_id}/resource-bookings/{booking_id}")
+def delete_resource_booking(
+    project_id: int,
+    booking_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user.role, {"lead"})
+    booking = db.query(models.ResourceBooking).filter_by(id=booking_id, project_id=project_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Resource booking not found.")
+    project = db.query(models.Project).filter_by(id=project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    db.delete(booking)
+    db.commit()
+    return {"ok": True, "deleted_booking_id": booking_id}
 
 
 @app.post("/api/projects/{project_id}/resource-bookings/submit")
@@ -945,6 +1460,7 @@ def node_output(db: Session, node: models.WbsNode):
         wbs_code=node.wbs_code,
         task_name=node.task_name,
         assigned_lead=node.assigned_lead,
+        assigned_lead_user_id=node.assigned_lead_user_id,
         assigned_engineer_id=node.assigned_engineer_id,
         assigned_engineer_name=engineer.name if engineer else None,
         estimated_hours=node.estimated_hours,
@@ -991,6 +1507,8 @@ def validate_node_payload(db: Session, project_id: int, payload: schemas.WbsNode
             raise HTTPException(status_code=400, detail="WBS hierarchy supports three levels.")
     if payload.assigned_engineer_id is not None and not db.query(models.Employee).filter_by(id=payload.assigned_engineer_id).first():
         raise HTTPException(status_code=400, detail="Engineer not found.")
+    if payload.assigned_lead_user_id is not None and not db.query(models.User).filter_by(id=payload.assigned_lead_user_id, role="lead").first():
+        raise HTTPException(status_code=400, detail="Assigned lead user not found.")
 
 
 @app.get("/api/projects/{project_id}/wbs-structure", response_model=List[schemas.WbsNodeOut])
@@ -1001,12 +1519,17 @@ def list_wbs_structure(
     db: Session = Depends(get_db),
 ):
     require_role(user.role, {"lead", "bu_head", "engineer"})
+    project = db.query(models.Project).filter_by(id=project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if user.role in ("lead", "engineer") and not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
     query = db.query(models.WbsNode).filter_by(project_id=project_id)
     if user.role == "engineer":
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
         assigned_nodes = query.filter(
-            engineer_wbs_condition(user.employee_id, user.full_name)
+            engineer_wbs_condition(user.employee_id)
         ).all()
         if not include_ancestors:
             return [node_output(db, node) for node in assigned_nodes]
@@ -1070,12 +1593,10 @@ def scoped_wbs_tasks(
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
         query = query.filter(
-            engineer_wbs_condition(user.employee_id, user.full_name)
+            engineer_wbs_condition(user.employee_id)
         )
     elif user.role == "lead":
-        if not user.full_name:
-            raise HTTPException(status_code=400, detail="Lead identity is required.")
-        query = query.filter(models.WbsNode.assigned_lead == user.full_name)
+        query = query.filter(lead_node_condition(user))
     return query.order_by(models.WbsNode.wbs_code).all()
 
 
@@ -1087,14 +1608,17 @@ def list_timesheet_entries(
     db: Session = Depends(get_db),
 ):
     require_role(user.role, {"lead", "engineer", "bu_head"})
+    project = db.query(models.Project).filter_by(id=project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if user.role in ("lead", "engineer") and not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
     query = db.query(models.TimeLogEntry).filter_by(project_id=project_id)
     if user.role == "engineer":
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
         query = query.filter_by(employee_id=user.employee_id)
     elif user.role == "lead":
-        if not user.full_name:
-            raise HTTPException(status_code=400, detail="Lead identity is required.")
         lead_tasks = scoped_wbs_tasks(db, project_id, user)
         task_ids = [task.id for task in lead_tasks]
         query = query.filter(models.TimeLogEntry.task_id.in_(task_ids)) if task_ids else query.filter(models.TimeLogEntry.id < 0)
@@ -1113,6 +1637,8 @@ def project_timeline_logs(
     project = db.query(models.Project).filter_by(id=project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found.")
+    if user.role in ("lead", "engineer") and not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
 
     tasks = scoped_wbs_tasks(db, project_id, user)
     task_ids = [task.id for task in tasks]
@@ -1137,11 +1663,16 @@ def project_timeline_logs(
     for entry in entries:
         task_actual[entry.task_id] += time_entry_total(entry)
 
+    # A node is complete when its real flow reached a terminal status:
+    # 'Approved' (tasks) or 'Done' (subtasks) — plus the legacy 'Completed'.
+    completed_statuses = {"Done", "Approved", "Completed"}
+
     tasks_out = []
     for task in tasks:
         actual = task_actual.get(task.id, 0.0)
         estimated = task.estimated_hours or 0
-        if task.deliverable_status == "Completed":
+        is_complete = task.deliverable_status in completed_statuses
+        if is_complete:
             percent = 100.0
         elif estimated > 0:
             percent = min(100.0, round((actual / estimated) * 100, 1))
@@ -1154,11 +1685,13 @@ def project_timeline_logs(
             "parent_id": task.parent_id,
             "wbs_code": task.wbs_code,
             "task_name": task.task_name,
+            "phase": task.phase,
             "assigned_lead": task.assigned_lead,
             "assigned_engineer_id": task.assigned_engineer_id,
             "assigned_engineer_name": engineer.name if engineer else None,
             "estimated_hours": task.estimated_hours,
             "deliverable_status": task.deliverable_status,
+            "is_complete": is_complete,
             "start_date": task.start_date.isoformat() if task.start_date else None,
             "target_due_date": task.target_due_date.isoformat() if task.target_due_date else None,
             "end_date": task.end_date.isoformat() if task.end_date else None,
@@ -1170,6 +1703,24 @@ def project_timeline_logs(
     entries_out = [time_entry_output(db, entry) for entry in entries]
     engineer = db.query(models.Employee).filter_by(id=user.employee_id).first() if user.role == "engineer" and user.employee_id else None
 
+    # Per-phase rollup — the single, shared completion rule: a task counts as
+    # complete when its real status reached a terminal state ('Done'/'Approved',
+    # plus the legacy 'Completed'); phase % = completed tasks / total tasks.
+    # A phase with zero tasks never divides by zero; it just is not reported.
+    phase_map = {}
+    for task_out in tasks_out:
+        phase = task_out.get("phase") or "Space Planning"
+        stats = phase_map.setdefault(phase, {"phase": phase, "total_tasks": 0, "completed_tasks": 0})
+        stats["total_tasks"] += 1
+        if task_out["is_complete"]:
+            stats["completed_tasks"] += 1
+    phases_out = []
+    for stats in phase_map.values():
+        total = stats["total_tasks"]
+        stats["percent_complete"] = round((stats["completed_tasks"] / total) * 100) if total else 0
+        phases_out.append(stats)
+    phases_out.sort(key=lambda p: p["phase"])
+
     return {
         "project_id": project.id,
         "project_name": project.project_name,
@@ -1180,6 +1731,7 @@ def project_timeline_logs(
             "lead_name": user.full_name if user.role == "lead" else None,
         },
         "tasks": tasks_out,
+        "phases": phases_out,
         "time_entries": [entry.model_dump() for entry in entries_out],
         "engineers": [
             {"id": e.id, "employee_code": e.employee_code, "name": e.name, "role_title": e.role_title}
@@ -1191,7 +1743,7 @@ def project_timeline_logs(
             "pending_hours": round(sum(time_entry_total(e) for e in entries if e.approval_status == "pending_review"), 2),
             "scheduled_hours": sum(task.estimated_hours or 0 for task in tasks),
             "total_tasks": len(tasks),
-            "completed_tasks": sum(1 for task in tasks if task.deliverable_status == "Completed"),
+            "completed_tasks": sum(1 for task in tasks if task.deliverable_status in completed_statuses),
             "engineer_count": len(engineers),
         },
     }
@@ -1210,7 +1762,7 @@ def engineer_performance(
         raise HTTPException(status_code=404, detail="Employee record not found for this account.")
 
     nodes = db.query(models.WbsNode).filter(
-        engineer_wbs_condition(user.employee_id, user.full_name)
+        engineer_wbs_condition(user.employee_id)
     ).order_by(models.WbsNode.wbs_code).all()
     entries = (
         db.query(models.TimeLogEntry)
@@ -1297,16 +1849,19 @@ def engineer_performance(
     }
 
 
-def engineer_dashboard_data(db: Session, employee_id: int, full_name: str | None = None):
+def engineer_dashboard_data(db: Session, employee_id: int, project_id: int | None = None):
     """Compute engineer-scoped dashboard metrics from approved time entries."""
     from datetime import datetime, date
     from collections import defaultdict
     import calendar
 
-    # Get all WBS nodes assigned to this engineer (by employee id OR by name)
-    nodes = db.query(models.WbsNode).filter(
-        engineer_wbs_condition(employee_id, full_name)
-    ).all()
+    # Get all WBS nodes assigned to this engineer (by employee id only)
+    nodes_query = db.query(models.WbsNode).filter(
+        engineer_wbs_condition(employee_id)
+    )
+    if project_id:
+        nodes_query = nodes_query.filter(models.WbsNode.project_id == project_id)
+    nodes = nodes_query.all()
     if not nodes:
         return {
             "summary": {
@@ -1320,6 +1875,11 @@ def engineer_dashboard_data(db: Session, employee_id: int, full_name: str | None
                 "governance_exceeded": False,
                 "spi_value": None,
                 "spi_note": "No assigned tasks.",
+                "total_tasks": 0,
+                "started_tasks": 0,
+                "completed_tasks": 0,
+                "completion_pct": 0,
+                "schedule_status": None,
             },
             "projects": [],
             "monthly_breakdown": [],
@@ -1329,8 +1889,17 @@ def engineer_dashboard_data(db: Session, employee_id: int, full_name: str | None
     projects = db.query(models.Project).filter(models.Project.id.in_(project_ids)).all()
     project_by_id = {project.id: project for project in projects}
 
-    # Get all approved/pending time entries for this engineer across their projects
-    entries = db.query(models.TimeLogEntry).filter_by(employee_id=employee_id).all()
+    # Get all time entries for this engineer across their projects. Following
+    # the app's governance rule (same as the executive dashboard), consumption
+    # and threshold status count ALL LOGGED hours (approved + pending) — a time
+    # log the engineer just saved must move the dashboard immediately. SPI
+    # stays approved-only (earned value), so pending hours do not inflate it.
+    entries_query = db.query(models.TimeLogEntry).filter_by(employee_id=employee_id)
+    if project_id:
+        entries_query = entries_query.filter(models.TimeLogEntry.project_id == project_id)
+    entries = entries_query.all()
+    approved_entries = [entry for entry in entries if entry.approval_status == "approved"]
+    pending_entries = [entry for entry in entries if entry.approval_status == "pending_review"]
 
     # Aggregate by project
     per_project = {}
@@ -1350,35 +1919,68 @@ def engineer_dashboard_data(db: Session, employee_id: int, full_name: str | None
             "approved_hours": 0.0,
             "pending_hours": 0.0,
             "total_tasks": 0,
+            "started_tasks": 0,
             "completed_tasks": 0,
         }
+
+    # A node counts as STARTED once it has a real actual start timestamp (stamped
+    # by the advance-status flow on the first "In-Progress" transition) OR its
+    # current status is past "To Do" in the flow. It counts as COMPLETED once a
+    # task is "Approved" or a subtask is "Done" (legacy "Completed" also counts).
+    def _is_started(node):
+        if node.actual_start_datetime:
+            return True
+        status = map_status_for_display(node.deliverable_status)
+        if status == "Completed":
+            return True
+        if node.parent_id:
+            return status in {"In-Progress", "Done"}
+        return status in {"In-Progress", "Submitted for Approval", "Approved"}
+
+    def _is_completed(node):
+        status = map_status_for_display(node.deliverable_status)
+        if status == "Completed":
+            return True
+        if node.parent_id:
+            return status == "Done"
+        return status == "Approved"
 
     for node in nodes:
         row = per_project.get(node.project_id)
         if row:
             row["scheduled_hours"] += node.estimated_hours or 0
             row["total_tasks"] += 1
-            if node.deliverable_status == "Completed":
+            if _is_started(node):
+                row["started_tasks"] += 1
+            if _is_completed(node):
                 row["completed_tasks"] += 1
 
-    for entry in entries:
+    for entry in approved_entries:
         row = per_project.get(entry.project_id)
         if not row:
             continue
         total = time_entry_total(entry)
-        row["logged_hours"] = round(row["logged_hours"] + total, 2)
-        if entry.approval_status == "approved":
-            row["approved_hours"] = round(row["approved_hours"] + total, 2)
-        elif entry.approval_status == "pending_review":
-            row["pending_hours"] = round(row["pending_hours"] + total, 2)
+        row["approved_hours"] = round(row["approved_hours"] + total, 2)
 
-    # Compute per-project governance threshold status for the engineer
+    for entry in pending_entries:
+        row = per_project.get(entry.project_id)
+        if not row:
+            continue
+        total = time_entry_total(entry)
+        row["pending_hours"] = round(row["pending_hours"] + total, 2)
+
+    for row in per_project.values():
+        row["logged_hours"] = round(row["approved_hours"] + row["pending_hours"], 2)
+
+    # Compute per-project governance threshold status for the engineer from ALL
+    # LOGGED consumption against the project's real configured threshold, so a
+    # time log the engineer just saved is reflected immediately.
     for project_id in project_ids:
         row = per_project[project_id]
         threshold = row["governance_threshold_pct"]
         scheduled = row["scheduled_hours"]
-        logged = row["logged_hours"]
-        pct = round((logged / scheduled) * 100, 1) if scheduled else 0.0
+        consumed = row["logged_hours"]
+        pct = round((consumed / scheduled) * 100, 1) if scheduled else 0.0
         row["consumption_pct"] = pct
         row["exceeded"] = threshold is not None and scheduled > 0 and pct > threshold
 
@@ -1396,7 +1998,8 @@ def engineer_dashboard_data(db: Session, employee_id: int, full_name: str | None
             for month_key, hours in distributed.items():
                 monthly_planned[month_key] += hours
 
-    # Aggregate consumed hours by month, splitting normal vs exceeded per project
+    # Aggregate ALL LOGGED consumed hours by month (approved + pending),
+    # splitting normal vs exceeded per project, so new time logs move the chart.
     for entry in entries:
         total = time_entry_total(entry)
         if total <= 0:
@@ -1429,11 +2032,15 @@ def engineer_dashboard_data(db: Session, employee_id: int, full_name: str | None
             "exceeded_threshold": exceeded,
         })
 
-    # Compute totals across all projects
+    # Compute totals across all projects. Total hours consumption is the
+    # engineer's all LOGGED hours (approved + pending): a freshly saved time
+    # log updates the card immediately, matching the governance rule on the
+    # executive dashboard. Approved and pending totals are still reported
+    # separately for the card foot / transparency.
     total_scheduled = sum(p["scheduled_hours"] for p in per_project.values())
     total_approved = sum(p["approved_hours"] for p in per_project.values())
-    total_logged = sum(p["logged_hours"] for p in per_project.values())
     total_pending = sum(p["pending_hours"] for p in per_project.values())
+    total_logged = sum(p["logged_hours"] for p in per_project.values())
 
     consumption_pct = round((total_logged / total_scheduled) * 100, 1) if total_scheduled else 0.0
 
@@ -1452,6 +2059,46 @@ def engineer_dashboard_data(db: Session, employee_id: int, full_name: str | None
     else:
         spi_note = f"Behind plan — {total_approved:g} earned of {total_scheduled:g} planned baseline hours."
 
+    # Schedule health from REAL start timestamps vs planned start dates. For every
+    # assigned node the engineer has actually started (real actual_start_datetime)
+    # with a planned start date, compare the two: started on/before plan is on
+    # schedule, started after is behind. No timestamps recorded yet -> no verdict.
+    started_nodes = [node for node in nodes if node.actual_start_datetime]
+    planned_started = [node for node in started_nodes if node.start_date]
+    if planned_started:
+        late_starts = [node for node in planned_started if node.actual_start_datetime.date() > node.start_date]
+        early_starts = [node for node in planned_started if node.actual_start_datetime.date() < node.start_date]
+        if late_starts:
+            schedule_status = "behind"
+        elif early_starts and len(early_starts) == len(planned_started):
+            schedule_status = "ahead"
+        else:
+            schedule_status = "on schedule"
+    else:
+        schedule_status = None
+
+    if started_nodes:
+        if schedule_status == "behind":
+            late_descriptions = [
+                f"{node.task_name or node.wbs_code or 'task'} started {node.actual_start_datetime.date()} vs planned {node.start_date}"
+                for node in late_starts[:3]
+            ]
+            spi_note += (
+                " Started after the planned start (" + "; ".join(late_descriptions) + ") — behind schedule."
+            )
+        elif schedule_status == "ahead":
+            spi_note += " Started before the planned start — ahead of schedule."
+        elif schedule_status == "on schedule":
+            spi_note += " Started on or before the planned start — on schedule."
+        else:
+            spi_note += f" {len(started_nodes)} started task(s) with no planned start date recorded."
+
+    # Task-level progress counts derived purely from real node statuses.
+    total_tasks = sum(p["total_tasks"] for p in per_project.values())
+    total_started = sum(p["started_tasks"] for p in per_project.values())
+    total_completed = sum(p["completed_tasks"] for p in per_project.values())
+    completion_pct = round((total_completed / total_tasks) * 100) if total_tasks else 0
+
     # Convert projects to list
     projects_list = list(per_project.values())
 
@@ -1467,6 +2114,11 @@ def engineer_dashboard_data(db: Session, employee_id: int, full_name: str | None
             "governance_exceeded": governance_exceeded,
             "spi_value": spi_value,
             "spi_note": spi_note,
+            "total_tasks": total_tasks,
+            "started_tasks": total_started,
+            "completed_tasks": total_completed,
+            "completion_pct": completion_pct,
+            "schedule_status": schedule_status,
         },
         "projects": projects_list,
         "monthly_breakdown": monthly_breakdown,
@@ -1475,6 +2127,7 @@ def engineer_dashboard_data(db: Session, employee_id: int, full_name: str | None
 
 @app.get("/api/engineer-performance-dashboard", response_model=schemas.EngineerDashboardOut)
 def engineer_performance_dashboard(
+    project_id: int | None = None,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1485,7 +2138,15 @@ def engineer_performance_dashboard(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee record not found for this account.")
 
-    return engineer_dashboard_data(db, user.employee_id, user.full_name)
+    if project_id is not None:
+        assigned = set(engineer_wbs_ids(db, user.employee_id))
+
+        booked = {row.project_id for row in db.query(models.ResourceBooking)
+                  .filter_by(employee_id=user.employee_id).all()}
+        if project_id not in assigned | booked:
+            raise HTTPException(status_code=403, detail="This engineer is not assigned to the requested project.")
+
+    return engineer_dashboard_data(db, user.employee_id, project_id=project_id)
 
 
 @app.get("/api/projects/{project_id}/work-summary")
@@ -2204,6 +2865,22 @@ def cascade_phase(db: Session, parent_id: int, phase: str):
         cascade_phase(db, child.id, phase)
 
 
+def estimated_hours_from_dates(start_date, end_date):
+    """Derive estimated hours from a Start/End date range, server-side.
+
+    Every calendar day between Start and End (inclusive) counts as a working
+    day of 8 hours — weekends are NOT excluded. Computing on the server keeps
+    the stored value authoritative and consistent with the Add WBS Node form;
+    a client-supplied hours value is never trusted when both dates are present.
+    Returns None when a full range is not available, so callers fall back to
+    the value sent by the client (e.g. legacy nodes with hours but no dates).
+    """
+    if start_date is None or end_date is None:
+        return None
+    days = (end_date - start_date).days + 1
+    return days * 8 if days > 0 else None
+
+
 @app.post("/api/projects/{project_id}/wbs-nodes", response_model=schemas.WbsNodeOut, status_code=201)
 def create_wbs_node(
     project_id: int,
@@ -2224,6 +2901,12 @@ def create_wbs_node(
     if not phase:
         raise HTTPException(status_code=422, detail="Phase is required. Choose one of the five fixed phases.")
     node_data = payload.model_dump(exclude={"subtask"})
+    derived = estimated_hours_from_dates(node_data.get("start_date"), node_data.get("end_date"))
+    if derived is not None:
+        node_data["estimated_hours"] = derived
+    if not node_data.get("assigned_lead_user_id") and not node_data.get("assigned_lead"):
+        node_data["assigned_lead"] = user.full_name
+        node_data["assigned_lead_user_id"] = user.id
     node_data["phase"] = phase
     node = models.WbsNode(project_id=project_id, **node_data)
     db.add(node)
@@ -2240,6 +2923,7 @@ def create_wbs_node(
             wbs_code=child_code,
             task_name=payload.subtask.strip(),
             assigned_lead=node.assigned_lead,
+            assigned_lead_user_id=node.assigned_lead_user_id,
             estimated_hours=None,
             deliverable_status="Not Started",
             start_date=node.start_date,
@@ -2250,6 +2934,85 @@ def create_wbs_node(
         db.add(child)
         db.commit()
     return node_output(db, node)
+
+
+@app.post("/api/wbs-nodes/{node_id}/subtasks", response_model=schemas.WbsNodeOut, status_code=201)
+def create_wbs_subtask(
+    node_id: int,
+    payload: schemas.WbsNodeUpdate,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a subtask under an existing WBS node.
+
+    Both the assigned Lead (project scope) and the Engineer assigned to the
+    parent node can create subtasks. Visibility is inherited from the parent
+    (assigned lead + assigned engineer), so an Engineer-created subtask shows
+    up in the Lead's and BU Head's WBS views immediately, and vice versa.
+    """
+    parent = db.query(models.WbsNode).filter_by(id=node_id).first()
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent WBS node not found.")
+    project = db.query(models.Project).filter_by(id=parent.project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    if user.role == "engineer":
+        if not user.employee_id:
+            raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
+        if not user_can_access_project(db, user, project):
+            raise HTTPException(status_code=403, detail="You do not have access to this project.")
+        if not node_assigned_to_engineer(parent, user):
+            raise HTTPException(
+                status_code=403,
+                detail="You can only create subtasks under WBS nodes assigned to you.",
+            )
+    elif user.role == "lead":
+        if not user_can_access_project(db, user, project):
+            raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    else:
+        raise HTTPException(status_code=403, detail="This action is not allowed for the current role.")
+
+    if node_level(db, parent) >= 3:
+        raise HTTPException(status_code=400, detail="WBS hierarchy supports three levels.")
+
+    if payload.assigned_engineer_id is not None and not db.query(models.Employee).filter_by(
+        id=payload.assigned_engineer_id
+    ).first():
+        raise HTTPException(status_code=400, detail="Engineer not found.")
+
+    phase = payload.phase or parent.phase or "Space Planning"
+    derived_hours = estimated_hours_from_dates(payload.start_date, payload.end_date)
+    sibling_count = db.query(models.WbsNode).filter_by(project_id=parent.project_id, parent_id=parent.id).count()
+    child_code = None
+    if parent.wbs_code:
+        child_code = f"{str(parent.wbs_code).rstrip('.')}.{sibling_count + 1}"
+    elif payload.wbs_code:
+        child_code = str(payload.wbs_code).strip() or None
+    if child_code and db.query(models.WbsNode).filter_by(project_id=parent.project_id, wbs_code=child_code).first():
+        raise HTTPException(status_code=409, detail="WBS code already exists in this project.")
+
+    child = models.WbsNode(
+        project_id=parent.project_id,
+        parent_id=parent.id,
+        wbs_code=child_code,
+        task_name=payload.task_name.strip(),
+        assigned_lead=parent.assigned_lead or (user.full_name if user.role == "lead" else None),
+        assigned_lead_user_id=parent.assigned_lead_user_id or (user.id if user.role == "lead" else None),
+        assigned_engineer_id=payload.assigned_engineer_id
+        if payload.assigned_engineer_id is not None
+        else parent.assigned_engineer_id,
+        estimated_hours=derived_hours if derived_hours is not None else payload.estimated_hours,
+        deliverable_status="To Do",
+        start_date=payload.start_date if payload.start_date else parent.start_date,
+        target_due_date=payload.target_due_date if payload.target_due_date else parent.target_due_date,
+        end_date=payload.end_date if payload.end_date else parent.end_date,
+        phase=phase,
+    )
+    db.add(child)
+    db.commit()
+    db.refresh(child)
+    return node_output(db, child)
 
 
 @app.put("/api/wbs-nodes/{node_id}", response_model=schemas.WbsNodeOut)
@@ -2271,6 +3034,12 @@ def update_wbs_node(
         raise HTTPException(status_code=409, detail="WBS code already exists in this project.")
     for field, value in payload.model_dump(exclude={"subtask", "phase"}).items():
         setattr(node, field, value)
+    derived = estimated_hours_from_dates(payload.start_date, payload.end_date)
+    if derived is not None:
+        node.estimated_hours = derived
+    if node.assigned_lead_user_id is None and node.assigned_lead is None:
+        node.assigned_lead = user.full_name
+        node.assigned_lead_user_id = user.id
     phase_changed = payload.phase is not None and payload.phase != node.phase
     if payload.phase is not None:
         node.phase = payload.phase
@@ -2282,34 +3051,150 @@ def update_wbs_node(
     return node_output(db, node)
 
 
+@app.delete("/api/wbs-nodes/{node_id}")
+def delete_wbs_node(
+    node_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user.role, {"lead"})
+    node = db.query(models.WbsNode).filter_by(id=node_id).first()
+    if not node:
+        raise HTTPException(status_code=404, detail="WBS node not found.")
+    descendant_ids = []
+    stack = [node_id]
+    while stack:
+        current = stack.pop()
+        descendant_ids.append(current)
+        children = db.query(models.WbsNode.id).filter_by(parent_id=current).all()
+        stack.extend(cid for (cid,) in children)
+    db.query(models.WbsNodeHistory).filter(
+        models.WbsNodeHistory.node_id.in_(descendant_ids)
+    ).delete(synchronize_session=False)
+    db.query(models.TimeLogEntry).filter(
+        models.TimeLogEntry.task_id.in_(descendant_ids)
+    ).delete(synchronize_session=False)
+    db.query(models.WbsNode).filter(
+        models.WbsNode.id.in_(descendant_ids)
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True, "deleted_nodes": descendant_ids}
+
+
+_FIELD_ALIASES = {
+    "wbs_code": {"wbs_code", "code", "wbs", "wbs_no", "task_code", "task_no"},
+    "task_name": {"task_name", "task", "name", "taskname", "activity", "description", "deliverable"},
+    "parent_wbs_code": {"parent_wbs_code", "parent_code", "parent", "parent_wbs"},
+    "assigned_lead": {"assigned_lead", "lead", "lead_name", "leadname", "lead_wbs"},
+    "assigned_engineer": {"assigned_engineer", "engineer", "engineer_name", "assigned_engineer_name", "responsible_engineer"},
+    "assigned_engineer_id": {"assigned_engineer_id", "engineer_id", "engineer_no"},
+    "estimated_hours": {"estimated_hours", "hours", "planned_hours", "hours_planned", "duration"},
+    "deliverable_status": {"deliverable_status", "status", "deliverable", "wbs_status", "task_status"},
+    "target_due_date": {"target_due_date", "due_date", "target", "due", "target_date"},
+    "phase": {"phase", "wbs_phase", "phase_name", "wbs_phase_category"},
+}
+
+
+def _header_field(value):
+    token = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    if not token:
+        return None
+    for field, aliases in _FIELD_ALIASES.items():
+        if token in aliases or token.startswith(field + "_") or token == field:
+            return field
+    return None
+
+
+def _parse_xlsx_rows(content):
+    namespace = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    with zipfile.ZipFile(io.BytesIO(content)) as workbook:
+        shared = []
+        if "xl/sharedStrings.xml" in workbook.namelist():
+            shared_root = ElementTree.fromstring(workbook.read("xl/sharedStrings.xml"))
+            shared = ["".join(node.itertext()) for node in shared_root.findall("main:si", namespace)]
+        sheet_name = "xl/worksheets/sheet1.xml"
+        sheet_root = ElementTree.fromstring(workbook.read(sheet_name))
+        raw = []
+        for row in sheet_root.findall(".//main:row", namespace):
+            row_num = int(row.get("r") or 0)
+            cells = {}
+            for cell in row.findall("main:c", namespace):
+                ref = cell.get("r") or ""
+                letter = "".join(ch for ch in ref if ch.isalpha()).upper()
+                value_el = cell.find("main:v", namespace)
+                text = value_el.text if value_el is not None else ""
+                if cell.get("t") == "s" and text:
+                    text = shared[int(text)]
+                cells[letter] = text
+            raw.append((row_num, cells))
+    return raw
+
+
 def parse_wbs_upload(upload: UploadFile, content: bytes):
     filename = (upload.filename or "").lower()
     if filename.endswith(".xlsx") or filename.endswith(".xls"):
         if filename.endswith(".xls"):
             raise HTTPException(status_code=415, detail="Use .xlsx or .csv format for WBS upload.")
-        namespace = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-        with zipfile.ZipFile(io.BytesIO(content)) as workbook:
-            shared = []
-            if "xl/sharedStrings.xml" in workbook.namelist():
-                shared_root = ElementTree.fromstring(workbook.read("xl/sharedStrings.xml"))
-                shared = ["".join(node.itertext()) for node in shared_root.findall("main:si", namespace)]
-            sheet_name = "xl/worksheets/sheet1.xml"
-            sheet_root = ElementTree.fromstring(workbook.read(sheet_name))
-            rows = []
-            for row in sheet_root.findall(".//main:row", namespace):
-                values = []
-                for cell in row.findall("main:c", namespace):
-                    value = cell.find("main:v", namespace)
-                    text = value.text if value is not None else ""
-                    if cell.get("t") == "s" and text:
-                        text = shared[int(text)]
-                    values.append(text)
-                rows.append(values)
-        if not rows:
+        raw_rows = _parse_xlsx_rows(content)
+        keyed = True
+    else:
+        reader = csv.reader(io.StringIO(content.decode("utf-8-sig")))
+        raw_rows = [(reader.line_num, row) for row in reader]
+        keyed = False
+
+    if not raw_rows:
+        return []
+
+    def cell_item(entry, key):
+        cells = entry[1]
+        if keyed:
+            return cells.get(key, "")
+        return cells[key] if key < len(cells) else ""
+
+    def row_nz(entry):
+        vals = list(entry[1].values()) if keyed else entry[1]
+        return any(str(v).strip() for v in vals)
+
+    # Locate the header row: the first row containing a recognised
+    # "WBS Code" / "Task Name" column. Rows above it (title rows, notes)
+    # are ignored instead of being misread as the column headers.
+    header_index = None
+    for i, entry in enumerate(raw_rows):
+        fields = {_header_field(v) for v in entry[1].values()} if keyed else {_header_field(v) for v in entry[1]}
+        if "wbs_code" in fields or "task_name" in fields:
+            header_index = i
+            break
+    if header_index is None:
+        for i, entry in enumerate(raw_rows):
+            if row_nz(entry):
+                header_index = i
+                break
+        if header_index is None:
             return []
-        headers = [str(value or "").strip() for value in rows[0]]
-        return [dict(zip(headers, row)) for row in rows[1:]]
-    return list(csv.DictReader(io.StringIO(content.decode("utf-8-sig"))))
+
+    header_entry = raw_rows[header_index]
+    header_keys = sorted(header_entry[1].keys()) if keyed else list(range(len(header_entry[1])))
+    header_map = {key: field for key in header_keys if (field := _header_field(cell_item(header_entry, key)))}
+    header_sig = frozenset((field, str(cell_item(header_entry, key)).strip()) for key, field in sorted(header_map.items()))
+
+    parsed = []
+    for i, entry in enumerate(raw_rows):
+        if i <= header_index:
+            continue
+        if not row_nz(entry):
+            continue  # blank / spacer row
+        row_sig = frozenset((field, str(cell_item(entry, key)).strip()) for key, field in sorted(header_map.items()))
+        if row_sig == header_sig:
+            continue  # repeated header row
+        row_dict = {field: cell_item(entry, key) for key, field in header_map.items()}
+        # Summary rows (e.g. "Total" in the WBS Code column) are noise, not data
+        # errors - skip them instead of failing with "missing Task Name".
+        code_val = str(row_dict.get("wbs_code") or "").strip().lower()
+        if code_val in {"total", "totals", "subtotal", "grand total", "grand subtotal", "total hours"}:
+            continue
+        row_num = entry[0] or (i + 1)
+        parsed.append((row_num, row_dict))
+    return parsed
 
 
 @app.post("/api/projects/{project_id}/wbs-upload")
@@ -2321,6 +3206,11 @@ async def upload_wbs(
     db: Session = Depends(get_db),
 ):
     require_role(user.role, {"lead"})
+    project = db.query(models.Project).filter_by(id=project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
     requested_phase = phase.strip() if phase and phase.strip() else None
     if requested_phase and requested_phase not in schemas.WBS_PHASES:
         raise HTTPException(status_code=422, detail=f"Phase '{requested_phase}' is not one of the five fixed phases.")
@@ -2329,12 +3219,32 @@ async def upload_wbs(
         raise HTTPException(status_code=400, detail="The WBS file contains no rows.")
     created = updated = 0
     code_to_id = {node.wbs_code: node.id for node in db.query(models.WbsNode).filter_by(project_id=project_id).all()}
-    for row in rows:
+    employees = db.query(models.Employee).all()
+    engineer_by_name = {e.name.strip().lower(): e.id for e in employees}
+    # Highest numeric root currently in use (e.g. "100." / "1") so we can mint
+    # unique codes for rows uploaded without a WBS Code.
+    used_roots = set()
+    for c in code_to_id:
+        m = re.match(r"(\d+)", str(c))
+        if m:
+            used_roots.add(int(m.group(1)))
+    next_root = (max(used_roots) + 1) if used_roots else 1
+    invalid = []
+    for row_num, row in rows:
         normalized = {str(key).strip().lower().replace(" ", "_"): value for key, value in row.items()}
-        code = str(normalized.get("wbs_code") or normalized.get("code") or "").strip()
         task_name = str(normalized.get("task_name") or normalized.get("task") or normalized.get("name") or "").strip()
-        if not code or not task_name:
-            raise HTTPException(status_code=422, detail="Each WBS row needs WBS Code and Task Name.")
+        if not task_name:
+            parsed = {k: v for k, v in normalized.items() if k in ("wbs_code", "task_name", "parent_wbs_code", "assigned_lead", "assigned_engineer", "estimated_hours", "deliverable_status", "target_due_date", "phase")}
+            invalid.append((row_num, "Task Name", parsed))
+            continue
+        raw_code = str(normalized.get("wbs_code") or normalized.get("code") or "").strip()
+        if raw_code:
+            code = raw_code
+        else:
+            while f"{next_root}." in code_to_id:
+                next_root += 1
+            code = f"{next_root}."
+            next_root += 1
         due = normalized.get("target_due_date") or normalized.get("due_date") or None
         parent_code = str(normalized.get("parent_wbs_code") or normalized.get("parent_code") or "").strip()
         parent_id = int(normalized["parent_id"]) if normalized.get("parent_id") else code_to_id.get(parent_code)
@@ -2345,12 +3255,23 @@ async def upload_wbs(
             phase = phase_raw if phase_raw in schemas.WBS_PHASES else "Space Planning"
             if phase_raw and phase_raw not in schemas.WBS_PHASES:
                 raise HTTPException(status_code=422, detail=f"Phase '{phase_raw}' is not one of the five fixed phases.")
+        engineer_id = None
+        if normalized.get("assigned_engineer_id"):
+            engineer_id = int(normalized["assigned_engineer_id"])
+        elif normalized.get("assigned_engineer"):
+            name = str(normalized["assigned_engineer"]).strip()
+            engineer_id = engineer_by_name.get(name.lower())
+            if engineer_id is None:
+                parsed = {k: v for k, v in normalized.items() if k in ("wbs_code", "task_name", "parent_wbs_code", "assigned_lead", "assigned_engineer", "estimated_hours", "deliverable_status", "target_due_date", "phase")}
+                invalid.append((row_num, f"Assigned Engineer '{name}' not found", parsed))
+                continue
         payload = schemas.WbsNodeUpdate(
             wbs_code=code,
             task_name=task_name,
             parent_id=parent_id,
-            assigned_lead=normalized.get("assigned_lead") or None,
-            assigned_engineer_id=int(normalized["assigned_engineer_id"]) if normalized.get("assigned_engineer_id") else None,
+            assigned_lead=normalized.get("assigned_lead") or user.full_name,
+            assigned_lead_user_id=user.id,
+            assigned_engineer_id=engineer_id,
             estimated_hours=int(float(normalized.get("estimated_hours") or normalized.get("planned_hours") or 0)),
             deliverable_status=normalized.get("deliverable_status") or normalized.get("status") or "Not Started",
             target_due_date=due,
@@ -2373,6 +3294,14 @@ async def upload_wbs(
             created += 1
         saved_node = db.query(models.WbsNode).filter_by(project_id=project_id, wbs_code=code).first()
         code_to_id[code] = saved_node.id
+    if invalid:
+        print(f"[wbs-upload] REJECTED {len(invalid)} of {len(rows)} rows (project {project_id}):", flush=True)
+        for row_num, reason, parsed in invalid:
+            print(f"  - Excel row {row_num}: {reason}; parsed values: {parsed}", flush=True)
+        detail = "Upload rejected. " + "; ".join(
+            f"Row {row_num}: {reason} (parsed: {parsed})" for row_num, reason, parsed in invalid
+        )
+        raise HTTPException(status_code=422, detail=detail)
     return {"created": created, "updated": updated, "phase": requested_phase or None}
 
 
@@ -2458,8 +3387,24 @@ def get_node_detail(db: Session, node_id: int, user: models.User):
         parent_node = db.query(models.WbsNode).filter_by(id=node.parent_id).first()
 
     linked_code = parent_node.wbs_code if parent_node else None
+    linked_task_name = parent_node.task_name if parent_node else None
     ntype = "subtask" if node.parent_id else "task"
     display_status = map_status_for_display(node.deliverable_status)
+
+    children_out = [
+        {
+            "id": child.id,
+            "project_id": child.project_id,
+            "parent_id": child.parent_id,
+            "wbs_code": child.wbs_code,
+            "task_name": child.task_name,
+            "deliverable_status": map_status_for_display(child.deliverable_status),
+        }
+        for child in db.query(models.WbsNode)
+        .filter_by(parent_id=node_id)
+        .order_by(models.WbsNode.wbs_code, models.WbsNode.id)
+        .all()
+    ]
 
     return schemas.WbsNodeDetailOut(
         id=node.id,
@@ -2483,7 +3428,9 @@ def get_node_detail(db: Session, node_id: int, user: models.User):
         actual_end_datetime=node.actual_end_datetime.isoformat() if node.actual_end_datetime else None,
         node_type=ntype,
         linked_code=linked_code,
+        linked_task_name=linked_task_name,
         history=[schemas.WbsNodeHistoryOut.model_validate(h) for h in history],
+        children=children_out,
     )
 
 
@@ -2503,23 +3450,72 @@ def advance_wbs_node_status(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if user.role != "engineer":
-        raise HTTPException(status_code=403, detail="Only engineers can advance task status.")
-    if not user.employee_id:
-        raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
-
     node = db.query(models.WbsNode).filter_by(id=node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="WBS node not found.")
-    if not node_assigned_to_engineer(node, user):
-        raise HTTPException(status_code=403, detail="You can only update tasks assigned to you.")
+    is_subtask = node.parent_id is not None
+    project = db.query(models.Project).filter_by(id=node.project_id).first()
+
+    # Who may advance a node:
+    #  - Engineer: any WBS node assigned to them (tasks and subtasks).
+    #  - Lead: subtasks only (the engineer drives task statuses; the Lead
+    #    approves submitted tasks via the dedicated /approve action).
+    #  - BU Head: never.
+    if user.role == "engineer":
+        if not user.employee_id:
+            raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
+        if not node_assigned_to_engineer(node, user):
+            raise HTTPException(status_code=403, detail="You can only update tasks assigned to you.")
+    elif user.role == "lead":
+        if not node_assigned_to_lead(node, user):
+            raise HTTPException(
+                status_code=403,
+                detail="You can only update subtasks assigned under your WBS scope.",
+            )
+        if not is_subtask:
+            raise HTTPException(
+                status_code=403,
+                detail="Only engineers advance task statuses. Use the Approve action to approve a submitted task.",
+            )
+    else:
+        raise HTTPException(status_code=403, detail="Only engineers (and leads for subtasks) can advance status.")
 
     validation_error = validate_status_transition(node.deliverable_status, payload.new_status, node)
     if validation_error:
         raise HTTPException(status_code=400, detail=validation_error)
 
+    # Re-posting the current status is a no-op (e.g. 'In-Progress' while already
+    # awaiting approval, or re-submitting an already submitted task). Reject it
+    # instead of silently appending a duplicate history entry.
+    if map_status_for_display(node.deliverable_status) == payload.new_status:
+        raise HTTPException(status_code=400, detail=f"Task is already '{payload.new_status}'.")
+
+    # A task's 'Approved' step is a Lead-only approval decision — never a
+    # status an engineer can advance through on their own.
+    if not is_subtask and payload.new_status == "Approved":
+        raise HTTPException(
+            status_code=403,
+            detail="Only the Lead assigned to this task can approve it. Use the Approve action.",
+        )
+
+    # Parent task cannot be submitted for approval until ALL subtasks are Done.
+    if not is_subtask and payload.new_status == "Submitted for Approval":
+        blocking = incomplete_subtasks(db, node)
+        if blocking:
+            raise HTTPException(status_code=400, detail=subtask_gate_error(blocking))
+
     old_status = map_status_for_display(node.deliverable_status)
     node.deliverable_status = payload.new_status
+
+    # "Actual Start/End Date and Time" come from the real server clock at the
+    # moment this transition is processed — never from the client. A node's
+    # flow only moves forward here, but a Lead can still edit a status back
+    # via the update endpoint, so each timestamp is set on the FIRST genuine
+    # occurrence and preserved (never overwritten) on any later transition.
+    if payload.new_status == "In-Progress" and node.actual_start_datetime is None:
+        node.actual_start_datetime = datetime.now()
+    if is_subtask and payload.new_status == "Done" and node.actual_end_datetime is None:
+        node.actual_end_datetime = datetime.now()
 
     history_entry = models.WbsNodeHistory(
         node_id=node_id,
@@ -2539,6 +3535,74 @@ def advance_wbs_node_status(
         "ok": True,
         "node": node_output(db, node),
         "message": f"Status updated to '{payload.new_status}'." + (f" {payload.comment}" if payload.comment else ""),
+    }
+
+
+@app.post("/api/wbs-nodes/{node_id}/approve")
+def approve_wbs_node(
+    node_id: int,
+    payload: schemas.WbsNodeStatusUpdate,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Lead-only approval of a submitted parent task.
+
+    Moves a Task from 'Submitted for Approval' to 'Approved'. Only the Lead
+    assigned to that project/task can approve — BU Head is denied here. The
+    BU Head's role in this workflow is governance-level actions on the
+    Executive Dashboard, not individual task approval.
+    """
+    require_role(user.role, {"lead"})
+    node = db.query(models.WbsNode).filter_by(id=node_id).first()
+    if not node:
+        raise HTTPException(status_code=404, detail="WBS node not found.")
+    if node.parent_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Only parent tasks are approved. Subtasks move directly to 'Done'.",
+        )
+
+    project = db.query(models.Project).filter_by(id=node.project_id).first()
+    if not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    if not node_assigned_to_lead(node, user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the Lead assigned to this task can approve it.",
+        )
+
+    display_status = map_status_for_display(node.deliverable_status)
+    if display_status != "Submitted for Approval":
+        raise HTTPException(
+            status_code=409,
+            detail="This task is not 'Submitted for Approval', so it cannot be approved.",
+        )
+
+    blocking = incomplete_subtasks(db, node)
+    if blocking:
+        raise HTTPException(status_code=400, detail=subtask_gate_error(blocking))
+
+    node.deliverable_status = "Approved"
+    if node.actual_end_datetime is None:
+        node.actual_end_datetime = datetime.now()
+    history_entry = models.WbsNodeHistory(
+        node_id=node_id,
+        project_id=node.project_id,
+        user_id=user.id,
+        user_name=user.full_name or user.username,
+        action="status_change",
+        old_status="Submitted for Approval",
+        new_status="Approved",
+        comment=payload.comment,
+    )
+    db.add(history_entry)
+    db.commit()
+    db.refresh(node)
+
+    return {
+        "ok": True,
+        "node": node_output(db, node),
+        "message": "Task approved.",
     }
 
 

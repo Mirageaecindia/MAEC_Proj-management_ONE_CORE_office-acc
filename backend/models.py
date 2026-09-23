@@ -23,6 +23,11 @@ class Project(Base):
     project_lead_electrical = Column(String(150), nullable=True)
     project_lead_mechanical = Column(String(150), nullable=True)
     project_lead_bim = Column(String(150), nullable=True)
+    # Real Lead user IDs (users.id) backing the display-name columns above, so
+    # access-scoping uses real user ID matching instead of name strings.
+    project_lead_electrical_user_id = Column(Integer, nullable=True)
+    project_lead_mechanical_user_id = Column(Integer, nullable=True)
+    project_lead_bim_user_id = Column(Integer, nullable=True)
     sharepoint_disciplines = Column(Text, nullable=True)
     target_effort_hours = Column(Float, nullable=True, default=None)
 
@@ -72,6 +77,9 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(150), nullable=True)
     role = Column(String(20), nullable=False, index=True)  # bu_head | lead | engineer
+    # Discipline attribute for Lead accounts (Electrical / Mechanical / BIM),
+    # used to filter the real Lead accounts for project-lead assignment.
+    discipline = Column(String(100), nullable=True)
     # For leads/engineers this links the account to an employee row so
     # data scoping (assigned_lead, assigned_engineer_id) resolves server-side.
     employee_id = Column(Integer, nullable=True, index=True)
@@ -122,6 +130,8 @@ class ResourceBooking(Base):
     employee_id = Column(Integer, nullable=False, index=True)
     planned_hours = Column(Integer, nullable=False, default=0)
     utilization_rate = Column(Integer, nullable=False, default=0)
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
 
     # BU Head approval workflow state. draft -> pending_approval -> approved.
     approval_status = Column(String(20), nullable=False, default="draft", index=True)
@@ -154,6 +164,7 @@ class WbsNode(Base):
     wbs_code = Column(String(80), nullable=True, index=True)
     task_name = Column(String(240), nullable=False)
     assigned_lead = Column(String(150), nullable=True)
+    assigned_lead_user_id = Column(Integer, nullable=True)
     assigned_engineer_id = Column(Integer, nullable=True, index=True)
     estimated_hours = Column(Integer, nullable=True, default=None)
     deliverable_status = Column(String(40), nullable=False, default="To Do")

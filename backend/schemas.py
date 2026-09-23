@@ -14,7 +14,7 @@ PROJECT_TYPES = {
 
 WBS_PHASES = ("Space Planning", "STR Coordination", "ID Coordination", "BoH Area RCP Coordination", "Submission")
 
-WBS_TASK_STATUSES = ["To Do", "In-Progress", "Submitted for Review", "Approved"]
+WBS_TASK_STATUSES = ["To Do", "In-Progress", "Submitted for Approval", "Approved"]
 WBS_SUBTASK_STATUSES = ["To Do", "In-Progress", "Done"]
 
 WBS_STATUS_FLOWS = {
@@ -30,6 +30,7 @@ class LoginRequest(BaseModel):
 
 class LoginResponse(BaseModel):
     token: str
+    id: int
     role: str
     username: str
     full_name: Optional[str] = None
@@ -44,6 +45,7 @@ class UserOut(BaseModel):
     full_name: Optional[str] = None
     role: str
     employee_id: Optional[int] = None
+    discipline: Optional[str] = None
 
 
 class EngineerPerformanceOut(BaseModel):
@@ -84,6 +86,11 @@ class EngineerDashboardSummaryOut(BaseModel):
     governance_exceeded: bool
     spi_value: Optional[float]
     spi_note: str
+    total_tasks: int
+    started_tasks: int
+    completed_tasks: int
+    completion_pct: int
+    schedule_status: Optional[str] = None
 
 
 class EngineerDashboardOut(BaseModel):
@@ -140,6 +147,9 @@ class ProjectOut(ProjectBase):
     project_lead_electrical: Optional[str] = None
     project_lead_mechanical: Optional[str] = None
     project_lead_bim: Optional[str] = None
+    project_lead_electrical_user_id: Optional[int] = None
+    project_lead_mechanical_user_id: Optional[int] = None
+    project_lead_bim_user_id: Optional[int] = None
     sharepoint_disciplines: Optional[str] = None
     target_effort_hours: Optional[float] = None
     sharepoint_site_url: Optional[str] = None
@@ -158,6 +168,9 @@ class ProjectCreatePayload(BaseModel):
     project_lead_electrical: str
     project_lead_mechanical: str
     project_lead_bim: str
+    project_lead_electrical_user_id: Optional[int] = None
+    project_lead_mechanical_user_id: Optional[int] = None
+    project_lead_bim_user_id: Optional[int] = None
     target_start_date: Optional[date] = None
     sharepoint_disciplines: Optional[List[str]] = None
     total_contract_value: float = 0
@@ -207,6 +220,7 @@ class EngineerOut(BaseModel):
     name: str
     role_title: str
     discipline: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 class WbsTaskUpdate(BaseModel):
@@ -235,6 +249,7 @@ class WbsNodeBase(BaseModel):
     task_name: str
     parent_id: Optional[int] = None
     assigned_lead: Optional[str] = None
+    assigned_lead_user_id: Optional[int] = None
     assigned_engineer_id: Optional[int] = None
     estimated_hours: Optional[int] = None
     deliverable_status: str = "Not Started"
@@ -444,7 +459,9 @@ class WbsNodeDetailOut(WbsNodeOut):
     actual_end_datetime: Optional[str] = None
     node_type: str = "task"
     linked_code: Optional[str] = None
+    linked_task_name: Optional[str] = None
     history: List["WbsNodeHistoryOut"] = []
+    children: List[dict] = []
 
 
 class WbsNodeHistoryOut(BaseModel):
