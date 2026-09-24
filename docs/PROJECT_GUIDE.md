@@ -245,7 +245,7 @@ MAEC_project_management/
 - **Project scope:** `user_can_access_project` (in `app/services/access.py`) decides who can see a project.
   - **BU Head:** all projects.
   - **Lead:** projects where they're one of the three project leads, or where they're the assigned lead of any WBS node.
-  - **Engineer:** projects where they have a WBS assignment or a resource booking.
+  - **Engineer:** only projects where they have an **approved** resource booking. The BU Head's approval is the only thing that grants access; a draft or pending booking, or a WBS task on its own, grants none.
 - **Node scope:** `node_assigned_to_engineer` (by employee ID) and `node_assigned_to_lead` (by user ID, with a name fallback).
 
 ### 6.3 Data model
@@ -363,8 +363,8 @@ stateDiagram-v2
 - While a project is soft-locked, engineers can't log hours and leads can't approve.
 
 ### 7.6 Resource booking approval
-- Draft → Lead **Submit** (every booking on the project becomes `pending_approval`, plus a notification to the BU Head) → BU Head **Approve** (every booking becomes `approved`; the notification is marked read).
-- There is no reject step. Approval doesn't restrict assignment, and editing an approved booking doesn't reset its approval (see §13).
+- Draft → Lead **Submit** (every booking on the project becomes `pending_approval`, plus a notification to the BU Head) → BU Head **Approve** (every booking becomes `approved`) or **Reject** (every booking goes back to `draft` so the Lead can adjust and re-submit). Either decision marks the notification read.
+- **Approval grants the booked engineers access to the project** (its WBS, timesheets and dashboard). Editing an approved booking doesn't reset its approval yet (see §13).
 
 ### 7.7 Governance calculations (`executive_dashboard_data`)
 | Figure | Formula |
@@ -416,7 +416,8 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | GET | `/api/resource-bookings/gantt` | Lead, BU Head | Engineer assignment timeline across projects |
 | POST / PUT / DELETE | `/api/projects/{id}/resource-bookings[/{booking_id}]` | Lead | Create, edit or delete a booking (100% cap) |
 | POST | `/api/projects/{id}/resource-bookings/submit` | Lead | Submit for BU Head approval |
-| POST | `/api/projects/{id}/resource-bookings/approve` | BU Head | Approve all bookings of the project |
+| POST | `/api/projects/{id}/resource-bookings/approve` | BU Head | Approve all bookings of the project (grants engineer access) |
+| POST | `/api/projects/{id}/resource-bookings/reject` | BU Head | Send a pending submission back to draft |
 | GET | `/api/notifications` | all | Latest 50 notifications for the user's role or user ID |
 | POST | `/api/notifications/{id}/read` | recipient | Mark as read |
 

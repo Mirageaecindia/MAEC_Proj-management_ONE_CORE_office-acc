@@ -101,7 +101,8 @@ unchanged. **Change them in their new home**, not by re-adding them to `main.py`
 | `get_current_user`, `hash_password`, `verify_password` | `app/core/security.py` (`auth.py` re-exports them) |
 | `time_entry_total` (Mon–Fri rule) | `app/domain/timesheets.py` → `entry_total` |
 | `_get_month_key`, `_distribute_hours_over_months` | `app/domain/calendar.py` |
-| `engineer_wbs_condition`, `engineer_wbs_ids`, `lead_project_ids`, `user_can_access_project` | `app/services/access.py` |
+| `engineer_wbs_condition`, `engineer_wbs_ids`, `engineer_approved_project_ids`, `lead_project_ids`, `user_can_access_project` | `app/services/access.py` |
+| `reject_resource_bookings` endpoint | `app/api/routers/bu_head/resourcing.py` → `BookingApprovalService.reject` |
 | `executive_dashboard_data` | `app/services/metrics.py` |
 | `extension_request_output`, `find_pending_extension_request` | `app/services/governance.py` |
 | `booking_approval_status`, `BOOKING_APPROVAL_LABELS` | `app/services/booking_approval.py` |
