@@ -219,18 +219,38 @@ export function WbsStructurePage() {
         setError('Task Name is required.');
         return;
       }
-      if (estimatedPreview && estimatedPreview.error) {
-        setError('End Date must be on or after Start Date.');
-        return;
-      }
-      const hours = estimatedPreview
-        ? estimatedPreview.hours
-        : nodeForm.estimated_hours === '' || nodeForm.estimated_hours === null
-          ? null
-          : Number(nodeForm.estimated_hours);
-      if (hours !== null && Number.isNaN(hours)) {
-        setError('Estimated Hours must be a number.');
-        return;
+      let hours = null;
+      if (nodeMode === 'subtask' || (nodeMode === 'edit' && nodeForm.parent_id)) {
+        const rawHours = String(nodeForm.estimated_hours === null || nodeForm.estimated_hours === '' ? '' : nodeForm.estimated_hours).trim();
+        if (rawHours === '') {
+          setError('Subtask planned hours must be between 1 and 4 hours.');
+          return;
+        }
+        hours = Number(rawHours);
+        if (!Number.isInteger(hours) || hours < 1 || hours > 4) {
+          setError('Subtask planned hours must be between 1 and 4 hours.');
+          return;
+        }
+        if (nodeForm.start_date || nodeForm.end_date) {
+          if (!nodeForm.start_date || !nodeForm.end_date || nodeForm.start_date !== nodeForm.end_date) {
+            setError('A subtask must be completed within a single working day — Start Date and End Date must be identical.');
+            return;
+          }
+        }
+      } else {
+        if (estimatedPreview && estimatedPreview.error) {
+          setError('End Date must be on or after Start Date.');
+          return;
+        }
+        hours = estimatedPreview
+          ? estimatedPreview.hours
+          : nodeForm.estimated_hours === '' || nodeForm.estimated_hours === null
+            ? null
+            : Number(nodeForm.estimated_hours);
+        if (hours !== null && Number.isNaN(hours)) {
+          setError('Estimated Hours must be a number.');
+          return;
+        }
       }
       const payload = {
         wbs_code: nodeForm.wbs_code ? String(nodeForm.wbs_code).trim() : null,
@@ -596,7 +616,30 @@ export function WbsStructurePage() {
               <span>End Date</span>
               <input type="date" value={nodeForm.end_date} onChange={(e) => setNodeForm({ ...nodeForm, end_date: e.target.value })} />
             </label>
-            {estimatedPreview && estimatedPreview.error ? (
+            {nodeMode === 'subtask' || (nodeMode === 'edit' && nodeForm.parent_id) ? (
+              <div className="wbs-subtask-fields">
+                <label className="wbs-field-sm">
+                  <span>Estimated Hours <em className="req">*</em></span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="4"
+                    step="1"
+                    placeholder="1-4"
+                    value={nodeForm.estimated_hours === null || nodeForm.estimated_hours === '' ? '' : nodeForm.estimated_hours}
+                    onChange={(e) => setNodeForm({ ...nodeForm, estimated_hours: e.target.value })}
+                  />
+                </label>
+                {nodeForm.start_date && nodeForm.end_date && nodeForm.start_date !== nodeForm.end_date && (
+                  <div className="wbs-hours-calc warn" role="alert">A subtask must be completed within a single working day — Start Date and End Date must be identical.</div>
+                )}
+                {nodeForm.estimated_hours !== null && nodeForm.estimated_hours !== '' && (
+                  <div className="wbs-hours-calc">
+                    Estimated Hours: <strong>{nodeForm.estimated_hours} hrs</strong>
+                  </div>
+                )}
+              </div>
+            ) : estimatedPreview && estimatedPreview.error ? (
               <div className="wbs-hours-calc warn" role="alert">End Date must be on or after Start Date.</div>
             ) : estimatedPreview ? (
               <div className="wbs-hours-calc">
@@ -609,7 +652,7 @@ export function WbsStructurePage() {
                 <em>(entered previously — add dates to recalculate)</em>
               </div>
             ) : null}
-            {nodeMode !== 'edit' && (
+            {nodeMode === 'node' && (
               <label className="wbs-field">
                 <span>Subtask</span>
                 <input placeholder="Subtask name or description (saved as a child node)" value={nodeForm.subtask} onChange={(e) => setNodeForm({ ...nodeForm, subtask: e.target.value })} />

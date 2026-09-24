@@ -110,13 +110,26 @@ def test_editing_an_approved_booking_keeps_it_approved(client, world, booked_pro
     assert response.json()["approval_status"] == "approved"
 
 
-def test_bu_head_has_no_reject_action(client, world, booked_project):
-    # KNOWN (roadmap 7.1): there is no reject / send-back endpoint yet.
+def test_bu_head_can_reject_pending_submission_back_to_draft(client, world, booked_project):
     project_id, _ = booked_project
+    reject_url = f"/api/projects/{project_id}/resource-bookings/reject"
 
-    response = client.post(f"/api/projects/{project_id}/resource-bookings/reject", headers=world.bu_h)
+    # a draft is not pending, so it cannot be rejected
+    assert client.post(reject_url, headers=world.bu_h).status_code == 409
 
-    assert response.status_code in (404, 405)
+    _submit(client, world, project_id)
+    rejected = client.post(reject_url, headers=world.bu_h)
+    assert rejected.status_code == 200
+    assert rejected.json() == {"status": "draft", "status_label": "Draft"}
+
+    bookings = client.get(f"/api/projects/{project_id}/resource-bookings", headers=world.bu_h).json()
+    assert bookings[0]["approval_status"] == "draft"
+
+    # the Lead can adjust and re-submit after a rejection
+    assert client.post(f"/api/projects/{project_id}/resource-bookings/submit", headers=world.lead_h).status_code == 200
+    # only a BU Head can reject, and only while pending
+    assert client.post(reject_url, headers=world.lead_h).status_code == 403
+    assert client.post(reject_url, headers=world.bu_h).status_code == 200
 
 
 def test_notifications_can_only_be_marked_read_by_their_recipient(client, db, world, booked_project):
@@ -144,3 +157,94 @@ def test_assignment_gantt_lists_booked_engineers(client, world, booked_project):
     assert assignment["start_date"] == "2026-09-01"
     assert assignment["end_date"] == "2026-09-30"
     assert assignment["has_date_range"] is True
+
+
+# --- Engineer project access is gated on BU Head approval -----------------------------
+
+
+@pytest.fixture
+def assigned_project(db, make, client, world):
+    """A project with a draft booking for emp1 and a WBS task assigned to emp1."""
+    project_id = world.create_project()["id"]
+    booking = {
+        "employee_id": world.emp1.id,
+        "planned_hours": 80,
+        "utilization_rate": 50,
+        "start_date": "2026-09-01",
+        "end_date": "2026-09-30",
+    }
+    response = client.post(f"/api/projects/{project_id}/resource-bookings", json=booking, headers=world.lead_h)
+    assert response.status_code == 200, response.text
+    node = make.wbs_node(project_id, world.lead_e, engineer=world.emp1)
+    return project_id, node
+
+
+def _eng_list(client, world):
+    return {p["id"] for p in client.get("/api/projects", headers=world.eng_h).json()}
+
+
+def _eng_open(client, world, project_id):
+    return client.get(f"/api/projects/{project_id}", headers=world.eng_h)
+
+
+def _time_entry(client, world, project_id, node_id):
+    return client.post(
+        f"/api/projects/{project_id}/timesheet-entries",
+        json={"task_id": node_id, "week_start_date": "2026-09-07", "mon_hours": 2},
+        headers=world.eng_h,
+    )
+
+
+def test_engineer_has_no_project_access_while_draft(client, world, assigned_project):
+    project_id, node = assigned_project
+
+    assert _eng_list(client, world) == set()
+    assert _eng_open(client, world, project_id).status_code == 403
+    assert client.get(f"/api/projects/{project_id}/wbs-structure", headers=world.eng_h).status_code == 403
+    assert client.get(f"/api/projects/{project_id}/timeline-logs", headers=world.eng_h).status_code == 403
+    assert client.get(f"/api/wbs-nodes/{node.id}", headers=world.eng_h).status_code == 403
+    assert _time_entry(client, world, project_id, node.id).status_code == 403
+    body = client.get("/api/engineer-performance", headers=world.eng_h).json()
+    assert body["projects"] == []
+
+
+def test_engineer_still_has_no_access_while_pending_approval(client, world, assigned_project):
+    project_id, node = assigned_project
+    _submit(client, world, project_id)
+
+    assert _eng_list(client, world) == set()
+    assert _eng_open(client, world, project_id).status_code == 403
+    assert _time_entry(client, world, project_id, node.id).status_code == 403
+    assert client.get("/api/engineer-performance", headers=world.eng_h).json()["projects"] == []
+    # the engineer's dashboard must not leak the project either
+    dashboard = client.get("/api/engineer-performance-dashboard", headers=world.eng_h).json()
+    assert dashboard["projects"] == [] and dashboard["summary"]["total_tasks"] == 0
+
+
+def test_engineer_gains_project_access_only_after_approval(client, world, assigned_project):
+    project_id, node = assigned_project
+    _submit(client, world, project_id)
+    assert client.post(f"/api/projects/{project_id}/resource-bookings/approve", headers=world.bu_h).status_code == 200
+
+    assert _eng_list(client, world) == {project_id}
+    assert _eng_open(client, world, project_id).status_code == 200
+    rows = client.get(f"/api/projects/{project_id}/wbs-structure", headers=world.eng_h).json()
+    assert {row["id"] for row in rows} == {node.id}
+    assert client.get(f"/api/wbs-nodes/{node.id}", headers=world.eng_h).status_code == 200
+    assert _time_entry(client, world, project_id, node.id).status_code == 200
+    assert client.get("/api/engineer-performance", headers=world.eng_h).json()["projects"][0]["project_id"] == project_id
+    # with a project id the dashboard resolves instead of 403ing
+    assert (
+        client.get(f"/api/engineer-performance-dashboard?project_id={project_id}", headers=world.eng_h).status_code
+        == 200
+    )
+
+
+def test_rejected_assignment_grants_no_project_access(client, world, assigned_project):
+    project_id, node = assigned_project
+    _submit(client, world, project_id)
+    assert client.post(f"/api/projects/{project_id}/resource-bookings/reject", headers=world.bu_h).status_code == 200
+
+    assert _eng_list(client, world) == set()
+    assert _eng_open(client, world, project_id).status_code == 403
+    assert _time_entry(client, world, project_id, node.id).status_code == 403

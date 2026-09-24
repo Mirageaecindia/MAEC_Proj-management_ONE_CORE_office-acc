@@ -1,6 +1,61 @@
 """Session handling the BU Head relies on (login, restore, logout)."""
 
+import models
+from auth import hash_password
 from factories import PASSWORD
+
+# New accounts added alongside the pre-existing cast. Each test builds its own
+# copies so the suite is self-contained and never depends on (or touches) the
+# pre-existing accounts created by the `world` fixture.
+NEW_LEAD_PASSWORD = "pass123"
+NEW_LEADS = [
+    ("kiran", NEW_LEAD_PASSWORD, "Kiran", "Electrical"),
+    ("naveen", NEW_LEAD_PASSWORD, "Naveen", "Mechanical"),
+    ("pallavi", NEW_LEAD_PASSWORD, "Pallavi", "BIM"),
+]
+NEW_ENGINEERS = [
+    ("sanjana", NEW_LEAD_PASSWORD, "Sanjana"),
+    ("vivek", NEW_LEAD_PASSWORD, "Vivek"),
+    ("ritu", NEW_LEAD_PASSWORD, "Ritu"),
+]
+
+
+def _make_new_accounts(db, make):
+    """Create the 3 new Leads and 3 new Engineers (with linked employees)."""
+    rows = {}
+    for username, password, full_name, discipline in NEW_LEADS:
+        rows[username] = models.User(
+            username=username,
+            password_hash=hash_password(password),
+            full_name=full_name,
+            role="lead",
+            discipline=discipline,
+        )
+    for username, password, full_name in NEW_ENGINEERS:
+        employee = make.employee(full_name)
+        rows[username] = models.User(
+            username=username,
+            password_hash=hash_password(password),
+            full_name=full_name,
+            role="engineer",
+            employee_id=employee.id,
+        )
+    for row in rows.values():
+        db.add(row)
+    db.commit()
+    for row in rows.values():
+        db.refresh(row)
+    return rows
+
+
+def _login(client, username, password=NEW_LEAD_PASSWORD):
+    return client.post("/api/auth/login", json={"username": username, "password": password})
+
+
+def _login_headers(client, username):
+    response = _login(client, username)
+    assert response.status_code == 200, response.text
+    return {"Authorization": f"Bearer {response.json()['token']}"}
 
 
 def test_login_returns_token_and_role(client, world):
@@ -36,3 +91,120 @@ def test_logout_invalidates_token(client, world):
 def test_protected_endpoints_require_token(client, world):
     assert client.get("/api/projects").status_code == 401
     assert client.get("/api/projects", headers={"Authorization": "Bearer nope"}).status_code == 401
+
+
+# --- New accounts (Leads: kiran / naveen / pallavi, Engineers: sanjana / vivek / ritu) ---
+
+
+def test_new_leads_and_engineers_can_log_in(client, db, make):
+    accounts = _make_new_accounts(db, make)
+
+    for username, password, full_name, _discipline in NEW_LEADS:
+        response = _login(client, username, password)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["role"] == "lead"
+        assert body["full_name"] == full_name
+        assert body["engineer_id"] is None
+
+    for username, password, full_name in NEW_ENGINEERS:
+        response = _login(client, username, password)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["role"] == "engineer"
+        assert body["full_name"] == full_name
+        assert body["engineer_id"] == accounts[username].employee_id
+
+    assert _login(client, "kiran", "wrong-password").status_code == 401
+
+
+def test_new_leads_appear_in_discipline_dropdowns(client, db, make, world):
+    _make_new_accounts(db, make)
+
+    electrical = {lead["name"] for lead in client.get("/api/project-leads", params={"discipline": "electrical"}, headers=world.bu_h).json()}
+    mechanical = {lead["name"] for lead in client.get("/api/project-leads", params={"discipline": "mechanical"}, headers=world.bu_h).json()}
+    bim = {lead["name"] for lead in client.get("/api/project-leads", params={"discipline": "bim"}, headers=world.bu_h).json()}
+
+    assert "Kiran" in electrical and {"Anita Kumar", "Unassigned Lead"} <= electrical
+    assert "Naveen" in mechanical and {"Priya Nair"} <= mechanical
+    assert "Pallavi" in bim and {"Mohan Daniel"} <= bim
+    # each new lead appears only in their own discipline dropdown
+    assert "Kiran" not in mechanical and "Kiran" not in bim
+    assert "Naveen" not in electrical and "Naveen" not in bim
+    assert "Pallavi" not in electrical and "Pallavi" not in mechanical
+
+
+def test_new_engineers_appear_in_employee_dropdowns(client, db, make, world):
+    _make_new_accounts(db, make)
+
+    employees = {employee["name"] for employee in client.get("/api/employees", headers=world.lead_h).json()}
+    engineers = {employee["name"] for employee in client.get("/api/engineers", headers=world.lead_h).json()}
+
+    expected_new = {"Sanjana", "Vivek", "Ritu"}
+    assert expected_new <= employees
+    assert expected_new <= engineers
+    assert {"Arjun Mehta", "Ravi Kumar"} <= employees
+
+
+def test_project_scoped_to_new_lead_only(client, db, make, world):
+    accounts = _make_new_accounts(db, make)
+    kiran = accounts["kiran"]
+
+    project = world.create_project(
+        project_lead_electrical="Kiran",
+        project_lead_electrical_user_id=kiran.id,
+    )
+
+    kiran_sees = {p["id"] for p in client.get("/api/projects", headers=_login_headers(client, "kiran")).json()}
+    assert project["id"] in kiran_sees
+
+    for other in ("naveen", "pallavi"):
+        other_ids = {p["id"] for p in client.get("/api/projects", headers=_login_headers(client, other)).json()}
+        assert project["id"] not in other_ids
+        assert client.get(f"/api/projects/{project['id']}", headers=_login_headers(client, other)).status_code == 403
+
+    # existing lead accounts are not affected by the new lead assignment
+    assert client.get("/api/projects", headers=world.other_lead_h).json() == []
+
+
+def test_engineer_assignment_scopes_project_to_that_engineer_only(client, db, make, world):
+    accounts = _make_new_accounts(db, make)
+    kiran = accounts["kiran"]
+
+    project = world.create_project(
+        project_lead_electrical="Kiran",
+        project_lead_electrical_user_id=kiran.id,
+    )
+
+    kiran_h = _login_headers(client, "kiran")
+    sanjana_employee_id = accounts["sanjana"].employee_id
+    booking = client.post(
+        f"/api/projects/{project['id']}/resource-bookings",
+        json={"employee_id": sanjana_employee_id, "planned_hours": 40, "utilization_rate": 50},
+        headers=kiran_h,
+    )
+    assert booking.status_code == 200, booking.text
+
+    booked_names = {
+        engineer["name"]
+        for engineer in client.get(f"/api/projects/{project['id']}/booked-engineers", headers=kiran_h).json()
+    }
+    assert "Sanjana" in booked_names
+
+    # Lead assignment (draft booking) alone grants NO project access — the
+    # project must not appear for the engineer until the BU Head approves.
+    assert client.get("/api/projects", headers=_login_headers(client, "sanjana")).json() == []
+
+    submit = client.post(f"/api/projects/{project['id']}/resource-bookings/submit", headers=kiran_h)
+    assert submit.status_code == 200
+    assert client.get("/api/projects", headers=_login_headers(client, "sanjana")).json() == []
+
+    approve = client.post(f"/api/projects/{project['id']}/resource-bookings/approve", headers=world.bu_h)
+    assert approve.status_code == 200
+
+    sanjana_ids = {p["id"] for p in client.get("/api/projects", headers=_login_headers(client, "sanjana")).json()}
+    assert project["id"] in sanjana_ids
+
+    for other in ("vivek", "ritu"):
+        other_ids = {p["id"] for p in client.get("/api/projects", headers=_login_headers(client, other)).json()}
+        assert project["id"] not in other_ids

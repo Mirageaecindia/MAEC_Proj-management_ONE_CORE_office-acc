@@ -558,6 +558,26 @@ def engineer_wbs_ids(db: Session, employee_id: int) -> set:
     }
 
 
+def engineer_approved_project_ids(db: Session, employee_id: int) -> set:
+    """Projects where this engineer has an APPROVED resource booking.
+
+    BU Head approval of the Lead's engineer assignment is the ONLY event that
+    grants an engineer access to a project. A draft or pending booking grants
+    no access — the engineer only sees the project once a booking is
+    'approved'. No name-based matching.
+    """
+    return {
+        project_id
+        for (project_id,) in db.query(models.ResourceBooking.project_id)
+        .filter(
+            models.ResourceBooking.employee_id == employee_id,
+            models.ResourceBooking.approval_status == "approved",
+        )
+        .distinct()
+        .all()
+    }
+
+
 def lead_project_ids(db: Session, user: models.User) -> set:
     """Projects assigned to this lead, resolved by the lead's REAL user id.
 
@@ -647,8 +667,10 @@ def user_can_access_project(db: Session, user: models.User, project: models.Proj
 
     BU Head sees everything. Leads see projects where their real user id is
     recorded as an assigned lead (electrical/mechanical/BIM) or as a real WBS
-    assigned-lead. Engineers see projects where their real employee id appears
-    in a WBS assignment or resource booking. No name-based matching.
+    assigned-lead. Engineers see a project only when their real employee id has
+    an APPROVED resource booking on it — a Lead assignment (draft or pending
+    booking, or a WBS task) alone never grants an engineer project access.
+    No name-based matching.
     """
     if user.role == "bu_head":
         return True
@@ -659,15 +681,7 @@ def user_can_access_project(db: Session, user: models.User, project: models.Proj
     if user.role == "engineer":
         if not user.employee_id:
             return False
-        wbs_ids = engineer_wbs_ids(db, user.employee_id)
-        booked_ids = {
-            pid
-            for (pid,) in db.query(models.ResourceBooking.project_id)
-            .filter_by(employee_id=user.employee_id)
-            .distinct()
-            .all()
-        }
-        return project.id in (wbs_ids | booked_ids)
+        return project.id in engineer_approved_project_ids(db, user.employee_id)
     return False
 
 
@@ -809,8 +823,9 @@ def list_projects(
 ):
     query = db.query(models.Project)
     # Role scoping for the Project Name selector: BU Head sees all projects;
-    # Leads see only projects where they are assigned; Engineers see only projects
-    # where they have real WBS task assignments or resource bookings.
+    # Leads see only projects where they are assigned; Engineers see only
+    # projects where their engineer assignment has been APPROVED by the BU Head
+    # (draft or pending bookings grant no access).
     if user.role == "lead":
         assigned_ids = lead_project_ids(db, user)
         if not assigned_ids:
@@ -819,15 +834,7 @@ def list_projects(
     elif user.role == "engineer":
         if not user.employee_id:
             return []
-        wbs_ids = engineer_wbs_ids(db, user.employee_id)
-        booked_ids = {
-            project_id
-            for (project_id,) in db.query(models.ResourceBooking.project_id)
-            .filter_by(employee_id=user.employee_id)
-            .distinct()
-            .all()
-        }
-        project_ids = wbs_ids | booked_ids
+        project_ids = engineer_approved_project_ids(db, user.employee_id)
         if not project_ids:
             return []
         query = query.filter(models.Project.id.in_(project_ids))
@@ -1411,6 +1418,41 @@ def approve_resource_bookings(
     }
 
 
+@app.post("/api/projects/{project_id}/resource-bookings/reject")
+def reject_resource_bookings(
+    project_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """BU Head sends a pending resource-booking submission back to the Lead.
+
+    Bookings return to 'draft' so the Lead can adjust and re-submit. Rejection
+    (or simply never approving) is what keeps an engineer from ever getting
+    project access: approval is the only event that grants it.
+    """
+    require_role(user.role, {"bu_head"})
+    project = db.query(models.Project).filter_by(id=project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    bookings = db.query(models.ResourceBooking).filter_by(project_id=project_id).all()
+    if not bookings:
+        raise HTTPException(status_code=400, detail="No resource bookings have been assigned.")
+    current = booking_approval_status(db, project_id)
+    if current == "approved":
+        raise HTTPException(status_code=409, detail="This resource booking has already been approved.")
+    if current != "pending_approval":
+        raise HTTPException(status_code=409, detail="This resource booking is not pending approval.")
+
+    for booking in bookings:
+        booking.approval_status = "draft"
+        booking.submitted_at = None
+    db.commit()
+    return {
+        "status": "draft",
+        "status_label": BOOKING_APPROVAL_LABELS["draft"],
+    }
+
+
 @app.get("/api/notifications")
 def list_notifications(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     require_role(user.role, {"bu_head", "lead", "engineer"})
@@ -1787,16 +1829,28 @@ def engineer_performance(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee record not found for this account.")
 
-    nodes = db.query(models.WbsNode).filter(
-        engineer_wbs_condition(user.employee_id)
-    ).order_by(models.WbsNode.wbs_code).all()
-    entries = (
-        db.query(models.TimeLogEntry)
-        .filter_by(employee_id=user.employee_id)
-        .order_by(models.TimeLogEntry.week_start_date.desc())
-        .all()
-    )
-
+    nodes = []
+    entries = []
+    approved_ids = engineer_approved_project_ids(db, user.employee_id)
+    if approved_ids:
+        nodes = (
+            db.query(models.WbsNode)
+            .filter(
+                engineer_wbs_condition(user.employee_id),
+                models.WbsNode.project_id.in_(approved_ids),
+            )
+            .order_by(models.WbsNode.wbs_code)
+            .all()
+        )
+        entries = (
+            db.query(models.TimeLogEntry)
+            .filter(
+                models.TimeLogEntry.employee_id == user.employee_id,
+                models.TimeLogEntry.project_id.in_(approved_ids),
+            )
+            .order_by(models.TimeLogEntry.week_start_date.desc())
+            .all()
+        )
     node_by_id = {node.id: node for node in nodes}
     project_ids = {node.project_id for node in nodes}
     projects = (
@@ -1881,14 +1935,11 @@ def engineer_dashboard_data(db: Session, employee_id: int, project_id: int | Non
     from collections import defaultdict
     import calendar
 
-    # Get all WBS nodes assigned to this engineer (by employee id only)
-    nodes_query = db.query(models.WbsNode).filter(
-        engineer_wbs_condition(employee_id)
-    )
-    if project_id:
-        nodes_query = nodes_query.filter(models.WbsNode.project_id == project_id)
-    nodes = nodes_query.all()
-    if not nodes:
+    # Get all WBS nodes assigned to this engineer (by employee id only) within
+    # projects the BU Head has APPROVED for them. Unapproved projects are never
+    # surfaced to the engineer through their dashboard.
+    approved_ids = engineer_approved_project_ids(db, employee_id)
+    if not approved_ids:
         return {
             "summary": {
                 "total_hours_consumption": 0.0,
@@ -1911,6 +1962,14 @@ def engineer_dashboard_data(db: Session, employee_id: int, project_id: int | Non
             "monthly_breakdown": [],
         }
 
+    nodes_query = db.query(models.WbsNode).filter(
+        engineer_wbs_condition(employee_id),
+        models.WbsNode.project_id.in_(approved_ids),
+    )
+    if project_id:
+        nodes_query = nodes_query.filter(models.WbsNode.project_id == project_id)
+    nodes = nodes_query.all()
+
     project_ids = {node.project_id for node in nodes}
     projects = db.query(models.Project).filter(models.Project.id.in_(project_ids)).all()
     project_by_id = {project.id: project for project in projects}
@@ -1920,7 +1979,10 @@ def engineer_dashboard_data(db: Session, employee_id: int, project_id: int | Non
     # and threshold status count ALL LOGGED hours (approved + pending) — a time
     # log the engineer just saved must move the dashboard immediately. SPI
     # stays approved-only (earned value), so pending hours do not inflate it.
-    entries_query = db.query(models.TimeLogEntry).filter_by(employee_id=employee_id)
+    entries_query = db.query(models.TimeLogEntry).filter(
+        models.TimeLogEntry.employee_id == employee_id,
+        models.TimeLogEntry.project_id.in_(approved_ids),
+    )
     if project_id:
         entries_query = entries_query.filter(models.TimeLogEntry.project_id == project_id)
     entries = entries_query.all()
@@ -2165,11 +2227,8 @@ def engineer_performance_dashboard(
         raise HTTPException(status_code=404, detail="Employee record not found for this account.")
 
     if project_id is not None:
-        assigned = set(engineer_wbs_ids(db, user.employee_id))
-
-        booked = {row.project_id for row in db.query(models.ResourceBooking)
-                  .filter_by(employee_id=user.employee_id).all()}
-        if project_id not in assigned | booked:
+        approved = engineer_approved_project_ids(db, user.employee_id)
+        if project_id not in approved:
             raise HTTPException(status_code=403, detail="This engineer is not assigned to the requested project.")
 
     return engineer_dashboard_data(db, user.employee_id, project_id=project_id)
@@ -2801,6 +2860,8 @@ def submit_time_log(
     project = db.query(models.Project).filter_by(id=project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found.")
+    if not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
     if project.timesheets_soft_locked:
         raise HTTPException(
             status_code=409,
@@ -2898,13 +2959,13 @@ DAILY_WORK_HOURS = 8
 
 def validate_subtask_rules(estimated_hours, start_date, end_date):
     """Enforce the subtask working-time rules that underpin automatic
-    tracking: planned hours are 1-4 only (whole hours) and a subtask is a
-    single-day unit whose Start and End dates must be identical.
+    tracking: planned hours are required and must be 1-4 whole hours, and a
+    subtask is a single-day unit whose Start and End dates must be identical.
 
     Only values explicitly present on the payload are checked, so subtasks
     that inherit dates from their parent main task keep working.
     """
-    if estimated_hours is not None and not (SUBTASK_MIN_HOURS <= estimated_hours <= SUBTASK_MAX_HOURS):
+    if estimated_hours is None or not (SUBTASK_MIN_HOURS <= estimated_hours <= SUBTASK_MAX_HOURS):
         raise HTTPException(
             status_code=400,
             detail=f"Subtask planned hours must be between {SUBTASK_MIN_HOURS} and {SUBTASK_MAX_HOURS} hours.",
@@ -3659,6 +3720,9 @@ def get_node_detail(db: Session, node_id: int, user: models.User):
     if user.role == "engineer":
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
+        project = db.query(models.Project).filter_by(id=node.project_id).first()
+        if not project or not user_can_access_project(db, user, project):
+            raise HTTPException(status_code=403, detail="You do not have access to this project.")
         if not node_assigned_to_engineer(node, user):
             raise HTTPException(status_code=403, detail="You can only view tasks assigned to you.")
     elif user.role == "lead":

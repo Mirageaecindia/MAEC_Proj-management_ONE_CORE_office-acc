@@ -199,9 +199,23 @@ def test_lead_and_engineer_project_lists_are_scoped(client, make, world):
     make.wbs_node(visible["id"], world.lead_e, engineer=world.emp1)
 
     lead_ids = {p["id"] for p in client.get("/api/projects", headers=world.lead_h).json()}
-    eng_ids = {p["id"] for p in client.get("/api/projects", headers=world.eng_h).json()}
-
     assert visible["id"] in lead_ids
+
+    # A Lead assignment (WBS task + draft booking) alone grants the engineer NO
+    # project access — BU Head approval is the only grant.
+    booking = client.post(
+        f"/api/projects/{visible['id']}/resource-bookings",
+        json={"employee_id": world.emp1.id, "planned_hours": 80, "utilization_rate": 50},
+        headers=world.lead_h,
+    )
+    assert booking.status_code == 200, booking.text
+    assert client.get("/api/projects", headers=world.eng_h).json() == []
+
+    client.post(f"/api/projects/{visible['id']}/resource-bookings/submit", headers=world.lead_h)
+    assert client.get("/api/projects", headers=world.eng_h).json() == []
+
+    client.post(f"/api/projects/{visible['id']}/resource-bookings/approve", headers=world.bu_h)
+    eng_ids = {p["id"] for p in client.get("/api/projects", headers=world.eng_h).json()}
     assert eng_ids == {visible["id"]}
 
 

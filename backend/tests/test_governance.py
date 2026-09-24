@@ -13,11 +13,27 @@ import models
 
 
 @pytest.fixture
-def governed(make, world):
+def governed(client, make, world):
     project = world.create_project(
         total_contract_value=100000, alert_override_threshold_pct=80, target_effort_hours=500
     )
     project_id = project["id"]
+    # The engineer must be booked and the booking APPROVED before they can log
+    # hours (access is only granted by BU Head approval of the assignment).
+    booking = client.post(
+        f"/api/projects/{project_id}/resource-bookings",
+        json={
+            "employee_id": world.emp1.id,
+            "planned_hours": 100,
+            "utilization_rate": 50,
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-30",
+        },
+        headers=world.lead_h,
+    )
+    assert booking.status_code == 200, booking.text
+    assert client.post(f"/api/projects/{project_id}/resource-bookings/submit", headers=world.lead_h).status_code == 200
+    assert client.post(f"/api/projects/{project_id}/resource-bookings/approve", headers=world.bu_h).status_code == 200
     node_a = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, estimated_hours=40)
     node_b = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, estimated_hours=60)
     make.time_entry(project_id, node_a, world.emp1, 30, status="approved")
