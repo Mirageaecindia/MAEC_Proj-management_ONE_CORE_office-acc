@@ -23,10 +23,10 @@ from sqlalchemy.orm import Session
 
 import models
 import schemas
-import sharepoint_service
 from auth import get_current_user, verify_password
 from database import Base, SessionLocal, engine, get_db
-from sharepoint_service import get_sharepoint_mirror_data, SharePointError
+from app.api import api_router
+from app.core.errors import register_exception_handlers
 
 logger = logging.getLogger(__name__)
 
@@ -699,210 +699,16 @@ def task_output(db: Session, task: models.GanttTask):
     )
 
 
-@app.get("/api/project-leads", response_model=List[schemas.ProjectLeadOut])
-def list_project_leads(
-    discipline: Optional[str] = None,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Return the real Lead user accounts (role=lead), optionally filtered by
-    discipline. Each entry is a real User row: id = users.id, name = display
-    name, title = discipline. The Create Project form uses this list to build
-    its Electrical / Mechanical / BIM project-lead dropdowns."""
-    require_role(user.role, {"bu_head", "lead", "engineer"})
-    query = db.query(models.User).filter(models.User.role == "lead")
-    if discipline:
-        normalized = str(discipline).strip().lower()
-        mapping = {"electrical": "Electrical", "mechanical": "Mechanical", "bim": "BIM"}
-        target = mapping.get(normalized)
-        if target:
-            query = query.filter(models.User.discipline == target)
-    leads = query.order_by(models.User.username).all()
-    return [
-        schemas.ProjectLeadOut(
-            id=lead.id,
-            name=lead.full_name or lead.username,
-            title=lead.discipline,
-        )
-        for lead in leads
-    ]
 
 
-@app.post("/api/projects", response_model=schemas.CreateProjectOut, status_code=201)
-async def create_project(
-    payload: schemas.ProjectCreatePayload,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"bu_head"})
-    # The BU Head 'Create Project' form posts a JSON body. Map its fields onto
-    # the existing projects table (same model as GET /api/projects — no
-    # duplicate table/model). The single project_lead column keeps the primary
-    # (electrical) lead for compatibility with any existing read paths.
-    if db.query(models.Project).filter_by(project_code=payload.project_code).first():
-        raise HTTPException(status_code=409, detail="Project Code already exists")
-
-    def resolve_lead(user_id: Optional[int], display_name: str) -> "tuple[str, Optional[int]]":
-        """Resolve the selected Lead to a display name + real user id.
-
-        The Create Project dropdowns now carry real Lead user ids; when one is
-        provided the display name is taken from the real account (so scoping
-        and display always agree). Falls back to the posted name for legacy
-        callers.
-        """
-        if user_id is not None:
-            lead = db.query(models.User).filter_by(id=user_id, role="lead").first()
-            if not lead:
-                raise HTTPException(status_code=400, detail="Selected Lead is not a valid Lead account.")
-            return lead.full_name or lead.username, lead.id
-        return display_name, None
-
-    elect_name, elect_id = resolve_lead(payload.project_lead_electrical_user_id, payload.project_lead_electrical)
-    mech_name, mech_id = resolve_lead(payload.project_lead_mechanical_user_id, payload.project_lead_mechanical)
-    bim_name, bim_id = resolve_lead(payload.project_lead_bim_user_id, payload.project_lead_bim)
-
-    db_project = models.Project(
-        project_name=payload.project_name,
-        project_code=payload.project_code,
-        client_organization=payload.client_customer,
-        project_lead=elect_name,
-        start_date=payload.target_start_date,
-        project_lead_electrical=elect_name,
-        project_lead_mechanical=mech_name,
-        project_lead_bim=bim_name,
-        project_lead_electrical_user_id=elect_id,
-        project_lead_mechanical_user_id=mech_id,
-        project_lead_bim_user_id=bim_id,
-        sharepoint_disciplines=json.dumps(payload.sharepoint_disciplines) if payload.sharepoint_disciplines else None,
-        contract_value=payload.total_contract_value,
-        contract_currency=payload.contract_currency,
-        governance_threshold_pct=payload.alert_override_threshold_pct,
-        target_effort_hours=payload.target_effort_hours,
-    )
-
-    try:
-        db.add(db_project)
-        db.commit()
-        db.refresh(db_project)
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Project Code already exists")
-
-    data = schemas.ProjectOut.model_validate(db_project).model_dump()
-
-    # Provision SharePoint directory if disciplines were selected
-    if payload.sharepoint_disciplines:
-        try:
-            sharepoint_url = await sharepoint_service.provision_sharepoint_directory(db_project)
-            db_project.sharepoint_site_url = sharepoint_url
-            db.commit()
-            db.refresh(db_project)
-            data["sharepoint_status"] = "provisioned"
-            data["sharepoint_site_url"] = sharepoint_url
-        except sharepoint_service.SharePointError as e:
-            logger.error(f"SharePoint provisioning failed for project {db_project.project_code}: {e}")
-            data["sharepoint_status"] = "failed"
-            data["sharepoint_site_url"] = None
-            data["sharepoint_error"] = str(e)
-        except Exception as e:
-            logger.exception(f"Unexpected SharePoint error for project {db_project.project_code}")
-            data["sharepoint_status"] = "error"
-            data["sharepoint_site_url"] = None
-            data["sharepoint_error"] = f"Unexpected error: {str(e)}"
-    else:
-        data["sharepoint_status"] = "not_requested"
-        data["sharepoint_site_url"] = None
-
-    return data
 
 
-@app.get("/api/projects", response_model=List[schemas.ProjectOut])
-def list_projects(
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    query = db.query(models.Project)
-    # Role scoping for the Project Name selector: BU Head sees all projects;
-    # Leads see only projects where they are assigned; Engineers see only
-    # projects where their engineer assignment has been APPROVED by the BU Head
-    # (draft or pending bookings grant no access).
-    if user.role == "lead":
-        assigned_ids = lead_project_ids(db, user)
-        if not assigned_ids:
-            return []
-        query = query.filter(models.Project.id.in_(assigned_ids))
-    elif user.role == "engineer":
-        if not user.employee_id:
-            return []
-        project_ids = engineer_approved_project_ids(db, user.employee_id)
-        if not project_ids:
-            return []
-        query = query.filter(models.Project.id.in_(project_ids))
-    return query.order_by(models.Project.created_at.desc()).all()
 
 
-@app.get("/api/projects/{project_id}", response_model=schemas.ProjectOut)
-def get_project(project_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    project = db.query(models.Project).get(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
-    return project
 
 
-@app.delete("/api/projects/{project_id}")
-def delete_project(project_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    require_role(user.role, {"bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    # The dev database has no foreign-key cascade, so remove the project and
-    # every child row explicitly (children are only ever owned by this project).
-    db.query(models.WbsNode).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.WbsNodeHistory).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.GanttTask).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.ResourceBooking).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.TimeLogEntry).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.GovernanceAction).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.ExtensionRequest).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.query(models.Notification).filter_by(project_id=project_id).delete(synchronize_session=False)
-    db.delete(project)
-    db.commit()
-    return {"ok": True, "deleted_project_id": project_id}
 
 
-@app.get("/api/projects/{project_id}/sharepoint-mirror")
-async def get_sharepoint_mirror(
-    project_id: int,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Get real SharePoint mirror data for a project.
-    Accessible by BU Head, Lead, and Engineer for projects they have access to.
-    """
-    # Role-based access: all three roles can view
-    require_role(user.role, {"bu_head", "lead", "engineer"})
-
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    # Additional scoping: Lead and Engineer must have access to this project
-    if user.role in ("lead", "engineer") and not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
-
-    try:
-        data = await get_sharepoint_mirror_data(project)
-        return data
-    except SharePointError as e:
-        logger.error(f"SharePoint mirror error for project {project.project_code}: {e}")
-        raise HTTPException(status_code=502, detail=f"SharePoint error: {str(e)}")
-    except Exception as e:
-        logger.exception(f"Unexpected error fetching SharePoint mirror for project {project.project_code}")
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
 @app.get("/api/engineers", response_model=List[schemas.EngineerOut])
@@ -2777,28 +2583,7 @@ def stop_execution(
     return action
 
 
-@app.post("/api/projects/{project_id}/governance/reject-extension", response_model=schemas.GovernanceActionOut)
-def reject_extension(
-    project_id: int,
-    payload: schemas.GovernanceActionBase,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    request = find_pending_extension_request(db, project_id)
-    if not request:
-        raise HTTPException(status_code=409, detail="No pending extension request is available to reject.")
-    request = decide_extension_request(db, project, request, "reject", payload.comments, user)
-    action = (
-        db.query(models.GovernanceAction)
-        .filter_by(extension_request_id=request.id, action="reject_extension")
-        .order_by(models.GovernanceAction.id.desc())
-        .first()
-    )
-    return action
+
 
 
 @app.post("/api/projects/{project_id}/governance/request-extension", response_model=schemas.GovernanceActionOut)
@@ -2823,28 +2608,7 @@ def request_extension(
     return action
 
 
-@app.post("/api/projects/{project_id}/governance/approve-extension", response_model=schemas.GovernanceActionOut)
-def approve_extension(
-    project_id: int,
-    payload: schemas.GovernanceActionBase,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    request = find_pending_extension_request(db, project_id)
-    if not request:
-        raise HTTPException(status_code=409, detail="No pending extension request is available to approve.")
-    request = decide_extension_request(db, project, request, "approve", payload.comments, user)
-    action = (
-        db.query(models.GovernanceAction)
-        .filter_by(extension_request_id=request.id, action="approve_extension")
-        .order_by(models.GovernanceAction.id.desc())
-        .first()
-    )
-    return action
+
 
 
 @app.post("/api/projects/{project_id}/timesheet-entries")
@@ -4021,3 +3785,7 @@ def get_server_date():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+app.include_router(api_router)
+register_exception_handlers(app)

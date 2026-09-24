@@ -54,15 +54,16 @@ def get_current_user(
     db: Session = Depends(get_db),
 ) -> models.User:
     """FastAPI dependency returning the authenticated user, or 401."""
+    SESSION_ERROR = "Session expired or invalid — please log in again."
     token = bearer_token(authorization)
     if not token:
-        raise HTTPException(status_code=401, detail="Authentication required.")
+        raise HTTPException(status_code=401, detail=SESSION_ERROR)
     session = db.query(models.LoginSession).filter_by(token=token).first()
     if not session:
-        raise HTTPException(status_code=401, detail="Session expired or invalid.")
+        raise HTTPException(status_code=401, detail=SESSION_ERROR)
     user = db.get(models.User, session.user_id)
     if not user:
-        raise HTTPException(status_code=401, detail="User not found.")
+        raise HTTPException(status_code=401, detail=SESSION_ERROR)
     return user
 
 

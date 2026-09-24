@@ -217,3 +217,40 @@ def test_engineer_assignment_scopes_project_to_that_engineer_only(client, db, ma
     for other in ("vivek", "ritu"):
         other_ids = {p["id"] for p in client.get("/api/projects", headers=_login_headers(client, other)).json()}
         assert project["id"] not in other_ids
+
+
+def test_status_change_endpoints_reject_missing_and_invalid_sessions(client, make, world):
+    """The Engineer's task status-change actions (advance, subtask Done,
+    approve) must reject missing / stale / invalid sessions with 401 and the
+    re-login message, and accept a real Engineer session via /api/auth/login."""
+    project = world.create_project()
+    node = make.wbs_node(project["id"], world.lead_e, engineer=world.emp1)
+
+    advance_url = f"/api/wbs-nodes/{node.id}/advance-status"
+    approve_url = f"/api/wbs-nodes/{node.id}/approve"
+    status_payload = {"new_status": "In-Progress"}
+
+    # Missing session
+    for url, payload in ((advance_url, status_payload), (approve_url, status_payload)):
+        response = client.post(url, json=payload)
+        assert response.status_code == 401
+        assert "Session expired or invalid" in response.json()["detail"]
+
+    # Client-side stale / fabricated session
+    bad_headers = {"Authorization": "Bearer deadbeefcafe"}
+    for url, payload in ((advance_url, status_payload), (approve_url, status_payload)):
+        response = client.post(url, json=payload, headers=bad_headers)
+        assert response.status_code == 401
+
+    # Session that was valid but has since logged out server-side
+    assert client.post("/api/auth/logout", headers=world.eng_h).status_code == 200
+    assert client.post(advance_url, json=status_payload, headers=world.eng_h).status_code == 401
+
+    # A real Engineer session (fresh login through the auth API) succeeds
+    login = client.post("/api/auth/login", json={"username": "eng.arjun", "password": PASSWORD})
+    assert login.status_code == 200
+    engineer_h = {"Authorization": f"Bearer {login.json()['token']}"}
+
+    advanced = client.post(advance_url, json=status_payload, headers=engineer_h)
+    assert advanced.status_code == 200, advanced.text
+    assert advanced.json()["ok"] is True

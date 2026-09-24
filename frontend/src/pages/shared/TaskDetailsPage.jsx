@@ -33,7 +33,7 @@ function formatDate(dateStr) {
 export function TaskDetailsPage() {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
-    const { role, authHeaders } = useAuth();
+    const { role, authHeaders, logout } = useAuth();
     const isEngineer = role === 'engineer';
     const isLead = role === 'lead';
 
@@ -150,6 +150,7 @@ export function TaskDetailsPage() {
                 }),
             });
             const body = await resp.json().catch(() => ({}));
+            if (resp.status === 401) { await logout(); return; }
             if (!resp.ok) throw new Error(body.detail || 'Could not update status.');
             setCommentText('');
             setStatusSelect('');
@@ -180,6 +181,7 @@ export function TaskDetailsPage() {
                 body: JSON.stringify({ new_status: pendingStatus, comment: null }),
             });
             const body = await resp.json().catch(() => ({}));
+            if (resp.status === 401) { await logout(); return; }
             if (!resp.ok) throw new Error(body.detail || 'Could not update status.');
             setPendingStatus(null);
             setConfirmError('');
@@ -204,6 +206,7 @@ export function TaskDetailsPage() {
                 body: JSON.stringify({ new_status: 'Approved', comment: commentText || null }),
             });
             const body = await resp.json().catch(() => ({}));
+            if (resp.status === 401) { await logout(); return; }
             if (!resp.ok) throw new Error(body.detail || 'Could not approve the task.');
             setCommentText('');
             showToast('success', 'Task approved.');
@@ -225,6 +228,7 @@ export function TaskDetailsPage() {
                 body: JSON.stringify({ comment: commentText }),
             });
             const body = await resp.json().catch(() => ({}));
+            if (resp.status === 401) { await logout(); return; }
             if (!resp.ok) throw new Error(body.detail || 'Could not add comment.');
             setCommentText('');
             showToast('success', 'Comment added.');
@@ -295,6 +299,7 @@ export function TaskDetailsPage() {
                     body: JSON.stringify({ active_seconds: secondsRef.current }),
                 });
                 const body = await resp.json().catch(() => ({}));
+                if (resp.status === 401) { await logout(); return; }
                 if (resp.status === 409) {
                     setPaused(true);
                     const now = Date.now();
@@ -312,7 +317,7 @@ export function TaskDetailsPage() {
         };
         const id = window.setInterval(sync, SYNC_INTERVAL_MS);
         return () => window.clearInterval(id);
-    }, [session, paused, authHeaders, showToast]);
+    }, [session, paused, authHeaders, showToast, logout]);
 
     async function startTracking() {
         if (!isEngineer || node?.node_type !== 'subtask' || trackingBusy) return;
@@ -324,6 +329,7 @@ export function TaskDetailsPage() {
                 body: JSON.stringify({ subtask_id: nodeId }),
             });
             const body = await resp.json().catch(() => ({}));
+            if (resp.status === 401) { await logout(); return; }
             if (!resp.ok) throw new Error(body.detail || 'Could not start tracking.');
             secondsRef.current = body.active_seconds || 0;
             setSession(body);
@@ -348,6 +354,7 @@ export function TaskDetailsPage() {
                 body: JSON.stringify({ active_seconds: secondsRef.current }),
             });
             const body = await resp.json().catch(() => ({}));
+            if (resp.status === 401) { await logout(); return; }
             if (!resp.ok) throw new Error(body.detail || 'Could not stop tracking.');
             setSession(null);
             setOtherSessionActive(false);
