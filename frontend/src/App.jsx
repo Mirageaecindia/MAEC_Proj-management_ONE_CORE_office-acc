@@ -38,6 +38,7 @@ const ResourceBookingPage = lazyPage(
 );
 const TimelineLogsPage = lazyPage(() => import('./pages/shared/TimelineLogsPage'), 'TimelineLogsPage');
 const WbsStructurePage = lazyPage(() => import('./pages/shared/WbsStructurePage'), 'WbsStructurePage');
+const EngineerWeeklyLogsPage = lazyPage(() => import('./pages/shared/EngineerWeeklyLogsPage'), 'EngineerWeeklyLogsPage');
 const TaskDetailsPage = lazyPage(() => import('./pages/shared/TaskDetailsPage'), 'TaskDetailsPage');
 
 function ExecutiveDashboardRouter() {
@@ -125,6 +126,14 @@ function AppRoutes() {
           element={
             <WorkspaceRoute roles={['lead', 'engineer', 'bu_head']} subtitle="Timeline & Logs">
               <TimelineLogsPage />
+            </WorkspaceRoute>
+          }
+        />
+        <Route
+          path="/weekly-logs"
+          element={
+            <WorkspaceRoute roles={['lead', 'engineer', 'bu_head']} subtitle="Engineer Weekly Logs">
+              <EngineerWeeklyLogsPage />
             </WorkspaceRoute>
           }
         />

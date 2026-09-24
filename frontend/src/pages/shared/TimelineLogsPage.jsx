@@ -1,13 +1,25 @@
 import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const DAY_FIELDS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+export const DAY_FIELDS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+const WEEKLY_SUBMISSION_LABELS = {
+  not_submitted: 'Not Submitted',
+  submitted: 'Submitted for Approval',
+  approved: 'Approved',
+  rejected: 'Rejected',
+};
+const WEEKLY_SUBMISSION_PILL = {
+  not_submitted: 'status-none',
+  submitted: 'status-pending',
+  approved: 'status-approved',
+  rejected: 'status-rejected',
+};
 // Automatic subtask tracking only ever lands on Monday-Friday; Saturday and
 // Sunday always display 0 and never contribute to a week's total.
-const WORKDAY_FIELDS = ['mon', 'tue', 'wed', 'thu', 'fri'];
+export const WORKDAY_FIELDS = ['mon', 'tue', 'wed', 'thu', 'fri'];
 
 const WBS_PHASES = ['Space Planning', 'STR Coordination', 'ID Coordination', 'BoH Area RCP Coordination'];
 const INITIAL_VIEWPORT_START = new Date(2026, 8, 1);
@@ -18,7 +30,7 @@ const INITIAL_VIEWPORT_MONTH_COUNT =
   INITIAL_VIEWPORT_START.getMonth() +
   1;
 
-function getMonday(d) {
+export function getMonday(d) {
   const date = new Date(d);
   const day = date.getDay();
   const diff = date.getDate() - day + (day === 0 ? -6 : 1);
@@ -27,14 +39,14 @@ function getMonday(d) {
   return monday;
 }
 
-function formatDateStr(dateObj) {
+export function formatDateStr(dateObj) {
   const y = dateObj.getFullYear();
   const m = String(dateObj.getMonth() + 1).padStart(2, '0');
   const d = String(dateObj.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
 
-function getWeekInfo(monday) {
+export function getWeekInfo(monday) {
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
 
@@ -82,6 +94,7 @@ export function TimelineLogsPage() {
   const [selectedId, setSelectedId] = useState('');
   const [nodes, setNodes] = useState([]);
   const [entries, setEntries] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
   const [timelineTasks, setTimelineTasks] = useState([]);
   const [timelinePhases, setTimelinePhases] = useState([]);
   const [currentMonday, setCurrentMonday] = useState(() => getMonday(new Date()));
@@ -89,6 +102,7 @@ export function TimelineLogsPage() {
 
   const [error, setError] = useState('');
   const [tick, setTick] = useState(0);
+  const weekRequestRef = useRef('');
 
   useEffect(() => {
     const timer = setInterval(() => setTick((t) => t + 1), 60000);
@@ -103,7 +117,7 @@ export function TimelineLogsPage() {
           const data = await response.json();
           setServerDate(new Date(data.date));
         }
-      } catch (err) {
+      } catch {
         console.warn('Could not fetch server date, using local date');
         setServerDate(new Date());
       }
@@ -137,27 +151,48 @@ export function TimelineLogsPage() {
   }, [targetProjectId, authHeaders]);
 
   const weekStartStr = useMemo(() => formatDateStr(currentMonday), [currentMonday]);
+  // Tracks the week the user is actually viewing right now. Assigned during
+  // render, so it can never lag behind a stale effect/closure: effect callbacks
+  // that read it always act on the current week.
+  const weekStartRef = useRef(weekStartStr);
+  weekStartRef.current = weekStartStr;
 
   const loadProjectData = async (id, weekStr) => {
+    const requestKey = `${id}:${weekStr}`;
+    weekRequestRef.current = requestKey;
+    setError('');
+    // The Weekly Hours sheet is scoped to the selected week: never keep the
+    // previous week's rows/status lingering under a changed week header while
+    // the new week's data is loading.
+    setEntries([]);
+    setSubmissions([]);
     try {
-      setError('');
-      const [nodesRes, timesheetRes] = await Promise.all([
+      const [nodesRes, timesheetRes, submissionsRes] = await Promise.all([
         fetch(`${API_BASE_URL}/api/projects/${id}/wbs-structure`, { headers: authHeaders() }),
         // source=tracking feeds this sheet exclusively from automatic Engineer
         // subtask working-time logs: only subtasks that have tracked hours are
         // returned, each as its own row.
         fetch(`${API_BASE_URL}/api/projects/${id}/timesheet?week_start=${weekStr}&source=tracking`, { headers: authHeaders() }),
+        fetch(`${API_BASE_URL}/api/projects/${id}/weekly-hours-submissions?week_start=${weekStr}`, { headers: authHeaders() }),
       ]);
 
-      if (!nodesRes.ok || !timesheetRes.ok) {
+      if (!nodesRes.ok || !timesheetRes.ok || !submissionsRes.ok) {
         throw new Error('Failed to load project timeline data.');
       }
 
       const nodesData = await nodesRes.json();
       const timesheetData = await timesheetRes.json();
+      const submissionsData = await submissionsRes.json();
+
+      // Ignore any response that is no longer the week the user is viewing:
+      // re-entrant callbacks (e.g. a window focus listener) may still deliver
+      // an older week, so compare both the latest request AND the currently
+      // displayed week before committing anything.
+      if (weekRequestRef.current !== requestKey || weekStartRef.current !== weekStr) return;
 
       setNodes(nodesData);
       setEntries(timesheetData);
+      setSubmissions(Array.isArray(submissionsData) ? submissionsData : []);
 
       if (isEngineer || isLead) {
         const timelineRes = await fetch(`${API_BASE_URL}/api/projects/${id}/timeline-logs`, { headers: authHeaders() });
@@ -165,6 +200,7 @@ export function TimelineLogsPage() {
           throw new Error('Failed to load task timeline data.');
         }
         const timelineData = await timelineRes.json();
+        if (weekRequestRef.current !== requestKey || weekStartRef.current !== weekStr) return;
         setTimelineTasks(Array.isArray(timelineData.tasks) ? timelineData.tasks : []);
         setTimelinePhases(Array.isArray(timelineData.phases) ? timelineData.phases : []);
       } else {
@@ -172,7 +208,9 @@ export function TimelineLogsPage() {
         setTimelinePhases([]);
       }
     } catch (err) {
-      setError(err.message);
+      if (weekRequestRef.current === requestKey && weekStartRef.current === weekStr) {
+        setError(err.message);
+      }
     }
   };
 
@@ -185,12 +223,14 @@ export function TimelineLogsPage() {
   useEffect(() => {
     const onFocus = () => {
       if (projectId) {
-        loadProjectData(projectId, weekStartStr);
+        // Always refresh the week currently being viewed; the ref never holds
+        // a stale closure, unlike the render value captured above.
+        loadProjectData(projectId, weekStartRef.current);
       }
     };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-  }, [projectId, weekStartStr]);
+  }, [projectId]);
 
   const phaseRows = useMemo(() => {
     const phaseMap = {};
@@ -225,7 +265,7 @@ export function TimelineLogsPage() {
     return Object.values(phaseMap).map((p) => ({ ...p, isRealData: p.count > 0 }));
   }, [nodes, timelineTasks, isEngineer]);
 
-  const { monthColumns, timelineStart, timelineEnd, quarterTitle } = useMemo(() => {
+  const { quarterTitle } = useMemo(() => {
     let minDate = null;
     let maxDate = null;
 
@@ -271,9 +311,6 @@ export function TimelineLogsPage() {
     const title = cols.length > 0 ? getQuarterFromMonth(cols[0]) : 'Upcoming Schedule';
 
     return {
-      monthColumns: cols,
-      timelineStart: start,
-      timelineEnd: end,
       quarterTitle: title,
     };
   }, [nodes, project]);
@@ -297,11 +334,6 @@ export function TimelineLogsPage() {
 
   const weekInfo = useMemo(() => getWeekInfo(currentMonday), [currentMonday]);
 
-  const openTaskDetails = (taskId) => {
-    if (!taskId || !projectId) return;
-    navigate(`/task-details?nodeId=${taskId}&projectId=${projectId}`);
-  };
-
   // Daily totals of the automatic subtask tracking hours for the visible week.
   // Only Monday-Friday contributes; Saturday and Sunday always stay 0.
   const dailyTotals = useMemo(() => {
@@ -319,6 +351,66 @@ export function TimelineLogsPage() {
     [dailyTotals],
   );
 
+  const fmtHrs = (value) => {
+    const number = Number(value) || 0;
+    return Math.round(number * 100) / 100;
+  };
+
+  // Weekly log entries are one row per subtask; group them by engineer so the
+  // main list shows each engineer exactly once, with a link to that engineer's
+  // weekly log details on a dedicated page.
+  const engineerGroups = useMemo(() => {
+    const groups = new Map();
+    entries.forEach((entry) => {
+      const key = String(entry.employee_id);
+      if (!groups.has(key)) {
+        groups.set(key, { employee_id: entry.employee_id, employee_name: entry.employee_name, entries: [] });
+      }
+      groups.get(key).entries.push(entry);
+    });
+    // A submitted week with no tracked hours must still surface a row so a
+    // lead can approve/reject it (an engineer may submit even an empty week).
+    submissions.forEach((sub) => {
+      const key = String(sub.employee_id);
+      if (!groups.has(key)) {
+        groups.set(key, { employee_id: sub.employee_id, employee_name: sub.employee_name, entries: [] });
+      }
+    });
+    return Array.from(groups.values()).sort((a, b) =>
+      (a.employee_name || '').localeCompare(b.employee_name || ''),
+    );
+  }, [entries, submissions]);
+
+  const submissionByEmployee = useMemo(() => {
+    const map = {};
+    submissions.forEach((sub) => {
+      map[String(sub.employee_id)] = sub;
+    });
+    return map;
+  }, [submissions]);
+
+  const ownWeekStatus = submissions.length > 0 ? submissions[0].status : 'not_submitted';
+
+  const groupRows = useMemo(
+    () =>
+      engineerGroups.map((group) => {
+        const days = {};
+        DAY_FIELDS.forEach((day) => {
+          days[day] = group.entries.reduce((sum, entry) => sum + fmtHrs(entry[`${day}_hours`] || 0), 0);
+        });
+        const total = WORKDAY_FIELDS.reduce((sum, day) => sum + days[day], 0);
+        return {
+          employee_id: group.employee_id,
+          employee_name: group.employee_name,
+          entries: group.entries,
+          days,
+          total,
+          weekStatus: (submissionByEmployee[String(group.employee_id)] || {}).status || 'not_submitted',
+        };
+      }),
+    [engineerGroups, submissionByEmployee],
+  );
+
   const handlePrevWeek = () => {
     const prev = new Date(currentMonday);
     prev.setDate(prev.getDate() - 7);
@@ -331,15 +423,37 @@ export function TimelineLogsPage() {
     setCurrentMonday(next);
   };
 
-  const handleReview = async (entryId, action) => {
+  const handleSubmitWeek = async () => {
+    if (!projectId || !weekStartStr) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/api/time-log-entries/${entryId}/${action}`, {
+      setError('');
+      const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/weekly-hours/submit`, {
         method: 'POST',
-        headers: authHeaders(),
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ week_start_date: weekStartStr }),
       });
       if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.detail || 'Could not update approval');
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || 'Could not submit this week for approval.');
+      }
+      await loadProjectData(projectId, weekStartStr);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleWeekReview = async (employeeId, action) => {
+    if (!projectId || !weekStartStr) return;
+    try {
+      setError('');
+      const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/weekly-hours/${action}`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ week_start_date: weekStartStr, employee_id: employeeId }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || `Could not ${action} these weekly hours.`);
       }
       await loadProjectData(projectId, weekStartStr);
     } catch (err) {
@@ -528,6 +642,18 @@ export function TimelineLogsPage() {
             <button type="button" className="button button-secondary week-nav-btn" onClick={handleNextWeek}>
               Next Week <ChevronRight size={16} />
             </button>
+            {isEngineer && (entries.length > 0 || submissions.length > 0) && (
+              <>
+                <span className={`approval-pill ${WEEKLY_SUBMISSION_PILL[ownWeekStatus]}`}>
+                  {WEEKLY_SUBMISSION_LABELS[ownWeekStatus]}
+                </span>
+                {entries.length > 0 && (ownWeekStatus === 'not_submitted' || ownWeekStatus === 'rejected') && (
+                  <button type="button" className="button button-primary week-nav-btn" onClick={handleSubmitWeek}>
+                    Submit for Approval
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -548,7 +674,7 @@ export function TimelineLogsPage() {
               </tr>
             </thead>
             <tbody>
-              {entries.length === 0 ? (
+              {groupRows.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="timesheet-empty-cell">
                     {nodes.filter((n) => n.assigned_engineer_id).length === 0
@@ -557,38 +683,25 @@ export function TimelineLogsPage() {
                   </td>
                 </tr>
               ) : (
-                entries.map((entry) => {
-                  const key = `${entry.employee_id}_${entry.task_id}`;
-
-                  const hoursOf = (day) =>
-                    day === 'sat' || day === 'sun'
-                      ? 0 // automatic tracking never writes weekend hours
-                      : Number(entry[`${day}_hours`] || 0) || 0;
-
-                  const totalHrs = WORKDAY_FIELDS.reduce((sum, day) => sum + hoursOf(day), 0);
-                  const isApproved = entry.approval_status === 'approved';
-                  const isRejected = entry.approval_status === 'rejected';
+                groupRows.map((group) => {
+                  const groupKey = String(group.employee_id);
 
                   return (
-                    <tr key={key}>
+                    <tr key={groupKey} className="timesheet-engineer-group-row">
                       <td className="col-engineer">
-                        <a
+                        <Link
                           className="timesheet-task-link"
-                          href={`/task-details?nodeId=${entry.task_id}&projectId=${projectId}`}
-                          title="Open this task / subtask"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            openTaskDetails(entry.task_id);
-                          }}
+                          to={`/weekly-logs?projectId=${projectId}&employeeId=${group.employee_id}&weekStart=${weekStartStr}`}
+                          title={`Open the weekly log details for ${group.employee_name}`}
                         >
                           <div className="timesheet-engineer-cell">
-                            <strong>{entry.employee_name}</strong>
+                            <strong>{group.employee_name}</strong>
                             <small>
-                              {entry.wbs_code ? `${entry.wbs_code} ` : ''}
-                              {entry.task_name}
+                              {group.entries.length} logged subtask{group.entries.length === 1 ? '' : 's'} this week
+                              {' · Open weekly log'}
                             </small>
                           </div>
-                        </a>
+                        </Link>
                       </td>
 
                       {DAY_FIELDS.map((day) => (
@@ -599,42 +712,38 @@ export function TimelineLogsPage() {
                             max="24"
                             step="0.5"
                             className="day-hour-input"
-                            value={hoursOf(day) === 0 ? '' : hoursOf(day)}
+                            value={group.days[day] === 0 ? '' : group.days[day]}
                             placeholder="0"
                             readOnly
-                            title="Hours come from automatic subtask Login/Logout tracking — manual entry is disabled."
+                            title={group.employee_name}
                           />
                         </td>
                       ))}
 
                       <td className="col-total">
-                        <a
-                          className="timesheet-task-link timesheet-total-link"
-                          href={`/task-details?nodeId=${entry.task_id}&projectId=${projectId}`}
-                          title="Open this task / subtask"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            openTaskDetails(entry.task_id);
-                          }}
-                        >
-                          <strong className="total-hours-blue">{totalHrs.toFixed(1)} hrs</strong>
-                        </a>
+                        <strong className="total-hours-blue">{group.total.toFixed(2)} hrs</strong>
                       </td>
 
                       <td className="col-approval">
-                        {(isApproved || isLead) && (
-                          <span
-                            className={`approval-pill ${
-                              isApproved ? 'status-approved' : isRejected ? 'status-rejected' : 'status-pending'
-                            }`}
-                          >
-                            {isApproved ? 'Approved' : isRejected ? 'Rejected' : 'Pending Review'}
-                          </span>
-                        )}
-                        {isLead && !isApproved && !isRejected && (
+                        <span className={`approval-pill ${WEEKLY_SUBMISSION_PILL[group.weekStatus]}`}>
+                          {WEEKLY_SUBMISSION_LABELS[group.weekStatus]}
+                        </span>
+                        {isLead && group.weekStatus === 'submitted' && (
                           <span className="review-actions">
-                            <button type="button" className="review-btn review-approve" onClick={() => handleReview(entry.id, 'approve')}>Approve</button>
-                            <button type="button" className="review-btn review-reject" onClick={() => handleReview(entry.id, 'reject')}>Reject</button>
+                            <button
+                              type="button"
+                              className="review-btn review-approve"
+                              onClick={() => handleWeekReview(group.employee_id, 'approve')}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              className="review-btn review-reject"
+                              onClick={() => handleWeekReview(group.employee_id, 'reject')}
+                            >
+                              Reject
+                            </button>
                           </span>
                         )}
                       </td>

@@ -1501,6 +1501,230 @@ def list_timesheet_entries(
     return [time_entry_output(db, entry) for entry in query.order_by(models.TimeLogEntry.week_start_date).all()]
 
 
+# --- Weekly-hours submission & approval --------------------------------------
+# The Weekly Hours section keys off a per-(engineer, week) submission record
+# that the ENGINEER creates. Engineer submits -> Lead approves/rejects, and the
+# Lead can only review a week whose status is exactly 'submitted' (enforced
+# here server-side, independent of any frontend button visibility).
+
+WEEKLY_HOURS_STATUS_LABELS = {
+    "not_submitted": "Not Submitted",
+    "submitted": "Submitted for Approval",
+    "approved": "Approved",
+    "rejected": "Rejected",
+}
+
+
+def weekly_submission_output(db: Session, submission: models.WeeklyHoursSubmission) -> dict:
+    employee = db.query(models.Employee).filter_by(id=submission.employee_id).first()
+    return {
+        "id": submission.id,
+        "project_id": submission.project_id,
+        "employee_id": submission.employee_id,
+        "employee_name": employee.name if employee else "",
+        "week_start_date": submission.week_start_date.isoformat(),
+        "status": submission.status,
+        "status_label": WEEKLY_HOURS_STATUS_LABELS.get(submission.status, submission.status),
+        "submitted_at": submission.submitted_at.isoformat() if submission.submitted_at else None,
+        "reviewed_by": submission.reviewed_by,
+        "reviewed_at": submission.reviewed_at.isoformat() if submission.reviewed_at else None,
+    }
+
+
+def weekly_submission_for(
+    db: Session, project_id: int, employee_id: int, week: date
+) -> Optional[models.WeeklyHoursSubmission]:
+    return (
+        db.query(models.WeeklyHoursSubmission)
+        .filter_by(project_id=project_id, employee_id=employee_id, week_start_date=week)
+        .first()
+    )
+
+
+def weekly_hours_visible_employee_ids(
+    db: Session, project_id: int, week: date, user: models.User
+) -> Optional[set]:
+    """Employee ids whose weekly-hours submissions this user may see or review.
+
+    Engineer: only their own real employee id. Lead: engineers assigned to a
+    WBS node in the lead's scope, plus engineers who logged hours on those
+    scoped tasks that week (mirrors the timesheet scoping). BU Head: None,
+    meaning unrestricted.
+    """
+    if user.role == "bu_head":
+        return None
+    if user.role == "engineer":
+        if not user.employee_id:
+            raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
+        return {user.employee_id}
+    tasks = scoped_wbs_tasks(db, project_id, user)
+    visible = {task.assigned_engineer_id for task in tasks if task.assigned_engineer_id}
+    task_ids = [task.id for task in tasks]
+    if task_ids:
+        logged = (
+            db.query(models.TimeLogEntry.employee_id)
+            .filter(
+                models.TimeLogEntry.project_id == project_id,
+                models.TimeLogEntry.task_id.in_(task_ids),
+                models.TimeLogEntry.week_start_date == week,
+            )
+            .distinct()
+            .all()
+        )
+        visible.update(row[0] for row in logged)
+    return visible
+
+
+def require_project_access(db: Session, project_id: int, user: models.User) -> models.Project:
+    project = db.query(models.Project).filter_by(id=project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if user.role in ("lead", "engineer") and not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    return project
+
+
+@app.get("/api/projects/{project_id}/weekly-hours-submissions")
+def list_weekly_hours_submissions(
+    project_id: int,
+    week_start: str,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user.role, {"lead", "engineer", "bu_head"})
+    require_project_access(db, project_id, user)
+    week = date.fromisoformat(week_start)
+    visible = weekly_hours_visible_employee_ids(db, project_id, week, user)
+    query = db.query(models.WeeklyHoursSubmission).filter_by(project_id=project_id, week_start_date=week)
+    if visible is not None:
+        query = query.filter(
+            models.WeeklyHoursSubmission.employee_id.in_(visible) if visible else models.WeeklyHoursSubmission.id < 0
+        )
+    return [
+        weekly_submission_output(db, submission)
+        for submission in query.order_by(models.WeeklyHoursSubmission.employee_id).all()
+    ]
+
+
+@app.post("/api/projects/{project_id}/weekly-hours/submit")
+def submit_weekly_hours(
+    project_id: int,
+    payload: schemas.WeeklyHoursActionIn,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user.role, {"engineer"})
+    project = require_project_access(db, project_id, user)
+    if not user.employee_id:
+        raise HTTPException(status_code=400, detail="Engineer account is not linked to an employee.")
+    if project.timesheets_soft_locked:
+        raise HTTPException(
+            status_code=409,
+            detail="Timesheets are soft-locked by the BU Head — weekly submissions are on hold.",
+        )
+    # Only a week with real tracked log hours can be submitted for approval;
+    # mirrors the tracking filter of the timesheet endpoint so the UI's
+    # "Submit for Approval" availability always matches the server-side rule.
+    tracked = or_(*[getattr(models.TimeLogEntry, field) > 0 for field in models.DAY_FIELDS[:5]])
+    eligible = (
+        db.query(models.TimeLogEntry)
+        .filter(
+            models.TimeLogEntry.project_id == project_id,
+            models.TimeLogEntry.employee_id == user.employee_id,
+            models.TimeLogEntry.week_start_date == payload.week_start_date,
+            tracked,
+        )
+        .first()
+    )
+    if not eligible:
+        raise HTTPException(
+            status_code=409,
+            detail="This week has no logged hours — nothing to submit for approval.",
+        )
+    # An engineer can only ever submit their OWN weekly hours; any employee_id
+    # in the payload is ignored.
+    submission = weekly_submission_for(db, project_id, user.employee_id, payload.week_start_date)
+    now = datetime.now(timezone.utc)
+    if submission:
+        if submission.status == "approved":
+            raise HTTPException(
+                status_code=409,
+                detail="This week's hours are already approved — a resubmission is not allowed.",
+            )
+        submission.status = "submitted"
+        submission.submitted_at = now
+        submission.reviewed_by = None
+        submission.reviewed_at = None
+    else:
+        submission = models.WeeklyHoursSubmission(
+            project_id=project_id,
+            employee_id=user.employee_id,
+            week_start_date=payload.week_start_date,
+            status="submitted",
+            submitted_at=now,
+        )
+        db.add(submission)
+    db.commit()
+    db.refresh(submission)
+    return weekly_submission_output(db, submission)
+
+
+def lead_review_weekly_hours(
+    db: Session, project_id: int, action: str, payload: schemas.WeeklyHoursActionIn, user: models.User
+):
+    require_role(user.role, {"lead"})
+    if not user.full_name:
+        raise HTTPException(status_code=400, detail="Lead identity is required.")
+    project = require_project_access(db, project_id, user)
+    if project.timesheets_soft_locked:
+        raise HTTPException(
+            status_code=409,
+            detail="Timesheets are soft-locked by the BU Head — approvals are on hold.",
+        )
+    if payload.employee_id is None:
+        raise HTTPException(status_code=400, detail="employee_id is required to review weekly hours.")
+    submission = weekly_submission_for(db, project_id, payload.employee_id, payload.week_start_date)
+    if not submission:
+        raise HTTPException(
+            status_code=409,
+            detail="This week's hours have not been submitted for approval yet.",
+        )
+    if submission.status != "submitted":
+        raise HTTPException(
+            status_code=409,
+            detail="Only weekly hours that are 'Submitted for Approval' can be approved or rejected.",
+        )
+    visible = weekly_hours_visible_employee_ids(db, project_id, payload.week_start_date, user)
+    if submission.employee_id not in (visible or set()):
+        raise HTTPException(status_code=403, detail="These weekly hours are outside your lead scope.")
+    submission.status = action
+    submission.reviewed_by = user.full_name
+    submission.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(submission)
+    return weekly_submission_output(db, submission)
+
+
+@app.post("/api/projects/{project_id}/weekly-hours/approve")
+def approve_weekly_hours(
+    project_id: int,
+    payload: schemas.WeeklyHoursActionIn,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return lead_review_weekly_hours(db, project_id, "approved", payload, user)
+
+
+@app.post("/api/projects/{project_id}/weekly-hours/reject")
+def reject_weekly_hours(
+    project_id: int,
+    payload: schemas.WeeklyHoursActionIn,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return lead_review_weekly_hours(db, project_id, "rejected", payload, user)
+
+
 @app.get("/api/projects/{project_id}/timeline-logs")
 def project_timeline_logs(
     project_id: int,

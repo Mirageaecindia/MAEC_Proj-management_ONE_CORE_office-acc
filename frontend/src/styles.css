@@ -923,6 +923,19 @@ input[type='date'] { color: #52687c; }
   font-size: 12px;
 }
 
+/* Engineer-grouped weekly timesheet — the main list shows each engineer once
+   and the engineer's subtask rows expand inline below their name. */
+.timesheet-engineer-group-row > td { background: #f6fafd; border-top: 2px solid #e2e9f0; }
+.timesheet-engineer-group-row:hover > td { background: #eef5fb; }
+.details-table { margin-bottom: 6px; }
+.details-table th { font-size: 9px; padding: 8px 12px; text-align: left; }
+.details-table td { padding: 9px 12px; text-align: left; font-size: 11px; }
+.details-table td strong { color: #2d4358; }
+.details-table .timesheet-task-link { display: inline-block; color: #1671ad; }
+.col-time-log { line-height: 1.6; min-width: 190px; }
+.time-log-item { display: block; color: #40566b; font-size: 11px; white-space: nowrap; }
+.time-log-empty { color: #8a99a6; font-size: 11px; }
+
 /* Footer & Next Button */
 .timesheet-footer {
   display: flex;

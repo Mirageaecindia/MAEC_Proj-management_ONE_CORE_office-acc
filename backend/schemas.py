@@ -335,6 +335,11 @@ class TimeLogEntryOut(BaseModel):
     reviewed_at: Optional[datetime] = None
 
 
+class WeeklyHoursActionIn(BaseModel):
+    week_start_date: date
+    employee_id: Optional[int] = None
+
+
 class SubtaskTrackingStart(BaseModel):
     subtask_id: int
 

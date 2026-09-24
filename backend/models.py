@@ -275,6 +275,33 @@ class TimeLogEntry(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class WeeklyHoursSubmission(Base):
+    """
+    An engineer's weekly-hours submission for one project + ISO week.
+
+    Unlike TimeLogEntry (one row per task/subtask), this is the WEEK-level
+    workflow record the Weekly Hours section keys off of. A row only exists
+    once the engineer submits: status goes not_submitted -> submitted ->
+    approved | rejected. Only a week whose status is exactly 'submitted' can
+    be approved or rejected — enforced server-side, never just in the UI.
+    """
+    __tablename__ = "weekly_hours_submissions"
+    __table_args__ = (
+        UniqueConstraint("project_id", "employee_id", "week_start_date", name="uq_weekly_hours_submission"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, nullable=False, index=True)
+    employee_id = Column(Integer, nullable=False, index=True)
+    week_start_date = Column(Date, nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="submitted", index=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by = Column(String(150), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 class TimeSession(Base):
     """
     An automatic working-time tracking session for a single subtask.
