@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { useAuth } from '../../AuthContext';
+import { formatDateTimeIST } from '../../utils/displayTime';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -18,13 +19,7 @@ const SYNC_INTERVAL_MS = 15000;
 
 function formatDateTime(isoStr) {
     if (!isoStr) return '\u2014';
-    try {
-        const d = new Date(isoStr);
-        return d.toLocaleString('en-US', {
-            month: 'short', day: 'numeric', year: 'numeric',
-            hour: '2-digit', minute: '2-digit',
-        });
-    } catch { return isoStr; }
+    return formatDateTimeIST(isoStr, { fallback: '\u2014' });
 }
 
 function formatDate(dateStr) {
@@ -38,7 +33,7 @@ function formatDate(dateStr) {
 export function TaskDetailsPage() {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
-    const { user, role, authHeaders } = useAuth();
+    const { role, authHeaders } = useAuth();
     const isEngineer = role === 'engineer';
     const isLead = role === 'lead';
 

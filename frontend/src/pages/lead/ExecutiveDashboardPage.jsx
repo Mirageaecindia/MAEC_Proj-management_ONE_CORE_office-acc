@@ -2,6 +2,7 @@ import { AlertTriangle, ArrowRight, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
+import { formatDateTimeIST } from '../../utils/displayTime';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -22,8 +23,7 @@ function formatValue(value, digits = 1) {
 
 function formatDate(value) {
   if (!value) return 'Not available';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? 'Not available' : parsed.toLocaleString();
+  return formatDateTimeIST(value, { fallback: 'Not available' });
 }
 
 export function ExecutiveDashboardPage() {
