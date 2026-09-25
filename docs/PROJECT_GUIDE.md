@@ -603,6 +603,8 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 
 ## 14. Roadmap
 
+The detailed, prioritised task list (including the September 2026 review findings) is in [TODO.md](TODO.md).
+
 | Phase | Goal | Status |
 |---|---|---|
 | 0 | Foundation: `.gitignore`, reproducible setup, single database config, lint/format tools, BU Head characterization tests, CONTRIBUTING | **Done** |
