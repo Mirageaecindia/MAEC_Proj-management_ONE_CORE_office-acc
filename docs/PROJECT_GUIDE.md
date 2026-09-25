@@ -142,7 +142,7 @@ flowchart LR
 |---|---|---|
 | Frontend | React 19, React Router 7, TanStack Query 5, Vite 8, Vitest, lucide-react icons | BU Head pages use a shared API client + query hooks; Lead/Engineer pages still `fetch` directly. Custom CSS; charts built from `<div>`s |
 | Backend | FastAPI 0.141, Pydantic 2 (+ pydantic-settings), SQLAlchemy 2, uvicorn | Auth and BU Head code live in the layered `app/` package (routers → services → repositories). Lead/Engineer endpoints are still in `main.py` |
-| Database | SQLite (WAL mode) via `DATABASE_URL`; Postgres-ready | Schema created by `create_all` plus `ALTER TABLE` statements run at startup (no migration tool yet) |
+| Database | SQLite (WAL mode) via `DATABASE_URL`; Postgres-ready | Schema managed by **Alembic** migrations (`backend/migrations/`), applied at startup |
 | Auth | PBKDF2-SHA256 password hashes, opaque bearer tokens in `login_sessions` | Tokens don't expire; logout deletes the token |
 | Integration | MSAL (app-only / client-credentials) + httpx → Microsoft Graph v1.0 | Folder provisioning and read-only mirror |
 
@@ -232,12 +232,10 @@ MAEC_project_management/
 ## 6. Backend
 
 ### 6.1 Startup sequence (`main.py` at import time)
-1. `Base.metadata.create_all()` creates any missing tables.
-2. A series of `add_*_columns()` functions run `ALTER TABLE` for columns added over time, and rebuild `wbs_nodes` once to make `wbs_code` and `estimated_hours` nullable.
-3. Data backfills: nodes without a phase get "Space Planning", and "Submitted for Review" becomes "Submitted for Approval".
-4. Seeding: four `project_leads` rows (legacy), and the `employees` table from `backend/data/employee_leads.csv` if it's empty (`Emp No`, `Emp Name` and `Designation` columns; designation is also stored as `discipline`).
-5. The FastAPI app is created. CORS allows `localhost` and `127.0.0.1` on any port. No static folder is served publicly.
-6. The domain-error handler is registered, and the `app` package's routers (auth + BU Head) are included. The Lead/Engineer endpoints declared in `main.py` follow.
+1. `migrate(engine)` (`app/core/migrations.py`) applies the Alembic migrations in `backend/migrations/` (`upgrade head`). A database created before Alembic (no `alembic_version` table) is adopted once: the old `ALTER TABLE` patches are replayed (`app/core/legacy_schema.py`), missing indexes are created, the schema is compared with the models, and it is stamped at the baseline `0001`. A missing table or column stops startup with an error instead of stamping a wrong schema; smaller differences are logged.
+2. Seeding: four `project_leads` rows (legacy), and the `employees` table from `backend/data/employee_leads.csv` if it's empty (`Emp No`, `Emp Name` and `Designation` columns; designation is also stored as `discipline`).
+3. The FastAPI app is created. CORS allows `localhost` and `127.0.0.1` on any port. No static folder is served publicly.
+4. The domain-error handler is registered, and the `app` package's routers (auth + BU Head) are included. The Lead/Engineer endpoints declared in `main.py` follow.
 
 ### 6.2 Authentication and authorization
 - **Login:** `POST /api/auth/login` checks the PBKDF2 hash and returns a random 64-character token. The token is stored in `login_sessions` and sent as `Authorization: Bearer <token>`.
@@ -594,7 +592,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 **SharePoint:** see §9.
 
 **Engineering**
-- `main.py` (~2,800 lines) still holds the Lead/Engineer endpoints. Schema changes happen via `ALTER TABLE` on import. There are no foreign keys, several per-row database queries, and frequent polling.
+- `main.py` (~2,800 lines) still holds the Lead/Engineer endpoints. There are no foreign keys, several per-row database queries, and frequent polling.
 - Legacy and dead code: the `gantt_tasks` table (its endpoints are gone), `project_leads`, the Lead's legacy `request-extension` endpoint, `leads_loader.py`, `temp_*.py`, `App.css`, the `recharts` dependency.
 
 ---

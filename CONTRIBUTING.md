@@ -80,7 +80,8 @@ then the change. URLs and response shapes did not change.
 
 ```
 backend/
-  main.py                  # startup migrations + seeding, Lead/Engineer endpoints, mounts app routers
+  main.py                  # runs migrations + seeding at startup, Lead/Engineer endpoints, mounts app routers
+  alembic.ini, migrations/ # Alembic schema migrations (applied at startup by app/core/migrations.py)
   app/
     core/                  # config (settings), database, security (auth, role guards), roles, errors
     domain/                # pure shared rules: timesheets (Mon–Fri totals), calendar (monthly spreading)

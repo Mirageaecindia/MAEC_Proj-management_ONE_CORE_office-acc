@@ -75,6 +75,8 @@ npm run build
 - Frontend pages never call `fetch` directly: use a hook from `hooks/` that calls `api/`.
 - New business rules come with tests; update `KNOWN (roadmap X.Y)` assertions deliberately when fixing them.
 - Legacy files are on a lint/format "ratchet" list: never add to it, remove a file from it when you refactor it.
-- Schema changes: no new entries in `app/core/schema_upgrades.py`; they go through Alembic (`docs/TODO.md` E4).
+- Schema changes are **Alembic revisions only**: change `models.py`, run `alembic revision --autogenerate -m "..."`
+  in `backend/`, review the file in `migrations/versions/`, commit both. Never add `ALTER TABLE` code.
+  `tests/test_migrations.py` fails if the models and the migrations disagree.
 - Changing Lead/Engineer code in `main.py`: small (S) fixes are patched in place with a test; bigger changes
   first get characterization tests, then the feature moves into `app/`, then it changes.

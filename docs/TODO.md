@@ -26,7 +26,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 
 ## Working rules
 
-1. **Every schema change goes through Alembic once E4 is done.** Until then, the only schema change allowed is S6 (`users.is_active`), via `app/core/schema_upgrades.py`. It then becomes part of the Alembic baseline.
+1. **Every schema change is an Alembic revision:** change `models.py`, run `alembic revision --autogenerate -m "..."` in `backend/`, review the generated file, commit both. `tests/test_migrations.py` fails if models and migrations disagree.
 2. **Lead and Engineer code is moved into `app/` when it is first touched,** but only for changes of size **M or larger**. Before changing it:
    - write characterization tests for the endpoint's current behaviour;
    - move it into `app/` (routers → services → repositories);
@@ -125,7 +125,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 
 | ID | Task | Why | Where | Size |
 |---|---|---|---|---|
-| E4 | **Alembic, first thing in Sprint A, before any other schema change.** (1) **Compare the database schemas across every machine** (dump `sqlite_master` and diff), because `ALTER TABLE` ran at different times; reconcile the differences; (2) create the baseline from the reconciled schema (including `lock_reason`, `governance_alert_level`, `is_active`); (3) `alembic stamp` the existing databases; (4) remove the startup `ALTER TABLE` calls and `schema_upgrades.py` | Adding schema at import time won't survive a production database, and Sprints A–C add schema | `backend/alembic/`, `main.py` startup, `app/core/schema_upgrades.py` | M |
+| E4 | ✅ **Done.** Alembic with a baseline revision `0001` generated from the models; `migrate(engine)` runs at startup. A database created before Alembic is adopted automatically, once per machine: the old patches are replayed, missing indexes created, the schema **compared with the models** (a missing table or column stops startup; smaller differences are logged), then stamped. Dry run on a copy of the real database: adopted, 6 users and 4 projects intact, 5 missing indexes created, 6 harmless type/nullability notes. The ~270 lines of `ALTER TABLE` code left `main.py` and `schema_upgrades.py` is gone. **Later:** delete `app/core/legacy_schema.py` once every database has started once on the new code; with Postgres or several workers (E5), run `alembic upgrade head` as a deploy step instead of at startup | Adding schema at import time won't survive a production database | `backend/alembic.ini`, `backend/migrations/`, `app/core/migrations.py`, `app/core/legacy_schema.py`, `tests/test_migrations.py` | M |
 | E1 | **Move Lead/Engineer endpoints into `app/`**, incrementally, under working rule 2 (M+ changes only). Extend the guard test as each feature moves | `main.py` is about 2,800 lines | `backend/main.py` → `backend/app/` | L (spread out) |
 | E2 | **Migrate the Lead, Engineer and shared pages** to `features/` + `hooks/` + `api/` with no direct `fetch`, on first M+ change. `ResourceBookingPage` first | Same standard as the BU Head pages | `frontend/src/pages/` | L (spread out) |
 | E3 | **Fix the 6 ESLint errors** (`WbsStructurePage.jsx`, `pages/lead/ExecutiveDashboardPage.jsx`, `EngineerPerformanceDashboardPage.jsx`); shrink the lint ratchet as files are refactored | `npm run lint` fails today | those files | S |
@@ -169,7 +169,7 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
    - **S2:** list **every clone** (you, Subhika, the Engineer dev, the previous developer, old laptops, CI, GitHub forks). One stale clone pushed later brings the history back.
    - **S7:** choose the off-machine backup folder and schedule the task.
    - S3–S8 and N14(d) are done.
-2. **Sprint A:** N2 pre-check (done: the only known database has no timesheet rows, so counting weekend hours trips nothing), **E4 Alembic first**, then E3, N2 (7-day hours), C1 archive, C2 edit, C4 reject button, C8, N5, N8, N11, N12, N13.
+2. **Sprint A:** N2 pre-check ✅ (the only known database has no timesheet rows, so counting weekend hours trips nothing), E4 Alembic ✅, then E3, N2 (7-day hours), C1 archive, C2 edit, C4 reject button, C8, N5, N8, N11, N12, N13.
 3. **Sprint B (timesheets and lock):** N1 timesheet model (tell the previous Engineer developer first), N9 single approval route, N14 lock rules, C6, C7, C10, C12. Lead/Engineer features move into `app/` as they are touched.
 4. **Sprint C (calendar and cost):** N3 office field, N4 EV/SPI/CPI, N6 rate card, N7 disciplines, N10, C3 (after S5), C5.
 5. **Sprint D:** W1–W3.
@@ -191,4 +191,5 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
 | Governance usage counts approved hours only (row or week approval); rejected hours excluded | `288c2ac` |
 | `/api/server-date` returns real UTC | Subhika's UTC change |
 | P0 S3–S8 and C10: Lead WBS access checks, tracked-time cap, no public uploads, user deactivation, SQLite backups, ownership docs, WBS delete cleans sessions | `cea05fc` |
-| N14(d): an extension too small to get below 100% keeps the lock | this sprint |
+| N14(d): an extension too small to get below 100% keeps the lock | `7e2c7eb` |
+| E4: Alembic migrations; pre-Alembic databases adopted automatically at startup | this sprint |

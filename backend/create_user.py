@@ -27,9 +27,9 @@ import getpass
 from sqlalchemy.orm import Session
 
 import models
-from app.core.schema_upgrades import upgrade_schema
+from app.core.migrations import migrate
 from auth import hash_password
-from database import Base, SessionLocal, engine
+from database import SessionLocal, engine
 
 ROLES = ("bu_head", "lead", "engineer")
 LEAD_DISCIPLINES = ("Electrical", "Mechanical", "BIM")
@@ -133,8 +133,7 @@ def main() -> None:
     status.add_argument("--activate", action="store_true", help="Reactivate the account given by --username.")
     args = parser.parse_args()
 
-    Base.metadata.create_all(bind=engine)
-    upgrade_schema(engine)  # add columns (e.g. users.is_active) if the server hasn't run yet
+    migrate(engine)  # same schema as the server, even if it hasn't started yet
     db = SessionLocal()
     try:
         if args.deactivate or args.activate:

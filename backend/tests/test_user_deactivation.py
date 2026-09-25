@@ -1,9 +1,6 @@
 """Deactivated accounts can't log in or keep using a session (TODO S6)."""
 
-from sqlalchemy import create_engine, inspect, text
-
 import models
-from app.core.schema_upgrades import upgrade_schema
 from create_user import set_active
 from factories import PASSWORD
 
@@ -41,17 +38,3 @@ def test_inactive_lead_is_not_offered_or_assignable(client, db, world):
     assert world.lead_m.full_name not in {lead["name"] for lead in leads}
     created = client.post("/api/projects", json=world.project_payload(), headers=world.bu_h)
     assert created.status_code == 400, created.text
-
-
-def test_upgrade_adds_is_active_to_an_existing_users_table(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
-    with engine.begin() as connection:
-        connection.exec_driver_sql("CREATE TABLE users (id INTEGER PRIMARY KEY, username VARCHAR(100))")
-        connection.exec_driver_sql("INSERT INTO users (username) VALUES ('old.user')")
-
-    upgrade_schema(engine)
-    upgrade_schema(engine)  # idempotent
-
-    assert "is_active" in {column["name"] for column in inspect(engine).get_columns("users")}
-    with engine.connect() as connection:
-        assert connection.execute(text("SELECT is_active FROM users")).scalar() == 1
