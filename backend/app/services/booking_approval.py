@@ -5,7 +5,7 @@ it reuses `booking_approval_status` and `BOOKING_APPROVAL_LABELS` from here.
 """
 
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -85,7 +85,7 @@ class BookingApprovalService:
     def approve(self, project_id: int) -> dict:
         """Approve the Lead's submission. Approval is what grants engineers project access."""
         project, bookings = self._pending_submission(project_id)
-        now = datetime.now()
+        now = datetime.now(UTC)
         for booking in bookings:
             booking.approval_status = APPROVED
             booking.approved_at = now

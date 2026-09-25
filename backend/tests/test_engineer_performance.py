@@ -7,8 +7,9 @@ in. Nothing is cached, hardcoded, or carried over from a fixed month list.
 
 from datetime import date
 
-import models
 import pytest
+
+import models
 
 DASH = "/api/engineer-performance-dashboard"
 
@@ -90,9 +91,7 @@ def test_approved_hours_in_two_months_are_separate_independent_bars(client, worl
 def test_week_straddling_month_boundary_uses_the_real_work_month(client, world, make, dash):
     project_id, node = dash
 
-    add_entry(
-        make, project_id, node, world.emp1, date(2026, 8, 31), status="approved", thu_hours=5.0, fri_hours=5.0
-    )
+    add_entry(make, project_id, node, world.emp1, date(2026, 8, 31), status="approved", thu_hours=5.0, fri_hours=5.0)
 
     body = dashboard(client, world, project_id)
 
@@ -199,9 +198,7 @@ def test_rejected_week_excludes_its_hours(client, world, make, dash):
 def test_total_always_equals_the_sum_of_the_monthly_bars(client, world, make, dash):
     project_id, node = dash
     add_entry(make, project_id, node, world.emp1, date(2026, 8, 3), status="approved", mon_hours=4.0)
-    add_entry(
-        make, project_id, node, world.emp1, date(2026, 8, 31), status="approved", thu_hours=5.0, fri_hours=5.0
-    )
+    add_entry(make, project_id, node, world.emp1, date(2026, 8, 31), status="approved", thu_hours=5.0, fri_hours=5.0)
     add_entry(make, project_id, node, world.emp1, date(2026, 9, 7), status="approved", mon_hours=2.0)
 
     body = dashboard(client, world, project_id)

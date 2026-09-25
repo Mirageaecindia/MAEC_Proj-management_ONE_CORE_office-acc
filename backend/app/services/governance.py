@@ -4,7 +4,7 @@ Every governance event is persisted as a GovernanceAction carrying a snapshot
 of the project's consumption at that moment (the audit log).
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -112,7 +112,7 @@ class GovernanceService:
         request.status = status
         request.decision_comments = comments
         request.decided_by = decided_by
-        request.decided_at = datetime.now()
+        request.decided_at = datetime.now(UTC)
         project.extension_status = status
         if status == "approved":
             project.extension_approved_hours = (project.extension_approved_hours or 0) + request.requested_hours

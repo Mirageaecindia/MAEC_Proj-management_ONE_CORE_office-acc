@@ -4,14 +4,14 @@ the backend never writes or returns LOCAL server time for the datetime fields
 surfaced to the frontend (Actual Start/End, history log, extension reviews,
 server date)."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 IST_OFFSET = timedelta(hours=5, minutes=30)
 TOLERANCE = timedelta(seconds=5)
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _as_utc_clock(value: str) -> datetime:
@@ -22,8 +22,8 @@ def _as_utc_clock(value: str) -> datetime:
         value = value[:-1] + "+00:00"
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _assigned_project(client, make, world):
@@ -40,8 +40,12 @@ def _assigned_project(client, make, world):
         headers=world.lead_h,
     )
     assert booking.status_code == 200, booking.text
-    assert client.post(f"/api/projects/{project['id']}/resource-bookings/submit", headers=world.lead_h).status_code == 200
-    assert client.post(f"/api/projects/{project['id']}/resource-bookings/approve", headers=world.bu_h).status_code == 200
+    assert (
+        client.post(f"/api/projects/{project['id']}/resource-bookings/submit", headers=world.lead_h).status_code == 200
+    )
+    assert (
+        client.post(f"/api/projects/{project['id']}/resource-bookings/approve", headers=world.bu_h).status_code == 200
+    )
     node = make.wbs_node(project["id"], world.lead_e, engineer=world.emp1)
     return project, node
 
@@ -100,12 +104,18 @@ def test_subtask_done_actual_end_datetime_is_utc(client, make, world):
     subtask_id = subtask.json()["id"]
 
     t0 = _utc_now()
-    assert client.post(
-        f"/api/wbs-nodes/{subtask_id}/advance-status", json={"new_status": "In-Progress"}, headers=world.eng_h
-    ).status_code == 200
-    assert client.post(
-        f"/api/wbs-nodes/{subtask_id}/advance-status", json={"new_status": "Done"}, headers=world.eng_h
-    ).status_code == 200
+    assert (
+        client.post(
+            f"/api/wbs-nodes/{subtask_id}/advance-status", json={"new_status": "In-Progress"}, headers=world.eng_h
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/api/wbs-nodes/{subtask_id}/advance-status", json={"new_status": "Done"}, headers=world.eng_h
+        ).status_code
+        == 200
+    )
     t1 = _utc_now()
 
     detail = client.get(f"/api/wbs-nodes/{subtask_id}", headers=world.lead_h).json()
@@ -135,7 +145,7 @@ def test_utc_clock_is_five_and_a_half_hours_behind_ist(client, make, world):
     detail = client.get(f"/api/wbs-nodes/{node.id}", headers=world.lead_h).json()
     actual_start = _as_utc_clock(detail["actual_start_datetime"])
 
-    assert actual_start + IST_OFFSET == actual_start.astimezone(timezone.utc) + IST_OFFSET
+    assert actual_start + IST_OFFSET == actual_start.astimezone(UTC) + IST_OFFSET
     diff = actual_start - _utc_now()
     # If the value were IST-local, the difference from UTC now would be ~5.5h.
     assert abs(diff.total_seconds()) < TOLERANCE.total_seconds()

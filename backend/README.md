@@ -13,6 +13,6 @@ the [root README](../README.md).
   `backend/promanage.db`, resolved relative to this folder.
 - SharePoint / Microsoft Graph setup: [SHAREPOINT_SETUP.md](SHAREPOINT_SETUP.md)
 - Accounts: [USERS.md](USERS.md)
-- Tests: `..\.venv\Scripts\python.exe -m pytest` (from `backend/`; the venv lives at
-  the repo root). Uses a throwaway database with SharePoint faked or disabled;
+- Tests: `<venv>\Scripts\python.exe -m pytest` from `backend/`, where `<venv>` is
+  `.venv` (backend) or `..\.venv` (repo root). Uses a throwaway database with SharePoint faked or disabled;
   never touches `promanage.db` or Microsoft Graph

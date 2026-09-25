@@ -31,9 +31,7 @@ def approved(client, make, world):
         headers=world.lead_h,
     )
     assert booking.status_code == 200, booking.text
-    assert (
-        client.post(f"/api/projects/{project_id}/resource-bookings/submit", headers=world.lead_h).status_code == 200
-    )
+    assert client.post(f"/api/projects/{project_id}/resource-bookings/submit", headers=world.lead_h).status_code == 200
     assert client.post(f"/api/projects/{project_id}/resource-bookings/approve", headers=world.bu_h).status_code == 200
     node = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, estimated_hours=40)
     entry = make.time_entry(project_id, node, world.emp1, 8)
@@ -146,7 +144,7 @@ def test_role_gates_on_submission_endpoints(client, world, approved):
 
 def test_submission_payload_cannot_target_another_engineer(client, make, world, approved):
     project_id, _, _ = approved
-    eng2 = make.user("eng.ravi", "engineer", "Ravi Kumar", employee_id=world.emp2.id)
+    make.user("eng.ravi", "engineer", "Ravi Kumar", employee_id=world.emp2.id)  # a second engineer to target
     response = client.post(
         f"/api/projects/{project_id}/weekly-hours/submit",
         json={"week_start_date": WEEK.isoformat(), "employee_id": world.emp2.id},
@@ -172,9 +170,7 @@ def test_engineer_only_sees_their_own_submission(client, make, world, approved):
         headers=world.lead_h,
     )
     assert booking.status_code == 200, booking.text
-    assert (
-        client.post(f"/api/projects/{project_id}/resource-bookings/submit", headers=world.lead_h).status_code == 200
-    )
+    assert client.post(f"/api/projects/{project_id}/resource-bookings/submit", headers=world.lead_h).status_code == 200
     assert client.post(f"/api/projects/{project_id}/resource-bookings/approve", headers=world.bu_h).status_code == 200
 
     _submit(client, world.eng_h, project_id)

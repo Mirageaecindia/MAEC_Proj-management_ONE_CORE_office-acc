@@ -36,6 +36,8 @@ htmlcov/
 backend/uploads/*
 !backend/uploads/.gitkeep
 *.log
+*.log.*
+*.err
 
 # ---------------------------------------------------------------------------
 # Node / frontend

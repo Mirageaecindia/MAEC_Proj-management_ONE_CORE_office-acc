@@ -57,7 +57,7 @@ Accounts are created from the command line. See [backend/USERS.md](backend/USERS
 cd backend
 .\start_backend.ps1
 
-# ...or run it manually in the foreground (venv lives at repo root, NOT in backend/):
+# ...or run it manually in the foreground (the venv can be backend\.venv or the repo-root .venv):
 cd backend
 ..\.venv\Scripts\python.exe -m uvicorn main:app --reload
 

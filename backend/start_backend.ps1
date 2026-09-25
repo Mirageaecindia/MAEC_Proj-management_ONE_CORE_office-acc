@@ -13,12 +13,16 @@
 $ErrorActionPreference = "Stop"
 
 $BackendDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$VenvPython = Join-Path $BackendDir "..\.venv\Scripts\python.exe"
+# The venv may live in backend\.venv or at the repo root (.venv); use whichever exists.
+$VenvPython = @(
+    (Join-Path $BackendDir ".venv\Scripts\python.exe"),
+    (Join-Path $BackendDir "..\.venv\Scripts\python.exe")
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 $LogFile = Join-Path $BackendDir "backend.log"
 $Port = 8000
 
-if (-not (Test-Path -LiteralPath $VenvPython)) {
-    Write-Host "ERROR: venv interpreter not found at $VenvPython" -ForegroundColor Red
+if (-not $VenvPython) {
+    Write-Host "ERROR: no venv found in backend\.venv or the repo-root .venv" -ForegroundColor Red
     Write-Host "Run:  python -m venv ..\.venv`nThen: ..\.venv\Scripts\python.exe -m pip install -r requirements.txt"
     exit 1
 }

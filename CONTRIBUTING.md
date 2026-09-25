@@ -94,6 +94,8 @@ backend/
 
 `main.py` imports these back under their old names, so Lead/Engineer code runs
 unchanged. **Change them in their new home**, not by re-adding them to `main.py`:
+(`backend/tests/test_route_ownership.py` fails if they, or BU Head routes, reappear
+in `main.py`. See also the merge-conflict rules in `CLAUDE.md`.)
 
 | Old name in `main.py` | New home |
 |---|---|
