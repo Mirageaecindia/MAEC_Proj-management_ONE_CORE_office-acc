@@ -119,16 +119,6 @@ export function ExecutiveDashboardPage() {
     [currency],
   );
 
-  const maxChartValue = useMemo(() => {
-    if (!data?.disciplines?.length) return 1;
-    return Math.max(
-      1,
-      ...data.disciplines.map((discipline) =>
-        Math.max(Number(discipline.baseline_hours) || 0, Number(discipline.consumed_hours) || 0),
-      ),
-    );
-  }, [data]);
-
   const monthlyData = useMemo(() => data?.monthly_data || [], [data]);
 
   const maxMonthlyValue = useMemo(() => {

@@ -1,12 +1,11 @@
 import { Pencil, Trash2 } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
 import { countWorkingDays, plannedHoursForRange } from '../../lib/hours';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-const STATUSES = ['Not Started', 'In Progress', 'Completed', 'Blocked'];
 const PHASES = ['Space Planning', 'STR Coordination', 'ID Coordination', 'BoH Area RCP Coordination', 'Submission'];
 
 const EMPTY_NODE = {
@@ -15,7 +14,7 @@ const EMPTY_NODE = {
   parent_id: null,
   assigned_engineer_id: null,
   estimated_hours: null,
-  deliverable_status: 'Not Started',
+  deliverable_status: 'To Do',
   start_date: '',
   target_due_date: '',
   end_date: '',
@@ -37,8 +36,6 @@ export function WbsStructurePage() {
   const [tasks, setTasks] = useState([]);
   const [engineers, setEngineers] = useState([]);
   const [error, setError] = useState('');
-  const [loadingProjects, setLoadingProjects] = useState(true);
-  const [loadingTasks, setLoadingTasks] = useState(true);
   const [savingId, setSavingId] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [expanded, setExpanded] = useState({});
@@ -55,10 +52,8 @@ export function WbsStructurePage() {
   const loadTasks = useCallback(async (projectId = selectedId) => {
     if (!projectId) {
       setTasks([]);
-      setLoadingTasks(false);
       return;
     }
-    setLoadingTasks(true);
     setError('');
     const ancestorParam = isEngineer ? '?include_ancestors=true' : '';
     try {
@@ -69,14 +64,11 @@ export function WbsStructurePage() {
       setLastUpdated(new Date());
     } catch (err) {
       setError(err.message);
-    } finally {
-      setLoadingTasks(false);
     }
   }, [selectedId, authHeaders, isEngineer]);
 
   useEffect(() => {
     let active = true;
-    setLoadingProjects(true);
     setError('');
     fetch(`${API_BASE_URL}/api/projects`, { headers: authHeaders() })
       .then(async (projectsResp) => {
@@ -91,8 +83,6 @@ export function WbsStructurePage() {
         });
       }).catch((err) => {
         if (active) setError(err.message);
-      }).finally(() => {
-        if (active) setLoadingProjects(false);
       });
     return () => { active = false; };
   }, [isBuHead, isEngineer, isLead, authHeaders]);
@@ -119,7 +109,6 @@ export function WbsStructurePage() {
   useEffect(() => {
     if (!selectedId) {
       setTasks([]);
-      setLoadingTasks(false);
       return undefined;
     }
     let active = true;
@@ -206,10 +195,6 @@ export function WbsStructurePage() {
     }
   }
 
-  function updateTask(id, field, value) {
-    setTasks((rows) => rows.map((row) => row.id === id ? { ...row, [field]: value } : row));
-  }
-
   async function addNode(event) {
     event.preventDefault();
     setError('');
@@ -260,7 +245,7 @@ export function WbsStructurePage() {
         assigned_lead_user_id: user.id ?? null,
         assigned_engineer_id: nodeForm.assigned_engineer_id ?? null,
         estimated_hours: hours,
-        deliverable_status: nodeForm.deliverable_status || 'Not Started',
+        deliverable_status: nodeForm.deliverable_status || 'To Do',
         start_date: nodeForm.start_date || null,
         target_due_date: nodeForm.target_due_date || null,
         end_date: nodeForm.end_date || null,
@@ -302,7 +287,7 @@ export function WbsStructurePage() {
       parent_id: task.parent_id ?? null,
       assigned_engineer_id: task.assigned_engineer_id ?? null,
       estimated_hours: task.estimated_hours === null || task.estimated_hours === '' ? null : task.estimated_hours,
-      deliverable_status: task.deliverable_status || 'Not Started',
+      deliverable_status: task.deliverable_status || 'To Do',
       start_date: task.start_date || '',
       target_due_date: task.target_due_date || '',
       end_date: task.end_date || '',
@@ -661,7 +646,7 @@ export function WbsStructurePage() {
             {nodeMode === 'edit' && (
               <label className="wbs-field">
                 <span>Deliverable Status</span>
-                <select value={nodeForm.deliverable_status || 'Not Started'} onChange={(e) => setNodeForm({ ...nodeForm, deliverable_status: e.target.value })}>
+                <select value={nodeForm.deliverable_status || 'To Do'} onChange={(e) => setNodeForm({ ...nodeForm, deliverable_status: e.target.value })}>
                   {['To Do', 'In-Progress', 'Submitted for Approval', 'Approved', 'Done'].map((status) => <option key={status} value={status}>{status}</option>)}
                 </select>
               </label>

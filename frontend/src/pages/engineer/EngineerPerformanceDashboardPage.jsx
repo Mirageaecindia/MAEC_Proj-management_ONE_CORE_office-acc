@@ -23,7 +23,7 @@ function formatValue(value, digits = 2) {
 export function EngineerPerformanceDashboardPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { authHeaders, user } = useAuth();
+  const { authHeaders } = useAuth();
   const targetProjectId = searchParams.get('projectId') ? Number(searchParams.get('projectId')) : null;
 
   const [projects, setProjects] = useState([]);
