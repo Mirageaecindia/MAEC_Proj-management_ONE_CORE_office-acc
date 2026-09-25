@@ -9,7 +9,9 @@ Delete this module once every database has been adopted (docs/TODO.md E4).
 New schema changes never go here: they are Alembic revisions in `migrations/`.
 """
 
-from sqlalchemy import inspect
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
 from app.core.database import Base
@@ -62,6 +64,18 @@ _LEGACY_COLUMNS = {
     },
 }
 
+# Added as nullable by the old patches but NOT NULL in the models / baseline:
+# table -> {column: model default used to fill existing NULLs}.
+_NOT_NULL_COLUMNS = {
+    "projects": {
+        "contract_value": 0,
+        "contract_currency": "USD",
+        "governance_threshold_pct": 80,
+        "timesheets_soft_locked": 0,
+    },
+    "resource_bookings": {"approval_status": "draft"},
+}
+
 _WBS_INDEXES = ("project_id", "parent_id", "wbs_code", "assigned_engineer_id")
 
 
@@ -71,6 +85,7 @@ def converge_legacy_schema(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)  # tables that didn't exist yet
     _add_missing_columns(engine)
     _make_wbs_code_and_hours_nullable(engine)
+    _enforce_not_null(engine)
     for table in Base.metadata.sorted_tables:  # indexes the old patches never created
         for index in table.indexes:
             index.create(engine, checkfirst=True)
@@ -91,6 +106,26 @@ def _add_missing_columns(engine: Engine) -> None:
             for name, definition in columns.items():
                 if name not in present:
                     connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+
+
+def _enforce_not_null(engine: Engine) -> None:
+    """Fill NULLs with the model default, then make the column NOT NULL, so the
+    lock logic never reads a NULL as "not locked" or "no threshold"."""
+    inspector = inspect(engine)
+    with engine.begin() as connection:
+        operations = Operations(MigrationContext.configure(connection))
+        for table, defaults in _NOT_NULL_COLUMNS.items():
+            columns = {column["name"]: column for column in inspector.get_columns(table)}
+            loose = [name for name in defaults if columns[name]["nullable"]]
+            if not loose:
+                continue
+            for name in loose:
+                connection.execute(
+                    text(f"UPDATE {table} SET {name} = :value WHERE {name} IS NULL"), {"value": defaults[name]}
+                )
+            with operations.batch_alter_table(table) as batch:  # SQLite: rebuilds the table, keeps its indexes
+                for name in loose:
+                    batch.alter_column(name, existing_type=columns[name]["type"], nullable=False)
 
 
 def _make_wbs_code_and_hours_nullable(engine: Engine) -> None:

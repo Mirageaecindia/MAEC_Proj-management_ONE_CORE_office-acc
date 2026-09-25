@@ -58,6 +58,18 @@ def pre_alembic(tmp_path):
         connection.exec_driver_sql(
             "INSERT INTO users (username, password_hash, role) VALUES ('old.user', 'x', 'bu_head')"
         )
+        # The old patches added these two lock-critical columns as nullable.
+        for column, legacy_definition in (
+            ("timesheets_soft_locked", "INTEGER DEFAULT 0"),
+            ("governance_threshold_pct", "FLOAT DEFAULT 80"),
+        ):
+            connection.exec_driver_sql(f"ALTER TABLE projects DROP COLUMN {column}")
+            connection.exec_driver_sql(f"ALTER TABLE projects ADD COLUMN {column} {legacy_definition}")
+        connection.exec_driver_sql(
+            "INSERT INTO projects (project_name, project_code, client_organization, project_lead, "
+            "contract_value, contract_currency, governance_threshold_pct) "
+            "VALUES ('Old', 'OLD-1', 'Client', 'Lead', 0, 'USD', NULL)"
+        )
     return old
 
 
@@ -69,6 +81,16 @@ def test_pre_alembic_database_is_adopted_with_its_data(pre_alembic):
     assert "ix_wbs_nodes_phase" in {index["name"] for index in inspect(pre_alembic).get_indexes("wbs_nodes")}
     with pre_alembic.connect() as connection:
         assert connection.execute(text("SELECT username, is_active FROM users")).one() == ("old.user", 1)
+        # A NULL threshold would silently mean "no threshold": filled with the model default, now NOT NULL.
+        row = connection.execute(text("SELECT governance_threshold_pct, timesheets_soft_locked FROM projects")).one()
+        assert row == (80.0, 0)
+    nullability = [
+        op
+        for d in _differences(pre_alembic)
+        for op in (d if isinstance(d, list) else [d])
+        if op[0] == "modify_nullable"
+    ]
+    assert nullability == []
 
 
 def test_database_that_cannot_be_adopted_stops_startup(pre_alembic):
