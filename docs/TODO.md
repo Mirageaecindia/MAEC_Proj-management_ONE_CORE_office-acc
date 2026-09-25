@@ -164,11 +164,11 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
 
 ## Suggested order
 
-1. **Now (P0), needs you:**
-   - **S1:** find who holds the Azure admin role and get the secret rotated this week.
-   - **S2:** list **every clone** (you, Subhika, the Engineer dev, the previous developer, old laptops, CI, GitHub forks). One stale clone pushed later brings the history back.
-   - **S7:** choose the off-machine backup folder and schedule the task.
-   - S3–S8 and N14(d) are done.
+1. **Blocked / later (P0):**
+   - **S1:** blocked until Azure credentials are available. Do it before any SharePoint work.
+   - **S2:** the only other clone is Subhika's; she has moved to another project and won't pull or push. Purge, then ask her to delete her clone.
+   - **S7 (go-live item):** the database holds only test data today. Before real use, point `backup_db.py --dir` at an off-machine folder (external drive or restricted OneDrive) and schedule it nightly.
+   - S3–S8, N14(d) and E4 are done.
 2. **Sprint A:** N2 pre-check ✅ (the only known database has no timesheet rows, so counting weekend hours trips nothing), E4 Alembic ✅, then E3, N2 (7-day hours), C1 archive, C2 edit, C4 reject button, C8, N5, N8, N11, N12, N13.
 3. **Sprint B (timesheets and lock):** N1 timesheet model (tell the previous Engineer developer first), N9 single approval route, N14 lock rules, C6, C7, C10, C12. Lead/Engineer features move into `app/` as they are touched.
 4. **Sprint C (calendar and cost):** N3 office field, N4 EV/SPI/CPI, N6 rate card, N7 disciplines, N10, C3 (after S5), C5.
