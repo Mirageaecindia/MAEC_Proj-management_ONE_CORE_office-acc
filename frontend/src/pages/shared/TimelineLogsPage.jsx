@@ -17,9 +17,6 @@ export const WEEKLY_SUBMISSION_PILL = {
   approved: 'status-approved',
   rejected: 'status-rejected',
 };
-// Automatic subtask tracking only ever lands on Monday-Friday; Saturday and
-// Sunday always display 0 and never contribute to a week's total.
-export const WORKDAY_FIELDS = ['mon', 'tue', 'wed', 'thu', 'fri'];
 
 const WBS_PHASES = ['Space Planning', 'STR Coordination', 'ID Coordination', 'BoH Area RCP Coordination'];
 const INITIAL_VIEWPORT_START = new Date(2026, 8, 1);
@@ -379,7 +376,8 @@ export function TimelineLogsPage() {
         DAY_FIELDS.forEach((day) => {
           days[day] = group.entries.reduce((sum, entry) => sum + fmtHrs(entry[`${day}_hours`] || 0), 0);
         });
-        const total = WORKDAY_FIELDS.reduce((sum, day) => sum + days[day], 0);
+        // All seven days count: offices work different weeks (TODO N2).
+        const total = DAY_FIELDS.reduce((sum, day) => sum + days[day], 0);
         return {
           employee_id: group.employee_id,
           employee_name: group.employee_name,
@@ -733,7 +731,7 @@ export function TimelineLogsPage() {
           <div className="footer-info">
             <span>
               {isEngineer
-                ? 'Hours are recorded automatically per subtask via Login/Logout tracking. Active time only — idle and hidden tabs are excluded. Totals cover Monday to Friday; Saturday and Sunday always show 0.'
+                ? 'Hours are recorded automatically per subtask via Login/Logout tracking. Active time only — idle and hidden tabs are excluded.'
                 : 'Hours are tracked automatically per subtask and approved by the assigned lead.'}
             </span>
           </div>

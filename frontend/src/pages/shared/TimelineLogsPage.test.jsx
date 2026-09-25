@@ -24,10 +24,58 @@ const PROJECTS = [
 ];
 
 const NODES = [
-  { id: 1, project_id: 1, parent_id: null, wbs_code: '1', task_name: 'task 1', deliverable_status: 'Not Started', phase: 'Space Planning', assigned_engineer_id: 3, start_date: '2026-09-24', end_date: '2026-10-10', level: 1 },
-  { id: 2, project_id: 1, parent_id: 1, wbs_code: '1.1', task_name: 'subtask 1', deliverable_status: 'Done', phase: 'Space Planning', assigned_engineer_id: 3, start_date: '2026-09-24', end_date: '2026-09-24', level: 2 },
-  { id: 3, project_id: 1, parent_id: null, wbs_code: null, task_name: 'task 2', deliverable_status: 'Not Started', phase: 'ID Coordination', assigned_engineer_id: 3, start_date: '2026-09-24', end_date: '2026-10-10', level: 1 },
-  { id: 4, project_id: 1, parent_id: 3, wbs_code: null, task_name: 'subtask 2', deliverable_status: 'Done', phase: 'ID Coordination', assigned_engineer_id: 3, start_date: '2026-09-25', end_date: '2026-09-25', level: 2 },
+  {
+    id: 1,
+    project_id: 1,
+    parent_id: null,
+    wbs_code: '1',
+    task_name: 'task 1',
+    deliverable_status: 'Not Started',
+    phase: 'Space Planning',
+    assigned_engineer_id: 3,
+    start_date: '2026-09-24',
+    end_date: '2026-10-10',
+    level: 1,
+  },
+  {
+    id: 2,
+    project_id: 1,
+    parent_id: 1,
+    wbs_code: '1.1',
+    task_name: 'subtask 1',
+    deliverable_status: 'Done',
+    phase: 'Space Planning',
+    assigned_engineer_id: 3,
+    start_date: '2026-09-24',
+    end_date: '2026-09-24',
+    level: 2,
+  },
+  {
+    id: 3,
+    project_id: 1,
+    parent_id: null,
+    wbs_code: null,
+    task_name: 'task 2',
+    deliverable_status: 'Not Started',
+    phase: 'ID Coordination',
+    assigned_engineer_id: 3,
+    start_date: '2026-09-24',
+    end_date: '2026-10-10',
+    level: 1,
+  },
+  {
+    id: 4,
+    project_id: 1,
+    parent_id: 3,
+    wbs_code: null,
+    task_name: 'subtask 2',
+    deliverable_status: 'Done',
+    phase: 'ID Coordination',
+    assigned_engineer_id: 3,
+    start_date: '2026-09-25',
+    end_date: '2026-09-25',
+    level: 2,
+  },
 ];
 
 const ENTRIES = [
@@ -77,10 +125,38 @@ const ENTRIES = [
 
 const TIMELINE = {
   tasks: [
-    { id: 1, task_name: 'task 1', phase: 'Space Planning', deliverable_status: 'Not Started', start_date: '2026-09-24', end_date: '2026-10-10' },
-    { id: 2, task_name: 'subtask 1', phase: 'Space Planning', deliverable_status: 'Done', start_date: '2026-09-24', end_date: '2026-09-24' },
-    { id: 3, task_name: 'task 2', phase: 'ID Coordination', deliverable_status: 'Not Started', start_date: '2026-09-24', end_date: '2026-10-10' },
-    { id: 4, task_name: 'subtask 2', phase: 'ID Coordination', deliverable_status: 'Done', start_date: '2026-09-25', end_date: '2026-09-25' },
+    {
+      id: 1,
+      task_name: 'task 1',
+      phase: 'Space Planning',
+      deliverable_status: 'Not Started',
+      start_date: '2026-09-24',
+      end_date: '2026-10-10',
+    },
+    {
+      id: 2,
+      task_name: 'subtask 1',
+      phase: 'Space Planning',
+      deliverable_status: 'Done',
+      start_date: '2026-09-24',
+      end_date: '2026-09-24',
+    },
+    {
+      id: 3,
+      task_name: 'task 2',
+      phase: 'ID Coordination',
+      deliverable_status: 'Not Started',
+      start_date: '2026-09-24',
+      end_date: '2026-10-10',
+    },
+    {
+      id: 4,
+      task_name: 'subtask 2',
+      phase: 'ID Coordination',
+      deliverable_status: 'Done',
+      start_date: '2026-09-25',
+      end_date: '2026-09-25',
+    },
   ],
   phases: [
     { phase: 'ID Coordination', total_tasks: 2, completed_tasks: 1, percent_complete: 50 },
@@ -103,7 +179,14 @@ function submission(status, overrides = {}) {
     employee_name: 'Ritu',
     week_start_date: '2026-09-21',
     status,
-    status_label: status === 'submitted' ? 'Submitted for Approval' : status === 'approved' ? 'Approved' : status === 'rejected' ? 'Rejected' : 'Not Submitted',
+    status_label:
+      status === 'submitted'
+        ? 'Submitted for Approval'
+        : status === 'approved'
+          ? 'Approved'
+          : status === 'rejected'
+            ? 'Rejected'
+            : 'Not Submitted',
     submitted_at: '2026-09-24T10:00:00+00:00',
     reviewed_by: null,
     reviewed_at: null,
@@ -146,7 +229,8 @@ function WeeklyLogsStub() {
   const [params] = useSearchParams();
   return (
     <div>
-      weekly-logs reached: projectId={params.get('projectId')} employeeId={params.get('employeeId')} weekStart={params.get('weekStart')}
+      weekly-logs reached: projectId={params.get('projectId')} employeeId={params.get('employeeId')}{' '}
+      weekStart={params.get('weekStart')}
     </div>
   );
 }
@@ -194,6 +278,13 @@ describe('Timeline Logs page groups the weekly log by engineer and navigates to 
     expect(screen.getByText('Submit for Approval')).toBeTruthy();
     expect(screen.queryByText('Approve')).toBeNull();
     expect(screen.queryByText('Reject')).toBeNull();
+  });
+
+  it('counts Saturday and Sunday hours in the weekly total (TODO N2)', async () => {
+    timesheetData = [{ ...ENTRIES[0], sat_hours: 2, sun_hours: 1, total_hours: 3.02 }, ENTRIES[1]];
+    renderPage();
+
+    expect(await screen.findByText('3.03 hrs')).toBeTruthy(); // 0.02 + 0.01 weekday + 3 weekend
   });
 
   it('submitting the week hides Submit and shows Submitted for Approval', async () => {

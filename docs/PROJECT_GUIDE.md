@@ -77,7 +77,7 @@ sequenceDiagram
     L->>API: Build WBS (phases → tasks → subtasks), assign engineers
     E->>API: Move task To Do → In-Progress
     E->>API: Start / heartbeat / end subtask tracking session
-    API->>API: Bank tracked hours into the weekly timesheet (Mon–Fri)
+    API->>API: Bank tracked hours into the weekly timesheet (any day)
     L->>API: Approve / reject timesheet entries
     E->>API: Subtasks Done → submit task for approval
     L->>API: Approve task
@@ -166,7 +166,7 @@ MAEC_project_management/
 │   ├── main.py                App object, startup migrations and seeding, Lead/Engineer endpoints; mounts app routers (~2,800 lines)
 │   ├── app/                   Layered package (auth + BU Head + SharePoint), see §6.4
 │   │   ├── core/              config (settings), database, security (auth, role guards), roles, errors
-│   │   ├── domain/            timesheets (Mon–Fri totals), calendar (monthly spreading)
+│   │   ├── domain/            timesheets (7-day totals, review status), calendar (monthly spreading), governance
 │   │   ├── repositories/      projects, users, governance, bookings, notifications, work
 │   │   ├── services/          access, metrics, projects, documents, governance, booking_approval, notifications, work_summary
 │   │   ├── integrations/sharepoint/  DocumentStorage interface (storage.py) + Graph client (graph.py)
@@ -299,7 +299,7 @@ Request flow: **router → service → repository → database**, with external 
 | `api/deps.py` | Composition root: builds each service from its repositories and adapters. Tests override these | `get_project_service`, `get_document_storage` |
 | `services/*` | Business rules and the transaction (commit). Raise `app.core.errors` (`NotFoundError`, `ForbiddenError`, `ConflictError`…), never `HTTPException` | `GovernanceService.decide_extension` |
 | `repositories/*` | Queries only, never commit | `ProjectRepository.delete_with_children` |
-| `domain/*` | Pure rules with no database or HTTP | `timesheets.entry_total` (Mon–Fri) |
+| `domain/*` | Pure rules with no database or HTTP | `timesheets.entry_total` (all seven days) |
 | `integrations/*` | Adapters to external systems behind a protocol | `DocumentStorage` / `GraphDocumentStorage` |
 | `core/*` | Settings, engine/session, security, roles, error-to-HTTP mapping | `get_settings()`, `require_bu_head` |
 
@@ -319,11 +319,11 @@ Shared helpers that the Lead/Engineer code in `main.py` needs (access rules, das
 ### 7.2 Hours
 | Item | Rule |
 |---|---|
-| Main task estimated hours | Weekdays (Mon–Fri, inclusive) between start and end date × 8. Calculated by the server. Weekends count 0. |
+| Main task estimated hours | Weekdays (Mon–Fri, inclusive) between start and end date × 8. Calculated by the server. Planned-hours maths moves to the person's office calendar in TODO N3. |
 | Subtask planned hours | Whole number from **1 to 4**. Start date must equal end date (a single-day unit). |
 | Resource booking planned hours | Weekdays in the booking range × 8. Calculated by the server (the booking % is not applied). |
 | Allocation cap | Sum of an engineer's `utilization_rate` across all projects must be ≤ 100%. Otherwise the API returns 400 with `X-Error-Code: ALLOCATION_LIMIT`. |
-| Weekly timesheet total | **Mon–Fri only.** The Sat/Sun columns never count. |
+| Weekly timesheet total | **All seven days** (offices work different weeks: KSA Sun–Thu, Indian offices often Saturday). The Lead's approval decides which hours stand. |
 
 ### 7.3 Status workflows
 
@@ -354,8 +354,8 @@ stateDiagram-v2
   - Activity is counted only while the tab is visible, and stops after **2 minutes** idle.
   - The cumulative active seconds are sent to the server every **15 seconds**.
 - **Backend:** active seconds can never go down, and the total is capped at **8 hours per engineer per day**.
-  - On Logout (`/end`), the seconds are converted to hours and added to that weekday's column in the weekly timesheet row for the subtask.
-  - Weekend sessions are never added.
+  - On Logout (`/end`), the seconds are converted to hours and added to that day's column (any day, weekends included) in the weekly timesheet row for the subtask.
+  - The active seconds are also capped at the wall-clock time since the session started.
 - **Manual entry of subtask hours is refused.** Manual `timesheet-entries` are accepted only for main tasks.
 - The Weekly Hours Logging sheet on Timeline & Logs shows only tracked subtask rows (`?source=tracking`).
 
@@ -372,7 +372,7 @@ stateDiagram-v2
 |---|---|
 | Baseline hours | `target_effort_hours` + `extension_approved_hours` (whole project) |
 | WBS planned hours | Sum of `estimated_hours` over all WBS nodes (shown for comparison; `wbs_exceeds_target` flags a WBS larger than the target) |
-| Approved hours (usage) | Mon–Fri hours of rows the Lead approved, or rows in a week the Lead approved (`effective_status` in `app/domain/timesheets.py`). Pending and rejected hours never count |
+| Approved hours (usage) | Hours (all seven days) of rows the Lead approved, or rows in a week the Lead approved (`effective_status` in `app/domain/timesheets.py`). Pending and rejected hours never count |
 | Logged hours | Approved + pending (rejected excluded); shown for information, with `rejected_hours` separately |
 | Consumption % | approved ÷ baseline × 100 |
 | Governance level | `normal`; `warning` at ≥ `governance_threshold_pct`; `hard_stop` at ≥ 100%. No baseline (target not set) → not configured, always normal |

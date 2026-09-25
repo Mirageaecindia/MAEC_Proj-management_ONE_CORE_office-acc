@@ -75,7 +75,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | ID | Task | Why | Where | Size |
 |---|---|---|---|---|
 | N1 | **Timesheet model (D1).** Engineers enter weekly hours per **main task**, approved by the Lead; subtasks carry progress only. Mostly deletion: the main-task path already exists. The tracker becomes an optional pre-fill or is removed (⚖️ D1a). Tell the previous Engineer developer first | The browser tracker records about zero while engineers work in Revit/AutoCAD, and with no idle cut-off it would become an attendance clock. Manual entry with Lead approval is the AEC norm | `main.py` `submit_time_log`, tracking endpoints, `TaskDetailsPage.jsx`, `EngineerWeeklyLogsPage.jsx` | M |
-| N2 | **Stop dropping weekend hours:** accept all 7 days on timesheets and count them in totals. Approval decides what stands | KSA works Sun–Thu and Indian offices often work Saturday. Today those hours are silently dropped | `app/domain/timesheets.py` `WEEKDAY_FIELDS`, the timesheet UI | S |
+| N2 | ✅ **Done.** Hours on all seven days are accepted and counted: row totals, approved usage (SQL), monthly buckets, "has tracked hours" filters, the Timeline & Logs weekly total, and tracking no longer discards weekend sessions. Planned-hours maths stays Mon–Fri until N3 | KSA works Sun–Thu, Indian offices often Saturday; those hours were silently dropped | `app/domain/timesheets.py`, `app/repositories/work.py`, `main.py`, `TimelineLogsPage.jsx`, `tests/test_weekend_hours.py` | S |
 | N3 | **Office field (prerequisite for D2):** an `offices` table (week pattern, time zone) and `employees.office_id`. **Default everyone to one office now** so nothing breaks. Then use it for the daily cap and day boundaries, and later for planned-hours maths | The 8 h cap and "today" use the server date; IST and GST days split differently | new table + Alembic, `main.py` tracking, `app/domain/calendar.py` | M |
 | N4 | **Real earned value:** EV = estimated hours of **finished** WBS tasks; PV = planned-to-date from the WBS dates. Show SPI = EV / PV and CPI = EV / approved hours. Replaces the current "SPI" (approved ÷ WBS hours), which isn't SPI | The only honest progress figure. Needs N8 first | `app/services/metrics.py`, `GovernanceSummaryCards.jsx` | M |
 | N5 | **Budget burn: add an over-budget state.** Burn can exceed the contract value once approved hours pass the target. Show it and cap the bar | Misleading figure today | `metrics.py`, `GovernanceSummaryCards.jsx` | S |
@@ -169,7 +169,7 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
    - **S2:** the only other clone is Subhika's; she has moved to another project and won't pull or push. Purge, then ask her to delete her clone.
    - **S7 (go-live item):** the database holds only test data today. Before real use, point `backup_db.py --dir` at an off-machine folder (external drive or restricted OneDrive) and schedule it nightly.
    - S3–S8, N14(d) and E4 are done.
-2. **Sprint A:** N2 pre-check ✅ (the only known database has no timesheet rows, so counting weekend hours trips nothing), E4 Alembic ✅, then E3, N2 (7-day hours), C1 archive, C2 edit, C4 reject button, C8, N5, N8, N11, N12, N13.
+2. **Sprint A:** E4 Alembic ✅, N2 7-day hours ✅, then E3, C1 archive, C2 edit, C4 reject button, C8, N5, N8, N11, N12, N13.
 3. **Sprint B (timesheets and lock):** N1 timesheet model (tell the previous Engineer developer first), N9 single approval route, N14 lock rules, C6, C7, C10, C12. Lead/Engineer features move into `app/` as they are touched.
 4. **Sprint C (calendar and cost):** N3 office field, N4 EV/SPI/CPI, N6 rate card, N7 disciplines, N10, C3 (after S5), C5.
 5. **Sprint D:** W1–W3.
@@ -209,4 +209,5 @@ Nothing here is urgent while the app is in development. All of it must be done b
 | `/api/server-date` returns real UTC | Subhika's UTC change |
 | P0 S3–S8 and C10: Lead WBS access checks, tracked-time cap, no public uploads, user deactivation, SQLite backups, ownership docs, WBS delete cleans sessions | `cea05fc` |
 | N14(d): an extension too small to get below 100% keeps the lock | `7e2c7eb` |
-| E4: Alembic migrations; pre-Alembic databases adopted automatically at startup | this sprint |
+| E4: Alembic migrations; pre-Alembic databases adopted automatically at startup | `7bd72ba`, `ceb8f4a` |
+| N2: hours on all seven days count | this sprint |

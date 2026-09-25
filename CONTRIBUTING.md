@@ -84,7 +84,7 @@ backend/
   alembic.ini, migrations/ # Alembic schema migrations (applied at startup by app/core/migrations.py)
   app/
     core/                  # config (settings), database, security (auth, role guards), roles, errors
-    domain/                # pure shared rules: timesheets (Mon–Fri totals), calendar (monthly spreading)
+    domain/                # pure shared rules: timesheets (7-day totals, review status), calendar, governance
     repositories/          # data access only; never commit (services own the transaction)
     services/              # business logic; raise app.core.errors, never HTTPException
     integrations/sharepoint/ # DocumentStorage interface + Microsoft Graph client
@@ -106,7 +106,7 @@ in `main.py`. See also the merge-conflict rules in `CLAUDE.md`.)
 |---|---|
 | `require_role` | `app/core/security.py` (plus guards `require_bu_head`, `require_lead_or_bu_head`, `require_any_role`) |
 | `get_current_user`, `hash_password`, `verify_password` | `app/core/security.py` (`auth.py` re-exports them) |
-| `time_entry_total` (Mon–Fri rule) | `app/domain/timesheets.py` → `entry_total` |
+| `time_entry_total` (7-day total) | `app/domain/timesheets.py` → `entry_total` |
 | `_get_month_key`, `_distribute_hours_over_months` | `app/domain/calendar.py` |
 | `engineer_wbs_condition`, `engineer_wbs_ids`, `engineer_approved_project_ids`, `lead_project_ids`, `user_can_access_project` | `app/services/access.py` |
 | `reject_resource_bookings` endpoint | `app/api/routers/bu_head/resourcing.py` → `BookingApprovalService.reject` |

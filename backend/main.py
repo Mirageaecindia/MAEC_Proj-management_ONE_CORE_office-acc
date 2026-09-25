@@ -755,7 +755,7 @@ def time_entry_hours_by_month(entry) -> dict[str, float]:
     buckets: dict[str, float] = {}
     if not entry.week_start_date:
         return buckets
-    for offset, field in enumerate(models.DAY_FIELDS[:5]):
+    for offset, field in enumerate(models.DAY_FIELDS):
         hours = float(getattr(entry, field, 0) or 0)
         if hours <= 0:
             continue
@@ -836,14 +836,14 @@ def list_timesheet_entries(
     if source == "tracking":
         # The Weekly Hours Logging sheet is fed exclusively by automatic
         # subtask tracking: only engineer subtasks (never main tasks) that
-        # actually have Monday-Friday tracked working time are shown.
+        # actually have tracked working time are shown.
         subtask_ids = [
             node.id
             for node in db.query(models.WbsNode)
             .filter(models.WbsNode.project_id == project_id, models.WbsNode.parent_id.isnot(None))
             .all()
         ]
-        tracked = or_(*[getattr(models.TimeLogEntry, field) > 0 for field in models.DAY_FIELDS[:5]])
+        tracked = or_(*[getattr(models.TimeLogEntry, field) > 0 for field in models.DAY_FIELDS])
         query = query.filter(
             models.TimeLogEntry.task_id.in_(subtask_ids) if subtask_ids else models.TimeLogEntry.id < 0,
             tracked,
@@ -975,7 +975,7 @@ def submit_weekly_hours(
     # Only a week with real tracked log hours can be submitted for approval;
     # mirrors the tracking filter of the timesheet endpoint so the UI's
     # "Submit for Approval" availability always matches the server-side rule.
-    tracked = or_(*[getattr(models.TimeLogEntry, field) > 0 for field in models.DAY_FIELDS[:5]])
+    tracked = or_(*[getattr(models.TimeLogEntry, field) > 0 for field in models.DAY_FIELDS])
     eligible = (
         db.query(models.TimeLogEntry)
         .filter(
@@ -1834,14 +1834,11 @@ def upsert_subtask_time_log(db: Session, project_id: int, task_id: int, employee
     row a Lead approves from Timelines & Logs is reused, so automatic and
     manual hours stay in one place with no duplicate time-log system.
 
-    Only Monday-Friday ever receives automatic tracked working hours: a
-    session on Saturday/Sunday is never banked, so the weekly sheet's
-    Saturday and Sunday columns always stay at zero.
+    Every day of the week is banked (offices work different weeks); the
+    Lead's approval decides which hours stand.
     """
     hours = round(seconds / 3600, 2)
     if hours <= 0:
-        return None
-    if day.weekday() >= 5:
         return None
     week_start = day - timedelta(days=day.weekday())
     field = models.DAY_FIELDS[day.weekday()]
@@ -2027,8 +2024,7 @@ def end_subtask_tracking(
     session.status = "ended"
     db.commit()
     # Hours are banked to the day the session was logged in: a late-night
-    # session that crosses midnight still lands in Friday's column, and the
-    # weekend rule then keeps Saturday/Sunday at zero.
+    # session that crosses midnight still lands in the starting day's column.
     work_date = session.login_at.date() if session.login_at else today
     upsert_subtask_time_log(db, session.project_id, session.subtask_id, session.employee_id, work_date, final_seconds)
     db.commit()

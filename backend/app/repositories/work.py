@@ -6,7 +6,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 import models
-from app.domain.timesheets import APPROVED, WEEKDAY_FIELDS
+from app.domain.timesheets import APPROVED, HOUR_FIELDS
 
 
 class WorkRepository:
@@ -36,12 +36,12 @@ class WorkRepository:
         return {(employee_id, week): status for employee_id, week, status in rows}
 
     def approved_hours(self, project_id: int) -> float:
-        """Approved hours on a project (Mon-Fri), in one SQL query. A row counts when
+        """Approved hours on a project (all seven days), in one SQL query. A row counts when
         it was approved itself or its engineer's week was approved (see effective_status)."""
         entry, week = models.TimeLogEntry, models.WeeklyHoursSubmission
-        weekday_sum = sum(func.coalesce(getattr(entry, field), 0) for field in WEEKDAY_FIELDS)
+        hours_sum = sum(func.coalesce(getattr(entry, field), 0) for field in HOUR_FIELDS)
         total = (
-            self.db.query(func.sum(weekday_sum))
+            self.db.query(func.sum(hours_sum))
             .select_from(entry)
             .outerjoin(
                 week,
