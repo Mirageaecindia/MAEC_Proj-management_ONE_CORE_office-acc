@@ -53,6 +53,17 @@ Notes:
   dependencies).
 - Logging out deletes the session token server-side.
 
+## Deactivating a leaver
+
+Deactivation logs the person out everywhere at once and blocks future logins
+(they see the normal "Invalid username or password"). Their data stays. An
+inactive lead no longer appears in the Create Project dropdowns.
+
+```
+.venv\Scripts\python.exe create_user.py --username eng.arjun --deactivate
+.venv\Scripts\python.exe create_user.py --username eng.arjun --activate
+```
+
 ## Auth flow
 
 - `POST /api/auth/login` → returns `token`, `role`, `full_name`, `engineer_id`.

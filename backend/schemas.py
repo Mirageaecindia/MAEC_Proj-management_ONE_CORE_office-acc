@@ -224,27 +224,6 @@ class EngineerOut(BaseModel):
     user_id: Optional[int] = None
 
 
-class WbsTaskUpdate(BaseModel):
-    task_name: str
-    wbs_code: str
-    status: str
-    planned_hours: int = 0
-    assigned_engineer_id: Optional[int] = None
-
-
-class WbsTaskOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    project_id: int
-    wbs_code: str
-    task_name: str
-    status: str
-    planned_hours: int
-    assigned_engineer_id: Optional[int] = None
-    assigned_engineer_name: Optional[str] = None
-
-
 class WbsNodeBase(BaseModel):
     wbs_code: Optional[str] = None
     task_name: str

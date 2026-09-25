@@ -1,6 +1,6 @@
 # MAEC ProManage: prioritised to-do list
 
-Last updated: 2026-09-26 (second revision, after the external review). Owner:
+Last updated: 2026-09-26 (S3–S8 and C10 done). Owner:
 Sajjad, who now owns all three roles (BU Head, Lead, Engineer) plus the
 SharePoint integration.
 
@@ -59,12 +59,12 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 |---|---|---|---|---|
 | S1 | **Rotate the Azure client secret.** Update `.env` on every machine. Check whether the GitHub repo is private, **and whether it was ever public** | The secret leaked in git history (commit `1b40874`) | Azure portal, `.env`, GitHub settings | S |
 | S2 | **Purge the HR CSV and the old secret from git history** with `git filter-repo`, **right after S1**. Force-push once (the only planned exception to "never force-push main"), then everyone re-clones. If the repo was ever public, assume both were copied and **inform whoever handles HR / data protection**: the CSV is employee personal data and India's DPDP Act applies | Every week it waits, the data sits in more clones | whole repo | M |
-| S3 | **Project-access checks on the Lead write endpoints that lack them:** WBS node create, WBS node delete, WBS task update (`PUT /api/wbs-tasks/{id}`), and the Lead branch of advance-status. Bookings are already checked | A Lead can change WBS data on projects they aren't allocated to | `main.py` (patch in place + tests) | S |
-| S4 | **Limit tracked time to real time elapsed:** on session sync and end, `active_seconds` must not exceed the time since `login_at` | Today only the 8 h daily cap applies; anyone calling the API can claim 8 h a minute after starting. Needed as long as the tracker exists (see N1) | `main.py` tracking (patch in place + test) | S |
-| S5 | **Serve uploaded files through an authenticated endpoint** that checks project access. Remove the public `app.mount("/uploads", ...)` | Anyone with a file URL can download it today. It blocks the SOW upload in C3. Keep CLAUDE.md's rule about where the routers are mounted | `main.py` (mount + route), `CLAUDE.md` | S |
-| S6 | **Deactivate users:** add a `users.is_active` column (the last change via `schema_upgrades.py`); login and sessions refuse inactive users; `create_user.py --deactivate / --activate` | A leaver can only be removed by editing the database. The W6 page is too far away | `app/core/security.py`, `app/services/auth.py`, `create_user.py`, `models.py` | S |
-| S7 | **SQLite backups:** nightly copy with retention, using the SQLite backup API (safe in WAL mode), plus a tested restore procedure | Anyone using real data today has no backup | script + scheduled task, guide | S |
-| S8 | **Update the ownership docs:** CLAUDE.md, CONTRIBUTING.md and the guide still describe three owners split by role. Add the working rules above | Rules must match reality | `CLAUDE.md`, `CONTRIBUTING.md`, `docs/PROJECT_GUIDE.md` | S |
+| S3 | ✅ **Done.** Project-access checks added to Lead WBS node create, **update** and delete. The unused legacy `gantt_tasks` endpoints (`GET /api/projects/{id}/wbs-tasks`, `PUT /api/wbs-tasks/{id}`), which had no access check, were removed. Advance-status was already limited to nodes in the Lead's scope | A Lead could change WBS data on projects they weren't allocated to | `main.py`, `tests/test_lead_wbs_access.py` | S |
+| S4 | ✅ **Done.** Tracked time is capped at the wall-clock time since `login_at` on session sync and end | Anyone calling the API could claim 8 h a minute after starting | `main.py` `cap_to_elapsed`, `tests/test_tracking_cap.py` | S |
+| S5 | ✅ **Done.** The public `/uploads` mount was removed: nothing was ever stored there. The authenticated, project-checked download endpoint is built with the first real files (C3, SOW upload). A test fails if any public mount comes back | Anyone with a file URL could have downloaded it | `main.py`, `tests/test_uploads.py`, `CLAUDE.md` | S |
+| S6 | ✅ **Done.** `users.is_active` (the last change via `schema_upgrades.py`). Login and existing sessions refuse inactive users (generic error); inactive leads are hidden from the Create Project dropdowns and can't be assigned; `create_user.py --deactivate / --activate` (deactivating ends their sessions at once) | A leaver could only be removed by editing the database | `models.py`, `app/core/security.py`, `app/services/auth.py`, `app/repositories/users.py`, `create_user.py`, `tests/test_user_deactivation.py` | S |
+| S7 | ✅ **Done.** `backup_db.py`: consistent snapshot via the SQLite backup API (safe while running), keeps the newest 14; Task Scheduler command and restore steps in its docstring and guide §12. **Still to do by hand:** create the scheduled task on the machine that holds the real database | No backup existed | `backend/backup_db.py`, `tests/test_backup_db.py` | S |
+| S8 | ✅ **Done.** CLAUDE.md, CONTRIBUTING.md, USERS.md and the guide describe the single owner, the working rules and the new commands | Rules must match reality | docs | S |
 
 ---
 
@@ -102,7 +102,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | C7 | **Assignment vs access (decided):** Leads assign after booking; the engineer sees tasks once the booking is approved. Safeguards: (a) a **badge on WBS tasks** saying "assigned engineer not approved"; (b) when the BU Head rejects or reduces a booking, the Lead is told **which tasks are affected**; (c) removing a booking can't leave tasks assigned silently | Today tasks can end up with someone who will never see them | `main.py` WBS + booking delete, `booking_approval.py` notification, `WbsStructurePage.jsx` | S–M |
 | C8 | **Confirmation dialog on Stop and Resume** | Prevents clicking by accident | `GovernanceControls.jsx` + `ConfirmDialog` | S |
 | C9 | *(merged into N14 rule b)* | | | |
-| C10 | **Deleting a WBS node also deletes its `time_sessions`** | Leaves orphan rows today | `main.py` WBS delete | S |
+| C10 | ✅ **Done** (with S3). Deleting a WBS node also deletes its `time_sessions` | Left orphan rows | `main.py` WBS delete | S |
 | C11 | **Engineers can log hours in a week that has no entry yet.** This becomes part of N1's main-task weekly timesheet | The timesheet UI only shows rows that already exist | N1 | – |
 | C12 | **Audit log for booking approvals, rejections and edits** (who, when, before/after) | The governance log doesn't cover resourcing decisions | `booking_approval.py`, `main.py` booking edit, new audit table or `governance_actions` | S–M |
 
@@ -131,7 +131,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | E3 | **Fix the 6 ESLint errors** (`WbsStructurePage.jsx`, `pages/lead/ExecutiveDashboardPage.jsx`, `EngineerPerformanceDashboardPage.jsx`); shrink the lint ratchet as files are refactored | `npm run lint` fails today | those files | S |
 | E5 | **Postgres decision, foreign keys, indexes** (after E4) | Production-grade database | `models.py`, config | M |
 | E6 | **Performance:** SQL aggregates instead of per-row queries; less polling | Scales badly | `main.py`, pages | M |
-| E7 | **Delete dead code:** `gantt_tasks`, `project_leads`, the legacy `request-extension` endpoint, `leads_loader.py`, `temp_*.py`, `App.css`, the unused `recharts` dependency, and the tracker if D1a says remove | Noise | various | S |
+| E7 | **Delete dead code:** the `gantt_tasks` table (its endpoints were removed in S3), `project_leads`, the legacy `request-extension` endpoint, `leads_loader.py`, `temp_*.py`, `App.css`, the unused `recharts` dependency, and the tracker if D1a says remove | Noise | various | S |
 | E8 | **Tokens in httpOnly cookies** instead of `localStorage` | XSS could steal tokens | `security.py`, `api/client.js`, `AuthContext.jsx` | M |
 | E9 | **Production setup:** single-port build (FastAPI serves the built frontend), structured logging, error monitoring | Deployment | `main.py`, `vite build` | M |
 
@@ -164,7 +164,7 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
 
 ## Suggested order
 
-1. **Now (P0):** S1 → S2 → S3, S4, S5, S6, S7, S8; plus E3.
+1. **Now (P0):** S1 → S2 (both need you: Azure access and a team moment); schedule the S7 backup task; E3. S3–S8 are done.
 2. **Sprint A:** **E4 Alembic first**, then N2 (7-day hours), C1 archive, C2 edit, C4 reject button, C8, N5, N8, N11, N12, N13.
 3. **Sprint B (timesheets and lock):** N1 timesheet model (tell the previous Engineer developer first), N9 single approval route, N14 lock rules, C6, C7, C10, C12. Lead/Engineer features move into `app/` as they are touched.
 4. **Sprint C (calendar and cost):** N3 office field, N4 EV/SPI/CPI, N6 rate card, N7 disciplines, N10, C3 (after S5), C5.
@@ -186,3 +186,4 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
 | Governance: baseline = target + extensions, alert at threshold, auto-lock at 100%, resume, notifications, header bell | `095de9c` |
 | Governance usage counts approved hours only (row or week approval); rejected hours excluded | `288c2ac` |
 | `/api/server-date` returns real UTC | Subhika's UTC change |
+| P0 S3–S8 and C10: Lead WBS access checks, tracked-time cap, no public uploads, user deactivation, SQLite backups, ownership docs, WBS delete cleans sessions | this sprint |

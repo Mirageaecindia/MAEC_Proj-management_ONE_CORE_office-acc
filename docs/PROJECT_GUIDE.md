@@ -124,7 +124,6 @@ flowchart LR
     subgraph Server
         API["FastAPI app (main.py)<br/>uvicorn :8000"]
         DB[("SQLite<br/>backend/promanage.db")]
-        UP["/uploads static files"]
     end
     subgraph Microsoft365["Microsoft 365"]
         AAD["Entra ID (Azure AD)<br/>client-credentials token"]
@@ -176,14 +175,15 @@ MAEC_project_management/
 │   ├── schemas.py             Pydantic request/response models, status and phase constants
 │   ├── database.py            Shim re-exporting app.core.database (old imports keep working)
 │   ├── auth.py                Shim re-exporting app.core.security
-│   ├── create_user.py         CLI to create login accounts (the only way to add users)
+│   ├── create_user.py         CLI to create, (de)activate and set the discipline of login accounts
+│   ├── backup_db.py           Nightly SQLite backup with retention (see §12)
 │   ├── seed_and_verify.py     Older end-to-end smoke script (TestClient)
 │   ├── seed_users.py, check_users.py, inspect_db.py, temp_*.py, leads_loader.py
 │   │                          Leftover dev scripts, mostly dead code (roadmap 1.6)
 │   ├── data/
 │   │   ├── employee_leads.example.csv   Column layout of the HR export (fake data)
 │   │   └── employee_leads.csv           Real HR export — git-ignored, contains personal data
-│   ├── uploads/               Served at /uploads (reserved for proposal/SOW files; unused)
+│   ├── uploads/               Reserved for proposal/SOW files; not served publicly (an authenticated endpoint comes with the SOW upload)
 │   ├── tests/                 pytest characterization suite for the BU Head API (77 tests)
 │   │   ├── conftest.py        Isolated temp DB, SharePoint disabled, fixtures (world, make, client)
 │   │   ├── factories.py       Test data builders
@@ -220,7 +220,7 @@ MAEC_project_management/
         │   │                  ExecutiveDashboardPage (+ governance/ cards, controls, audit log),
         │   │                  ProjectWorkSummaryPage, *.test.js(x)
         │   └── sharepoint/    SharePointMirrorPage, folderTree helpers, sharepoint.css
-        └── pages/             Not yet migrated to the data layer (owned by Lead/Engineer developers)
+        └── pages/             Lead / Engineer / shared pages, not yet migrated to the data layer (TODO E2)
             ├── LoginPage.jsx
             ├── lead/          ExecutiveDashboardPage (Lead variant)
             ├── engineer/      EngineerPerformanceDashboardPage
@@ -236,7 +236,7 @@ MAEC_project_management/
 2. A series of `add_*_columns()` functions run `ALTER TABLE` for columns added over time, and rebuild `wbs_nodes` once to make `wbs_code` and `estimated_hours` nullable.
 3. Data backfills: nodes without a phase get "Space Planning", and "Submitted for Review" becomes "Submitted for Approval".
 4. Seeding: four `project_leads` rows (legacy), and the `employees` table from `backend/data/employee_leads.csv` if it's empty (`Emp No`, `Emp Name` and `Designation` columns; designation is also stored as `discipline`).
-5. The FastAPI app is created. CORS allows `localhost` and `127.0.0.1` on any port. `/uploads` is mounted.
+5. The FastAPI app is created. CORS allows `localhost` and `127.0.0.1` on any port. No static folder is served publicly.
 6. The domain-error handler is registered, and the `app` package's routers (auth + BU Head) are included. The Lead/Engineer endpoints declared in `main.py` follow.
 
 ### 6.2 Authentication and authorization
@@ -276,7 +276,7 @@ There are no database foreign keys. Relationships are plain integer columns and 
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `users` | Login accounts | `username` (unique), `password_hash`, `full_name`, `role` (`bu_head`/`lead`/`engineer`), `discipline` (leads), `employee_id` (engineers) |
+| `users` | Login accounts | `username` (unique), `password_hash`, `full_name`, `role` (`bu_head`/`lead`/`engineer`), `discipline` (leads), `employee_id` (engineers), `is_active` (deactivated accounts can't log in) |
 | `login_sessions` | Bearer tokens | `token` (unique), `user_id` |
 | `employees` | HR roster (seeded from CSV) | `employee_code`, `name`, `role_title`, `discipline` (= designation) |
 | `projects` | A project and its commercial baseline | `project_name`, `project_code` (unique), `client_organization`, `project_lead` + `project_lead_{electrical,mechanical,bim}` and matching `_user_id` columns, `start_date`, `target_end_date`, `contract_value`, `contract_currency`, `target_effort_hours`, `governance_threshold_pct`, `timesheets_soft_locked`, `lock_reason` (`manual`/`auto`), `governance_alert_level` (last level acted on), `extension_status`, `extension_approved_hours`, `sharepoint_disciplines` (JSON list), `sharepoint_site_url` |
@@ -288,7 +288,7 @@ There are no database foreign keys. Relationships are plain integer columns and 
 | `extension_requests` | Lead's request for extra hours | `requested_hours`, `justification`, `status` (`pending`/`approved`/`rejected`), `decision_comments`, `decided_by`, `decided_at` |
 | `governance_actions` | Audit log of governance events | `action` (`extension_request`, `approve_extension`, `reject_extension`, `stop_execution`, `resume_execution`, `auto_lock` by "System"), plus a snapshot: `discipline`, `consumption_pct`, `threshold_pct`, `consumption_hours`, `comments`, `created_by`, `requested_hours` |
 | `notifications` | Role-targeted notifications | `recipient_role`, `recipient_user_id`, `notification_type` (`resource_booking_approval`/`_approved`/`_rejected`, `extension_requested`/`_decided`, `threshold_warning`, `execution_locked`, `execution_resumed`); `recipient_user_id` set = personal, null = everyone with `recipient_role`, `title`, `message`, `project_id`, `is_read` |
-| `gantt_tasks` | **Legacy**, replaced by `wbs_nodes` | Still has endpoints; unused by the UI |
+| `gantt_tasks` | **Legacy**, replaced by `wbs_nodes` | No endpoints any more; table still dropped with its project |
 | `project_leads` | **Legacy** lead lookup, replaced by `users` with role `lead` | Seeded, unused |
 
 ### 6.4 The `app` package (auth + BU Head)
@@ -441,7 +441,6 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | POST | `/api/wbs-nodes/{id}/advance-status` | Engineer (assigned), Lead (subtasks) | Move to the next status |
 | POST | `/api/wbs-nodes/{id}/approve` | Lead (assigned) | Approve a submitted task |
 | POST | `/api/wbs-nodes/{id}/comments` | Engineer (assigned) | Add a history comment |
-| GET / PUT | `/api/projects/{id}/wbs-tasks`, `/api/wbs-tasks/{id}` | — | **Legacy** `gantt_tasks` endpoints (unused) |
 
 **Time**
 | Method | Path | Roles | Purpose |
@@ -468,7 +467,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | POST | `/api/projects/{id}/governance/resume-execution` | BU Head | Lift a manual or automatic lock (`{comments}` optional; 409 if not locked) |
 | POST | `/api/projects/{id}/governance/request-extension` | Lead | **Legacy** duplicate of `POST extension-requests` (the BU Head legacy `approve-extension` / `reject-extension` were removed in Phase 1) |
 
-**Utility:** `GET /health` → `{status: ok}` · `GET /api/server-date` → the server's local date and time.
+**Utility:** `GET /health` → `{status: ok}` · `GET /api/server-date` → the current date and time in UTC.
 
 ---
 
@@ -538,7 +537,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 - **BU Head and SharePoint pages** (`features/`): no direct `fetch`. A page uses a hook (`hooks/`), which caches through TanStack Query and calls `api/`, which adds the base URL and token and raises `ApiError`. Data is fresh for 30 s and refetched on window focus instead of polling. SharePoint data is fetched on demand. A 401 logs the user out, and the cache is cleared when the user changes.
 - The selected project lives in the URL (`?projectId=`, via `useProjectSelection`), so links and refreshes keep the same project.
 - Routes are lazy-loaded, so each page is its own download. The initial bundle went from 400 KB to 272 KB (86 KB gzipped).
-- **Lead/Engineer/shared pages** (`pages/`) still `fetch` with `authHeaders()`, and Resource Booking still hardcodes `http://localhost:8000`. Their owners can migrate them to the same pattern.
+- **Lead/Engineer/shared pages** (`pages/`) still `fetch` with `authHeaders()`, and Resource Booking still hardcodes `http://localhost:8000`. They migrate to the same pattern when they are next changed (TODO E2).
 - Charts and Gantt bars are plain `<div>`s sized with CSS percentages. The monthly chart is the shared `MonthlyHoursChart` component.
 - Working-day maths shared by the WBS and booking forms lives in `src/lib/hours.js`, matching the server rule.
 
@@ -567,11 +566,12 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 ## 12. Development workflow
 
 - **Setup and run:** see [README.md](../README.md). Backend: `backend\.venv\Scripts\python.exe -m uvicorn main:app --reload` (port 8000). Frontend: `npm run dev` (port 5173).
-- **Accounts:** `backend\.venv\Scripts\python.exe create_user.py --username … --role bu_head|lead|engineer --full-name "…" [--employee-id N]`. See [backend/USERS.md](../backend/USERS.md). Lead accounts also need `users.discipline` set, or they won't appear in the Create Project dropdowns.
+- **Accounts:** `backend\.venv\Scripts\python.exe create_user.py --username … --role bu_head|lead|engineer --full-name "…" [--employee-id N] [--discipline Electrical|Mechanical|BIM]` (leads need a discipline). Leavers: `create_user.py --username … --deactivate` logs them out at once and blocks login; `--activate` reverses it. See [backend/USERS.md](../backend/USERS.md).
+- **Backups:** `backend\.venv\Scripts\python.exe backup_db.py` takes a consistent snapshot (safe while the server runs) into `backend/backups/` and keeps the newest 14. Schedule it nightly with Windows Task Scheduler; the command and the restore steps are in the script's docstring.
 - **Tests:** `backend\.venv\Scripts\python.exe -m pytest` runs 77 characterization tests of the BU Head API against an isolated temp database with SharePoint disabled. Assertions marked `KNOWN (roadmap X.Y)` record current, known-wrong behaviour.
 - **Quality:** ruff (backend), ESLint + Prettier (frontend), and pre-commit hooks that also block secrets, databases and data CSVs. Legacy shared files are on a "ratchet" exception list and are cleaned up when they're refactored.
 - **Git:** everyone commits directly to `main`. Pull with rebase before starting and before pushing, keep commits small, and never force-push. See [CONTRIBUTING.md](../CONTRIBUTING.md).
-- **Ownership:** BU Head features and SharePoint belong to the BU Head developer; Lead and Engineer workflows to their developers. `main.py`, `models.py`, `schemas.py`, `auth.py`, `database.py`, the app shell and the shared pages are shared.
+- **Ownership:** since 2026-09-26 one owner covers all roles and SharePoint. The backlog and working rules are in [TODO.md](TODO.md).
 
 ---
 
@@ -580,7 +580,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 **Security**
 - The Azure client secret and the HR CSV were committed in earlier history (repo on GitHub). The secret must be rotated.
 - Tokens are stored in `localStorage`, so XSS could steal them (httpOnly cookies would be safer). Sessions now expire, and login is rate-limited.
-- Lead WBS create/update/delete have no project-access check (Lead code). Extension requests, booking submission and the Executive Dashboard are now limited to Leads allocated to the project.
+- Lead WBS create/update/delete, extension requests, booking submission and the Executive Dashboard are limited to Leads allocated to the project.
 
 **BU Head / governance**
 - Budget burn is proportional to hours, not real cost. There's no rate card, and the resource summary returns hardcoded zeros for commercial figures.
@@ -588,16 +588,14 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 - Booking approval isn't reset when a booking is edited, and the Resource Booking page has no Reject button yet (the API exists).
 - Work Summary counts only the legacy "Completed" status, so completion shows 0 for current data.
 - Timeline & Logs is effectively empty for the BU Head (phase bars and approval states only load for Lead and Engineer). The Gantt viewport is fixed to Sep–Dec 2026 and leaves out the Submission phase.
-- The Create Project lead dropdowns are empty until leads have a discipline (`create_user.py` can't set one). A SharePoint failure message is lost because the page redirects straight after saving.
+- A SharePoint failure message on Create Project is lost because the page redirects straight after saving.
 - There's no project edit, project status or archive.
 
 **SharePoint:** see §9.
 
 **Engineering**
 - `main.py` (~2,800 lines) still holds the Lead/Engineer endpoints. Schema changes happen via `ALTER TABLE` on import. There are no foreign keys, several per-row database queries, and frequent polling.
-- Legacy and dead code: `gantt_tasks`, `project_leads`, the Lead's legacy `request-extension` endpoint, `leads_loader.py`, `temp_*.py`, `App.css`, the `recharts` dependency.
-- Deleting a WBS node doesn't remove its `time_sessions` rows (Lead code). Project deletion does since Phase 1.
-- `/api/server-date` labels the server's local time as "UTC".
+- Legacy and dead code: the `gantt_tasks` table (its endpoints are gone), `project_leads`, the Lead's legacy `request-extension` endpoint, `leads_loader.py`, `temp_*.py`, `App.css`, the `recharts` dependency.
 
 ---
 

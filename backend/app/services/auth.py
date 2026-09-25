@@ -80,7 +80,7 @@ class AuthService:
         username = username.strip()
         self.throttle.check(username)
         user = self.db.query(models.User).filter_by(username=username).first()
-        if not user or not verify_password(password, user.password_hash):
+        if not user or not verify_password(password, user.password_hash) or not user.is_active:
             self.throttle.record_failure(username)
             raise UnauthorizedError(INVALID_CREDENTIALS)
         self.throttle.reset(username)

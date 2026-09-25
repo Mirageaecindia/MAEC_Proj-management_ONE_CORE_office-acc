@@ -1,7 +1,10 @@
 # Contributing
 
-Three developers work on this codebase, split by role. This file records how we
-avoid stepping on each other while we restructure the monolith.
+Since 2026-09-26 one owner (Sajjad) is responsible for all roles (BU Head, Lead,
+Engineer) and the SharePoint integration. Earlier the work was split between three
+developers. This file records how we work on `main` and how the monolith is
+being restructured. The prioritised backlog and working rules are in
+[docs/TODO.md](docs/TODO.md).
 
 ## ⚠️ Before you pull the "Phase 0 foundation" change
 
@@ -32,16 +35,16 @@ Ask for the new value; do not reuse the old one.
 
 ## Ownership
 
-| Area | Owner | Main files today |
-|---|---|---|
-| BU Head: projects, governance, resource approval, dashboards | BU Head developer | `pages/bu_head/*`, `backend/app/api/routers/bu_head/*` and the `app/services` they use |
-| SharePoint / Microsoft Graph integration | BU Head developer | `backend/app/integrations/sharepoint/*`, `pages/shared/SharePointMirrorPage.jsx` |
-| Lead workflows (WBS, bookings, timesheet review, extension requests) | Lead developer | `pages/lead/*`, Lead endpoints |
-| Engineer workflows (tasks, timesheets, performance) | Engineer developer | `pages/engineer/*`, Engineer endpoints |
-| **Shared**: `main.py`, `models.py`, `schemas.py`, `backend/app/core`, `app/domain`, `app/services/access.py`, `App.jsx`, `AuthContext.jsx`, `MaecHeader.jsx`, `styles.css`, shared pages | Everyone | Announce before changing; keep diffs small |
+| Area | Main files today |
+|---|---|
+| BU Head: projects, governance, resource approval, dashboards | `frontend/src/features/bu-head/*`, `backend/app/api/routers/bu_head/*` and the `app/services` they use |
+| SharePoint / Microsoft Graph integration | `backend/app/integrations/sharepoint/*`, `frontend/src/features/sharepoint/*` |
+| Lead workflows (WBS, bookings, timesheet review, extension requests) | `frontend/src/pages/lead/*`, Lead endpoints in `main.py` |
+| Engineer workflows (tasks, timesheets, tracking, performance) | `frontend/src/pages/engineer/*`, Engineer endpoints in `main.py` |
+| Shared: `models.py`, `schemas.py`, `backend/app/core`, `app/domain`, `app/services/access.py`, `App.jsx`, `AuthContext.jsx`, `MaecHeader.jsx`, `styles.css`, shared pages | |
 
-If a bug in your area is caused by another owner's code, open an issue or tell
-them. Don't fix it silently in their files.
+All areas have one owner (see above). Anyone else who still commits: announce
+changes to shared files and keep the diffs small.
 
 ## Working on `main`
 
@@ -69,10 +72,11 @@ only if everyone syncs often:
 
 ## Backend module layout (roadmap Phase 1)
 
-Only the **BU Head and SharePoint** code has moved into the `backend/app/`
-package. **Lead and Engineer endpoints stay in `main.py`**, and their owners can
-move them into `app/api/routers/lead|engineer` whenever they choose, following
-the same pattern. URLs and response shapes did not change.
+The **BU Head and SharePoint** code has moved into the `backend/app/` package.
+**Lead and Engineer endpoints are still in `main.py`.** They move into
+`app/api/routers/lead|engineer` feature by feature, following the working rules
+in [docs/TODO.md](docs/TODO.md) (E1): characterization tests first, then the move,
+then the change. URLs and response shapes did not change.
 
 ```
 backend/
@@ -180,10 +184,9 @@ refactoring can't silently change it. Assertions marked **`KNOWN (roadmap X.Y)`*
 record behaviour that is currently wrong and scheduled to be fixed. When you fix
 one, update that assertion in the same commit.
 
-## Known cross-team items
+## Known issues in Lead/Engineer code
 
-The BU Head suite found these in Lead/Engineer code:
-- Lead endpoints that create, update or delete WBS nodes have no project-access check.
-- New WBS nodes default to the legacy status "Not Started" (current flow: "To Do").
+The full, prioritised list is in [docs/TODO.md](docs/TODO.md). Two examples:
+- New WBS nodes default to the legacy status "Not Started" (current flow: "To Do") (N8).
 - Engineers can't log hours in a week with no existing entry (the timesheet UI
-  only shows rows that already exist).
+  only shows rows that already exist) (C11 / N1).

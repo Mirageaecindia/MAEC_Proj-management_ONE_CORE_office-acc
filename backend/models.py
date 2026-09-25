@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, Date, DateTime, Text, Float, UniqueConstraint
+from sqlalchemy import Boolean, Column, Integer, String, Date, DateTime, Text, Float, UniqueConstraint, true
 from sqlalchemy.sql import func
 
 from database import Base
@@ -88,6 +88,8 @@ class User(Base):
     # For leads/engineers this links the account to an employee row so
     # data scoping (assigned_lead, assigned_engineer_id) resolves server-side.
     employee_id = Column(Integer, nullable=True, index=True)
+    # Deactivated accounts (leavers) can't log in and their sessions stop working.
+    is_active = Column(Boolean, nullable=False, default=True, server_default=true())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

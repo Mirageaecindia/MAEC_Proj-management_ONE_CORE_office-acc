@@ -14,6 +14,10 @@ Engineers are linked to an employee so WBS/timesheet data is scoped to them:
 Set the discipline of an existing lead (no password prompt):
     .venv\\Scripts\\python.exe create_user.py --username lead --set-discipline Mechanical
 
+Deactivate a leaver (logged out at once, can't log in again) or reactivate:
+    .venv\\Scripts\\python.exe create_user.py --username eng.arjun --deactivate
+    .venv\\Scripts\\python.exe create_user.py --username eng.arjun --activate
+
 Accounts are NOT seeded at startup on purpose: real credentials are created manually.
 """
 
@@ -23,6 +27,7 @@ import getpass
 from sqlalchemy.orm import Session
 
 import models
+from app.core.schema_upgrades import upgrade_schema
 from auth import hash_password
 from database import Base, SessionLocal, engine
 
@@ -98,6 +103,19 @@ def set_lead_discipline(db: Session, username: str, discipline: str) -> models.U
     return user
 
 
+def set_active(db: Session, username: str, active: bool) -> models.User:
+    """Activate or deactivate an account; deactivating also ends its sessions."""
+    user = db.query(models.User).filter_by(username=username.strip()).first()
+    if not user:
+        raise SystemExit(f"User '{username}' does not exist.")
+    user.is_active = active
+    if not active:
+        db.query(models.LoginSession).filter_by(user_id=user.id).delete(synchronize_session=False)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create a MAEC login account.")
     parser.add_argument("--username", help="Login username (unique).")
@@ -110,11 +128,22 @@ def main() -> None:
         metavar="DISCIPLINE",
         help="Only update the discipline of the existing lead given by --username.",
     )
+    status = parser.add_mutually_exclusive_group()
+    status.add_argument("--deactivate", action="store_true", help="Deactivate the account given by --username.")
+    status.add_argument("--activate", action="store_true", help="Reactivate the account given by --username.")
     args = parser.parse_args()
 
     Base.metadata.create_all(bind=engine)
+    upgrade_schema(engine)  # add columns (e.g. users.is_active) if the server hasn't run yet
     db = SessionLocal()
     try:
+        if args.deactivate or args.activate:
+            if not args.username:
+                raise SystemExit("--deactivate/--activate need --username.")
+            user = set_active(db, args.username, active=args.activate)
+            print(f"User '{user.username}' is now {'active' if user.is_active else 'deactivated'}.")
+            return
+
         if args.set_discipline:
             if not args.username:
                 raise SystemExit("--set-discipline needs --username.")

@@ -13,7 +13,6 @@ from typing import List, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -25,7 +24,7 @@ from database import Base, SessionLocal, engine, get_db
 from app.api import api_router
 from app.core.errors import register_exception_handlers
 from app.core.schema_upgrades import upgrade_schema
-from app.core.security import require_role
+from app.core.security import as_utc, require_role
 from app.domain.calendar import distribute_hours_over_months as _distribute_hours_over_months
 from app.domain.calendar import month_key as _get_month_key
 from app.domain.timesheets import entry_total as time_entry_total
@@ -312,9 +311,6 @@ def add_resource_booking_approval_columns():
 add_resource_booking_approval_columns()
 upgrade_schema(engine)  # app-owned column additions (app/core/schema_upgrades.py)
 
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
 app = FastAPI(title="ProManage API", version="1.0.0")
 
 # Allow the React dev servers to call this API. The app pins two dev ports
@@ -337,7 +333,8 @@ app.add_middleware(
     expose_headers=["X-Error-Code"],
 )
 
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+# No public static file mount: uploaded files (e.g. SOWs) must be served by an
+# authenticated endpoint that checks project access (docs/TODO.md S5/C3).
 
 # Auth and BU Head endpoints live in the app package and MUST be mounted here,
 # before any @app route below; tests/test_route_ownership.py enforces this.
@@ -491,20 +488,6 @@ def subtask_gate_error(blocking: List[models.WbsNode]) -> str:
         return f"Cannot submit for approval — 1 subtask ('{blocking[0].task_name}') is still not marked Done."
     names = ", ".join(f"'{subtask.task_name}'" for subtask in blocking)
     return f"Cannot submit for approval — {len(blocking)} subtasks are still not marked Done: {names}."
-
-
-def task_output(db: Session, task: models.GanttTask):
-    engineer = db.query(models.Employee).filter_by(id=task.assigned_engineer_id).first() if task.assigned_engineer_id else None
-    return schemas.WbsTaskOut(
-        id=task.id,
-        project_id=task.project_id,
-        wbs_code=task.wbs_code,
-        task_name=task.task_name,
-        status=task.status,
-        planned_hours=task.planned_hours,
-        assigned_engineer_id=task.assigned_engineer_id,
-        assigned_engineer_name=engineer.name if engineer else None,
-    )
 
 
 @app.get("/api/engineers", response_model=List[schemas.EngineerOut])
@@ -2147,6 +2130,12 @@ def upsert_subtask_time_log(db: Session, project_id: int, task_id: int, employee
     return entry
 
 
+def cap_to_elapsed(session: models.TimeSession, active_seconds: int) -> int:
+    """Active time reported by the client can never exceed the wall-clock time since the session started."""
+    elapsed = (datetime.now(timezone.utc) - as_utc(session.login_at)).total_seconds()
+    return min(active_seconds, max(0, int(elapsed)))
+
+
 def _session_output(session: models.TimeSession) -> dict:
     return {
         "id": session.id,
@@ -2264,12 +2253,13 @@ def sync_subtask_tracking(
         raise HTTPException(status_code=409, detail="This tracking session has already ended.")
     if payload.active_seconds < session.active_seconds:
         raise HTTPException(status_code=409, detail="active_seconds cannot decrease.")
-    if payload.active_seconds > day_capacity_seconds(db, user.employee_id, date.today()):
+    active_seconds = cap_to_elapsed(session, payload.active_seconds)
+    if active_seconds > day_capacity_seconds(db, user.employee_id, date.today()):
         raise HTTPException(
             status_code=409,
             detail=f"You have reached your {DAILY_WORK_HOURS}-hour daily working limit. The session will not count more time.",
         )
-    session.active_seconds = payload.active_seconds
+    session.active_seconds = active_seconds
     db.commit()
     db.refresh(session)
     return _session_output(session)
@@ -2294,7 +2284,7 @@ def end_subtask_tracking(
         raise HTTPException(status_code=409, detail="active_seconds cannot decrease.")
     today = date.today()
     capacity = day_capacity_seconds(db, user.employee_id, today)
-    final_seconds = payload.active_seconds
+    final_seconds = cap_to_elapsed(session, payload.active_seconds)
     exceeded = final_seconds > capacity
     if exceeded:
         final_seconds = max(0, capacity)
@@ -2362,8 +2352,7 @@ def create_wbs_node(
     db: Session = Depends(get_db),
 ):
     require_role(user.role, {"lead"})
-    if not db.query(models.Project).filter_by(id=project_id).first():
-        raise HTTPException(status_code=404, detail="Project not found.")
+    require_project_access(db, project_id, user)
     validate_node_payload(db, project_id, payload)
     if payload.wbs_code and db.query(models.WbsNode).filter_by(project_id=project_id, wbs_code=payload.wbs_code).first():
         raise HTTPException(status_code=409, detail="WBS code already exists in this project.")
@@ -2512,6 +2501,7 @@ def update_wbs_node(
     node = db.query(models.WbsNode).filter_by(id=node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="WBS node not found.")
+    require_project_access(db, node.project_id, user)
     validate_node_payload(db, node.project_id, payload)
     duplicate = None
     if payload.wbs_code:
@@ -2553,6 +2543,7 @@ def delete_wbs_node(
     node = db.query(models.WbsNode).filter_by(id=node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="WBS node not found.")
+    require_project_access(db, node.project_id, user)
     descendant_ids = []
     stack = [node_id]
     while stack:
@@ -2565,6 +2556,9 @@ def delete_wbs_node(
     ).delete(synchronize_session=False)
     db.query(models.TimeLogEntry).filter(
         models.TimeLogEntry.task_id.in_(descendant_ids)
+    ).delete(synchronize_session=False)
+    db.query(models.TimeSession).filter(
+        models.TimeSession.subtask_id.in_(descendant_ids) | models.TimeSession.task_id.in_(descendant_ids)
     ).delete(synchronize_session=False)
     db.query(models.WbsNode).filter(
         models.WbsNode.id.in_(descendant_ids)
@@ -2795,44 +2789,6 @@ async def upload_wbs(
         )
         raise HTTPException(status_code=422, detail=detail)
     return {"created": created, "updated": updated, "phase": requested_phase or None}
-
-
-@app.get("/api/projects/{project_id}/wbs-tasks", response_model=List[schemas.WbsTaskOut])
-def list_wbs_tasks(
-    project_id: int,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"lead", "engineer", "bu_head"})
-    query = db.query(models.GanttTask).filter_by(project_id=project_id)
-    if user.role == "engineer":
-        if not user.employee_id:
-            raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
-        query = query.filter_by(assigned_engineer_id=user.employee_id)
-    return [task_output(db, task) for task in query.order_by(models.GanttTask.wbs_code).all()]
-
-
-@app.put("/api/wbs-tasks/{task_id}", response_model=schemas.WbsTaskOut)
-def update_wbs_task(
-    task_id: int,
-    payload: schemas.WbsTaskUpdate,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"lead"})
-    task = db.query(models.GanttTask).filter_by(id=task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="WBS task not found.")
-    if payload.assigned_engineer_id is not None and not db.query(models.Employee).filter_by(id=payload.assigned_engineer_id).first():
-        raise HTTPException(status_code=400, detail="Engineer not found.")
-    task.task_name = payload.task_name.strip()
-    task.wbs_code = payload.wbs_code.strip()
-    task.status = payload.status
-    task.planned_hours = payload.planned_hours
-    task.assigned_engineer_id = payload.assigned_engineer_id
-    db.commit()
-    db.refresh(task)
-    return task_output(db, task)
 
 
 def map_status_for_display(status: str) -> str:

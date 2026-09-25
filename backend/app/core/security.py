@@ -84,7 +84,7 @@ def get_current_user(
         db.commit()
         raise HTTPException(status_code=401, detail=SESSION_ERROR)
     user = db.get(models.User, session.user_id)
-    if not user:
+    if not user or not user.is_active:
         raise HTTPException(status_code=401, detail=SESSION_ERROR)
     return user
 

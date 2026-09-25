@@ -1,8 +1,8 @@
 """Additive schema upgrades for existing databases.
 
 `Base.metadata.create_all()` creates missing tables but never adds columns to
-existing ones, so new nullable columns on app-owned features are added here
-(idempotent). To be replaced by Alembic migrations (roadmap).
+existing ones, so new columns (nullable, or with a default) are added here
+(idempotent). No new entries: Alembic replaces this file (docs/TODO.md E4).
 """
 
 from sqlalchemy import inspect
@@ -13,6 +13,9 @@ _ADDED_COLUMNS = {
     "projects": {
         "lock_reason": "VARCHAR(20)",
         "governance_alert_level": "VARCHAR(20)",
+    },
+    "users": {
+        "is_active": "BOOLEAN NOT NULL DEFAULT TRUE",
     },
 }
 
