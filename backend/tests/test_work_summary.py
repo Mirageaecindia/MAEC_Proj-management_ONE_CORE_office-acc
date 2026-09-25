@@ -29,9 +29,9 @@ def test_summary_totals(client, world, summary_project):
 
     assert body["summary"] == {
         "total_nodes": 3,
-        # KNOWN (roadmap 5.3): only the legacy "Completed" status counts;
-        # the current terminal statuses "Approved"/"Done" are ignored.
-        "completed_nodes": 1,
+        # Roadmap 5.3 / TODO N8 (fixed): "Approved" counts as finished, and the
+        # legacy "Completed" was normalized to "Approved" when stored.
+        "completed_nodes": 2,
         "scheduled_hours": 120,
         "approved_hours": 10.0,
         "logged_hours": 15.0,
@@ -39,7 +39,7 @@ def test_summary_totals(client, world, summary_project):
         "pending_entries": 1,
     }
     assert body["phase_completion"] == {
-        "Space Planning": {"total": 2, "completed": 0},
+        "Space Planning": {"total": 2, "completed": 1},
         "STR Coordination": {"total": 1, "completed": 1},
     }
 
@@ -56,7 +56,7 @@ def test_lead_oversight_rows(client, world, summary_project):
             "nodes_managed": 3,
             "phase_completion": {
                 "STR Coordination": {"total": 1, "completed": 1},
-                "Space Planning": {"total": 2, "completed": 0},
+                "Space Planning": {"total": 2, "completed": 1},
             },
             "approved_hours": 10.0,
             "logged_hours": 15.0,
@@ -75,9 +75,9 @@ def test_engineer_contribution_rows(client, world, summary_project):
     assert arjun["baseline_hours"] == 80
     assert arjun["approved_hours"] == 10.0
     assert {t["task_id"]: t["approved_hours"] for t in arjun["tasks"]}[approved.id] == 10.0
-    # KNOWN (roadmap 5.3): "In-Progress" (current flow) is not recognised as
-    # in progress, so the engineer's status falls through to "—".
-    assert engineers["Ravi Kumar"]["progress_status"] == "—"
+    # Roadmap 5.3 / TODO N8 (fixed): current flow statuses drive progress.
+    assert arjun["progress_status"] == "Completed"  # Approved + legacy Completed
+    assert engineers["Ravi Kumar"]["progress_status"] == "In Progress"
 
 
 def test_work_summary_is_bu_head_only(client, world, summary_project):

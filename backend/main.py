@@ -28,6 +28,7 @@ from app.core.security import as_utc, require_role
 from app.domain.calendar import distribute_hours_over_months as _distribute_hours_over_months
 from app.domain.calendar import month_key as _get_month_key
 from app.domain.timesheets import entry_total as time_entry_total
+from app.domain.wbs import TO_DO, is_finished
 from app.services.access import (
     engineer_approved_project_ids,
     engineer_wbs_condition,
@@ -1112,15 +1113,12 @@ def project_timeline_logs(
     for entry in entries:
         task_actual[entry.task_id] += time_entry_total(entry)
 
-    # A node is complete when its real flow reached a terminal status:
-    # 'Approved' (tasks) or 'Done' (subtasks) — plus the legacy 'Completed'.
-    completed_statuses = {"Done", "Approved", "Completed"}
 
     tasks_out = []
     for task in tasks:
         actual = task_actual.get(task.id, 0.0)
         estimated = task.estimated_hours or 0
-        is_complete = task.deliverable_status in completed_statuses
+        is_complete = is_finished(task.deliverable_status)
         if is_complete:
             percent = 100.0
         elif estimated > 0:
@@ -1192,7 +1190,7 @@ def project_timeline_logs(
             "pending_hours": round(sum(time_entry_total(e) for e in entries if e.approval_status == "pending_review"), 2),
             "scheduled_hours": sum(task.estimated_hours or 0 for task in tasks),
             "total_tasks": len(tasks),
-            "completed_tasks": sum(1 for task in tasks if task.deliverable_status in completed_statuses),
+            "completed_tasks": sum(1 for task in tasks if is_finished(task.deliverable_status)),
             "engineer_count": len(engineers),
         },
     }
@@ -1260,7 +1258,7 @@ def engineer_performance(
         row = per_project[node.project_id]
         row["scheduled_hours"] += node.estimated_hours or 0
         row["total_tasks"] += 1
-        if node.deliverable_status == "Completed":
+        if is_finished(node.deliverable_status):
             row["completed_tasks"] += 1
 
     for entry in entries:
@@ -1297,12 +1295,12 @@ def engineer_performance(
             "role_title": employee.role_title,
             "discipline": employee.discipline or "—",
             "total_tasks": len(nodes),
-            "completed_tasks": sum(1 for node in nodes if node.deliverable_status == "Completed"),
+            "completed_tasks": sum(1 for node in nodes if is_finished(node.deliverable_status)),
             "scheduled_hours": scheduled_hours,
             "logged_hours": total_logged,
             "approved_hours": approved_hours,
             "pending_hours": pending_hours,
-            "completion_pct": round((sum(1 for node in nodes if node.deliverable_status == "Completed") / len(nodes)) * 100) if nodes else 0,
+            "completion_pct": round((sum(1 for node in nodes if is_finished(node.deliverable_status)) / len(nodes)) * 100) if nodes else 0,
             "allocation_pct": round((total_logged / scheduled_hours) * 100) if scheduled_hours else 0,
         },
         "projects": [row for row in per_project.values()],
@@ -1421,24 +1419,12 @@ def engineer_dashboard_data(db: Session, employee_id: int, project_id: int | Non
     # A node counts as STARTED once it has a real actual start timestamp (stamped
     # by the advance-status flow on the first "In-Progress" transition) OR its
     # current status is past "To Do" in the flow. It counts as COMPLETED once a
-    # task is "Approved" or a subtask is "Done" (legacy "Completed" also counts).
+    # task is "Approved" or a subtask is "Done" (app/domain/wbs.py).
     def _is_started(node):
-        if node.actual_start_datetime:
-            return True
-        status = map_status_for_display(node.deliverable_status)
-        if status == "Completed":
-            return True
-        if node.parent_id:
-            return status in {"In-Progress", "Done"}
-        return status in {"In-Progress", "Submitted for Approval", "Approved"}
+        return bool(node.actual_start_datetime) or node.deliverable_status != TO_DO
 
     def _is_completed(node):
-        status = map_status_for_display(node.deliverable_status)
-        if status == "Completed":
-            return True
-        if node.parent_id:
-            return status == "Done"
-        return status == "Approved"
+        return is_finished(node.deliverable_status)
 
     for node in nodes:
         row = per_project.get(node.project_id)
@@ -2117,7 +2103,7 @@ def create_wbs_node(
             assigned_lead=node.assigned_lead,
             assigned_lead_user_id=node.assigned_lead_user_id,
             estimated_hours=None,
-            deliverable_status="Not Started",
+            deliverable_status=TO_DO,
             start_date=node.start_date,
             target_due_date=node.target_due_date,
             end_date=node.end_date,
@@ -2489,7 +2475,7 @@ async def upload_wbs(
             assigned_lead_user_id=user.id,
             assigned_engineer_id=engineer_id,
             estimated_hours=int(float(normalized.get("estimated_hours") or normalized.get("planned_hours") or 0)),
-            deliverable_status=normalized.get("deliverable_status") or normalized.get("status") or "Not Started",
+            deliverable_status=normalized.get("deliverable_status") or normalized.get("status") or TO_DO,
             target_due_date=due,
             phase=phase,
         )

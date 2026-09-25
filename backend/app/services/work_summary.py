@@ -5,12 +5,12 @@ from collections import defaultdict
 import models
 from app.core.errors import NotFoundError
 from app.domain.timesheets import APPROVED, PENDING_REVIEW, REJECTED, effective_status, entry_total
+from app.domain.wbs import TO_DO, is_finished
 from app.repositories.projects import ProjectRepository
 from app.repositories.work import WorkRepository
 
-# KNOWN (roadmap 5.3): completion uses the legacy "Completed" status only, and
-# engineer progress uses legacy status names; fixed with status normalization.
-LEGACY_COMPLETED = "Completed"
+# Engineer progress labels shown on the Work Summary.
+PROGRESS_COMPLETED, PROGRESS_IN_PROGRESS, PROGRESS_NOT_STARTED = "Completed", "In Progress", "Not Started"
 
 
 def _stats():
@@ -38,7 +38,7 @@ class WorkSummaryService:
         lead_nodes = defaultdict(int)
         eng_tasks = defaultdict(list)
         for node in nodes:
-            completed = node.deliverable_status == LEGACY_COMPLETED
+            completed = is_finished(node.deliverable_status)
             if node.phase:
                 phase_stats[node.phase]["total"] += 1
                 phase_stats[node.phase]["completed"] += int(completed)
@@ -114,7 +114,7 @@ class WorkSummaryService:
                     "approved_hours": round(eng_approved[engineer_id], 2),
                     "logged_hours": round(eng_logged[engineer_id], 2),
                     "pending_hours": round(eng_pending[engineer_id], 2),
-                    "progress_status": _legacy_progress_status(tasks),
+                    "progress_status": _progress_status(tasks),
                     "tasks": [
                         {
                             "task_id": task.id,
@@ -137,7 +137,7 @@ class WorkSummaryService:
             "phase_completion": dict(phase_stats),
             "summary": {
                 "total_nodes": len(nodes),
-                "completed_nodes": sum(1 for node in nodes if node.deliverable_status == LEGACY_COMPLETED),
+                "completed_nodes": sum(1 for node in nodes if is_finished(node.deliverable_status)),
                 "scheduled_hours": sum(node.estimated_hours or 0 for node in nodes),
                 "approved_hours": round(sum(eng_approved.values()), 2),
                 "logged_hours": round(sum(eng_logged.values()), 2),
@@ -147,15 +147,16 @@ class WorkSummaryService:
         }
 
 
-def _legacy_progress_status(tasks: list[models.WbsNode]) -> str:
-    statuses = {task.deliverable_status for task in tasks}
-    if "In Progress" in statuses:
-        return "In Progress"
-    if "Not Started" in statuses:
-        return "Not Started"
-    if statuses == {LEGACY_COMPLETED}:
-        return LEGACY_COMPLETED
-    return "—"
+def _progress_status(tasks: list[models.WbsNode]) -> str:
+    """An engineer's overall progress across their assigned WBS nodes."""
+    statuses = [task.deliverable_status for task in tasks]
+    if not statuses:
+        return "—"
+    if all(is_finished(status) for status in statuses):
+        return PROGRESS_COMPLETED
+    if any(status != TO_DO for status in statuses):
+        return PROGRESS_IN_PROGRESS
+    return PROGRESS_NOT_STARTED
 
 
 def _project_output(project: models.Project) -> dict:

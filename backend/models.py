@@ -1,6 +1,8 @@
 from sqlalchemy import Boolean, Column, Integer, String, Date, DateTime, Text, Float, UniqueConstraint, true
+from sqlalchemy.orm import validates
 from sqlalchemy.sql import func
 
+from app.domain.wbs import TO_DO, normalize_status
 from database import Base
 
 
@@ -174,7 +176,7 @@ class WbsNode(Base):
     assigned_lead_user_id = Column(Integer, nullable=True)
     assigned_engineer_id = Column(Integer, nullable=True, index=True)
     estimated_hours = Column(Integer, nullable=True, default=None)
-    deliverable_status = Column(String(40), nullable=False, default="To Do")
+    deliverable_status = Column(String(40), nullable=False, default=TO_DO)
     description = Column(Text, nullable=True)
     severity = Column(String(20), nullable=True)
     start_date = Column(Date, nullable=True)
@@ -184,6 +186,13 @@ class WbsNode(Base):
     actual_end_datetime = Column(DateTime(timezone=True), nullable=True)
     phase = Column(String(50), nullable=True, index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    @validates("deliverable_status")
+    def _canonical_status(self, _key, status):
+        # Every write stores a canonical status (app/domain/wbs.py), whatever the
+        # source (form, edit, Excel upload). parent_id is set before the status on
+        # every write path, so the legacy "Completed" maps to Done/Approved correctly.
+        return normalize_status(status, is_subtask=self.parent_id is not None)
 
 
 class WbsNodeHistory(Base):

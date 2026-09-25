@@ -232,7 +232,7 @@ class WbsNodeBase(BaseModel):
     assigned_lead_user_id: Optional[int] = None
     assigned_engineer_id: Optional[int] = None
     estimated_hours: Optional[int] = None
-    deliverable_status: str = "Not Started"
+    deliverable_status: str = "To Do"
     start_date: Optional[date] = None
     target_due_date: Optional[date] = None
     end_date: Optional[date] = None

@@ -346,7 +346,7 @@ stateDiagram-v2
 - Statuses move forward **one step at a time**. Posting the current status again is rejected.
 - The first move to In-Progress records `actual_start_datetime` from the server clock. Done (subtask) or Approved (task) records `actual_end_datetime`.
 - Every change writes a `wbs_node_history` row. Engineers can also add comments.
-- Older data may still hold the legacy statuses "Not Started", "In Progress", "Blocked" and "Completed". They're shown as the current names (`map_status_for_display`); for example, "Completed" counts as finished.
+- Only the current statuses are stored (`app/domain/wbs.py`). Legacy names ("Not Started", "In Progress", "Blocked", "Completed", "Submitted for Review") are mapped on every write by a guard on `WbsNode.deliverable_status`, and migration `0002` converted existing rows. A node is **finished** when a task is Approved or a subtask is Done (`is_finished`); Work Summary, Timeline and both Engineer dashboards use that one rule.
 
 ### 7.4 Automatic subtask time tracking
 - Only for **subtasks**, and only for the **assigned engineer**. One active session per engineer at a time.
@@ -584,7 +584,6 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 - Budget burn is proportional to hours, not real cost. There's no rate card, and the resource summary returns hardcoded zeros for commercial figures.
 - "Discipline" in governance is the employee's designation, not Electrical, Mechanical or BIM.
 - Booking approval isn't reset when a booking is edited, and the Resource Booking page has no Reject button yet (the API exists).
-- Work Summary counts only the legacy "Completed" status, so completion shows 0 for current data.
 - Timeline & Logs is effectively empty for the BU Head (phase bars and approval states only load for Lead and Engineer). The Gantt viewport is fixed to Sep–Dec 2026 and leaves out the Submission phase.
 - A SharePoint failure message on Create Project is lost because the page redirects straight after saving.
 - There's no project edit, project status or archive.

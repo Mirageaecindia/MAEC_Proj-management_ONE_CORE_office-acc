@@ -90,12 +90,8 @@ def converge_legacy_schema(engine: Engine) -> None:
         for index in table.indexes:
             index.create(engine, checkfirst=True)
     with engine.begin() as connection:
-        # Data fixes the old startup code applied.
+        # Data fix the old startup code applied (status names: migration 0002).
         connection.exec_driver_sql("UPDATE wbs_nodes SET phase = 'Space Planning' WHERE phase IS NULL")
-        connection.exec_driver_sql(
-            "UPDATE wbs_nodes SET deliverable_status = 'Submitted for Approval' "
-            "WHERE deliverable_status = 'Submitted for Review'"
-        )
 
 
 def _add_missing_columns(engine: Engine) -> None:
