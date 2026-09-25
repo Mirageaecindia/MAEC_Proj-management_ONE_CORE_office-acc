@@ -5,13 +5,13 @@ import { useAuth } from '../../AuthContext';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 export const DAY_FIELDS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-const WEEKLY_SUBMISSION_LABELS = {
+export const WEEKLY_SUBMISSION_LABELS = {
   not_submitted: 'Not Submitted',
   submitted: 'Submitted for Approval',
   approved: 'Approved',
   rejected: 'Rejected',
 };
-const WEEKLY_SUBMISSION_PILL = {
+export const WEEKLY_SUBMISSION_PILL = {
   not_submitted: 'status-none',
   submitted: 'status-pending',
   approved: 'status-approved',
@@ -334,23 +334,6 @@ export function TimelineLogsPage() {
 
   const weekInfo = useMemo(() => getWeekInfo(currentMonday), [currentMonday]);
 
-  // Daily totals of the automatic subtask tracking hours for the visible week.
-  // Only Monday-Friday contributes; Saturday and Sunday always stay 0.
-  const dailyTotals = useMemo(() => {
-    const sums = Object.fromEntries(DAY_FIELDS.map((d) => [d, 0]));
-    entries.forEach((entry) => {
-      WORKDAY_FIELDS.forEach((day) => {
-        sums[day] += Number(entry[`${day}_hours`] || 0) || 0;
-      });
-    });
-    return sums;
-  }, [entries]);
-
-  const grandTotal = useMemo(
-    () => WORKDAY_FIELDS.reduce((sum, day) => sum + dailyTotals[day], 0),
-    [dailyTotals],
-  );
-
   const fmtHrs = (value) => {
     const number = Number(value) || 0;
     return Math.round(number * 100) / 100;
@@ -388,8 +371,6 @@ export function TimelineLogsPage() {
     });
     return map;
   }, [submissions]);
-
-  const ownWeekStatus = submissions.length > 0 ? submissions[0].status : 'not_submitted';
 
   const groupRows = useMemo(
     () =>
@@ -642,18 +623,6 @@ export function TimelineLogsPage() {
             <button type="button" className="button button-secondary week-nav-btn" onClick={handleNextWeek}>
               Next Week <ChevronRight size={16} />
             </button>
-            {isEngineer && (entries.length > 0 || submissions.length > 0) && (
-              <>
-                <span className={`approval-pill ${WEEKLY_SUBMISSION_PILL[ownWeekStatus]}`}>
-                  {WEEKLY_SUBMISSION_LABELS[ownWeekStatus]}
-                </span>
-                {entries.length > 0 && (ownWeekStatus === 'not_submitted' || ownWeekStatus === 'rejected') && (
-                  <button type="button" className="button button-primary week-nav-btn" onClick={handleSubmitWeek}>
-                    Submit for Approval
-                  </button>
-                )}
-              </>
-            )}
           </div>
         </div>
 
@@ -728,6 +697,11 @@ export function TimelineLogsPage() {
                         <span className={`approval-pill ${WEEKLY_SUBMISSION_PILL[group.weekStatus]}`}>
                           {WEEKLY_SUBMISSION_LABELS[group.weekStatus]}
                         </span>
+                        {isEngineer && group.entries.length > 0 && (group.weekStatus === 'not_submitted' || group.weekStatus === 'rejected') && (
+                          <button type="button" className="button button-primary week-nav-btn" onClick={handleSubmitWeek}>
+                            Submit for Approval
+                          </button>
+                        )}
                         {isLead && group.weekStatus === 'submitted' && (
                           <span className="review-actions">
                             <button
@@ -752,22 +726,6 @@ export function TimelineLogsPage() {
                 })
 )}
               </tbody>
-              {entries.length > 0 && (
-                <tfoot>
-                  <tr className="timesheet-total-row">
-                    <td className="col-engineer">Daily Total ({entries.length} task{entries.length === 1 ? '' : 's'})</td>
-                    {DAY_FIELDS.map((day) => (
-                      <td key={day} className="col-day">
-                        <strong>{dailyTotals[day].toFixed(1)}</strong>
-                      </td>
-                    ))}
-                    <td className="col-total">
-                      <strong className="total-hours-blue">{grandTotal.toFixed(1)} hrs</strong>
-                    </td>
-                    <td className="col-approval" />
-                  </tr>
-                </tfoot>
-              )}
             </table>
         </div>
 

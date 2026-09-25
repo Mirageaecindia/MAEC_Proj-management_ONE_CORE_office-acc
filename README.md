@@ -51,8 +51,15 @@ Accounts are created from the command line. See [backend/USERS.md](backend/USERS
 ## Running locally
 ```powershell
 # terminal 1 — API on http://localhost:8000 (docs at /docs)
+# Recommended: the script frees port 8000 (a leftover uvicorn from a previous
+# run keeps it bound, which makes every new start fail with "address already
+# in use") and launches the API with the repo venv. Stop it with stop_backend.ps1.
 cd backend
-.venv\Scripts\python.exe -m uvicorn main:app --reload
+.\start_backend.ps1
+
+# ...or run it manually in the foreground (venv lives at repo root, NOT in backend/):
+cd backend
+..\.venv\Scripts\python.exe -m uvicorn main:app --reload
 
 # terminal 2 — web app on http://localhost:5173
 cd frontend

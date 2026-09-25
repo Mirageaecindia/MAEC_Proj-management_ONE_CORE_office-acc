@@ -2,7 +2,7 @@ import { ArrowLeft } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
-import { DAY_FIELDS, getMonday, formatDateStr, getWeekInfo } from './TimelineLogsPage';
+import { DAY_FIELDS, getMonday, formatDateStr, getWeekInfo, WEEKLY_SUBMISSION_LABELS, WEEKLY_SUBMISSION_PILL } from './TimelineLogsPage';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -21,6 +21,7 @@ export function EngineerWeeklyLogsPage() {
   const [selectedId, setSelectedId] = useState('');
   const [nodes, setNodes] = useState([]);
   const [entries, setEntries] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
   const [timelineEngineers, setTimelineEngineers] = useState([]);
   const [scopeEngineerName, setScopeEngineerName] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -69,6 +70,19 @@ export function EngineerWeeklyLogsPage() {
     return entries.filter((entry) => String(entry.employee_id) === targetEmployeeId);
   }, [entries, isEngineer, targetEmployeeId]);
 
+  // The week-level submission record that drives the APPROVAL column. Approval
+  // happens once per engineer per week, not per entry, so the engineer's own
+  // record (engineer view) or the selected engineer's record (lead view) rules.
+  const weekSubmission = useMemo(() => {
+    if (isEngineer) return submissions[0] || null;
+    return submissions.find((submission) => String(submission.employee_id) === targetEmployeeId) || null;
+  }, [submissions, isEngineer, targetEmployeeId]);
+
+  const weeklyStatus = useMemo(
+    () => (weekSubmission ? weekSubmission.status : 'not_submitted'),
+    [weekSubmission],
+  );
+
   const engineerName = useMemo(() => {
     if (detailsRows.length > 0 && detailsRows[0].employee_name) return detailsRows[0].employee_name;
     if (isEngineer && scopeEngineerName) return scopeEngineerName;
@@ -96,18 +110,21 @@ export function EngineerWeeklyLogsPage() {
       const requests = [
         fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/wbs-structure`, { headers: authHeaders() }),
         fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timesheet?week_start=${weekStr}&source=tracking`, { headers: authHeaders() }),
+        fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/weekly-hours-submissions?week_start=${weekStr}`, { headers: authHeaders() }),
       ];
       if (isEngineer || isLead) {
         requests.push(fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timeline-logs`, { headers: authHeaders() }));
       }
-      const [nodesRes, timesheetRes, timelineRes] = await Promise.all(requests);
-      if (!nodesRes.ok || !timesheetRes.ok) {
+      const [nodesRes, timesheetRes, submissionsRes, timelineRes] = await Promise.all(requests);
+      if (!nodesRes.ok || !timesheetRes.ok || !submissionsRes.ok) {
         throw new Error('Failed to load the engineer weekly log data.');
       }
       const nodesData = await nodesRes.json();
       const timesheetData = await timesheetRes.json();
+      const submissionsData = await submissionsRes.json();
       setNodes(nodesData);
       setEntries(timesheetData);
+      setSubmissions(Array.isArray(submissionsData) ? submissionsData : []);
       if (timelineRes) {
         const timelineData = await timelineRes.json();
         setTimelineEngineers(Array.isArray(timelineData.engineers) ? timelineData.engineers : []);
@@ -125,23 +142,6 @@ export function EngineerWeeklyLogsPage() {
       loadDetails(projectId, weekStartStr);
     }
   }, [projectId, weekStartStr]);
-
-  const handleReview = async (entryId, action) => {
-    try {
-      setError('');
-      const response = await fetch(`${API_BASE_URL}/api/time-log-entries/${entryId}/${action}`, {
-        method: 'POST',
-        headers: authHeaders(),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.detail || 'Could not update approval');
-      }
-      await loadDetails(projectId, weekStartStr);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
 
   const fmtHours = (value) => {
     const number = Number(value) || 0;
@@ -187,7 +187,7 @@ export function EngineerWeeklyLogsPage() {
             <p>
               {isEngineer
                 ? 'Your automatic subtask working-time for this week, recorded from Login/Logout tracking. Only active time counts — idle and hidden tabs are excluded.'
-                : `Logged hours for ${engineerName || 'the selected engineer'} this week, recorded automatically per subtask.`}
+                : `Logged hours for ${engineerName || 'the selected engineer'} this week, recorded automatically per subtask. The week is approved by the assigned lead after you submit it for review.`}
             </p>
           </div>
 
@@ -231,8 +231,6 @@ export function EngineerWeeklyLogsPage() {
                 {detailsRows.map((entry) => {
                   const node = nodeMap[entry.task_id];
                   const parent = node && node.parent_id ? nodeMap[node.parent_id] : null;
-                  const isApproved = entry.approval_status === 'approved';
-                  const isRejected = entry.approval_status === 'rejected';
                   const workedDays = workedDaysFor(entry);
 
                   return (
@@ -276,21 +274,9 @@ export function EngineerWeeklyLogsPage() {
                         )}
                       </td>
                       <td>
-                        {(isApproved || isLead) && (
-                          <span
-                            className={`approval-pill ${
-                              isApproved ? 'status-approved' : isRejected ? 'status-rejected' : 'status-pending'
-                            }`}
-                          >
-                            {isApproved ? 'Approved' : isRejected ? 'Rejected' : 'Pending Review'}
-                          </span>
-                        )}
-                        {isLead && !isApproved && !isRejected && (
-                          <span className="review-actions">
-                            <button type="button" className="review-btn review-approve" onClick={() => handleReview(entry.id, 'approve')}>Approve</button>
-                            <button type="button" className="review-btn review-reject" onClick={() => handleReview(entry.id, 'reject')}>Reject</button>
-                          </span>
-                        )}
+                        <span className={`approval-pill ${WEEKLY_SUBMISSION_PILL[weeklyStatus] || 'status-none'}`}>
+                          {WEEKLY_SUBMISSION_LABELS[weeklyStatus] || weeklyStatus}
+                        </span>
                       </td>
                     </tr>
                   );
@@ -304,8 +290,8 @@ export function EngineerWeeklyLogsPage() {
           <div className="footer-info">
             <span>
               {isEngineer
-                ? 'You can only view your own weekly logs. Hours are recorded automatically per subtask via Login/Logout tracking — active time only.'
-                : 'Approvals by the assigned lead are final. Engineer accounts never see approval controls on this page.'}
+                ? 'You can only view your own weekly logs. Submit a week for your lead’s review; hours are recorded automatically per subtask via Login/Logout tracking — active time only.'
+                : 'Read-only detail view. Approve or reject this week from the Approval column on the Timeline & Logs page.'}
             </span>
           </div>
           <Link

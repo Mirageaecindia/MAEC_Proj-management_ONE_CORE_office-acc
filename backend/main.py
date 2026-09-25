@@ -1415,6 +1415,31 @@ def time_entry_total(entry) -> float:
     return sum(float(getattr(entry, field) or 0) for field in models.DAY_FIELDS[:5])
 
 
+def time_entry_hours_by_month(entry) -> dict[str, float]:
+    """Bucket a weekly time entry's hours into the REAL month each day was worked.
+
+    A weekly entry stores one column per weekday relative to ``week_start_date``,
+    so the actual calendar date of every logged day is recoverable. Bucketing by
+    the week's start date instead misfiles any day that falls in a later month
+    than the Monday the week began on: the Thursday and Friday of a week starting
+    Mon 31 Aug are September work, not August work. Grouping per day keeps every
+    month correct even when a week straddles a month boundary.
+    """
+    from datetime import timedelta
+
+    buckets: dict[str, float] = {}
+    if not entry.week_start_date:
+        return buckets
+    for offset, field in enumerate(models.DAY_FIELDS[:5]):
+        hours = float(getattr(entry, field, 0) or 0)
+        if hours <= 0:
+            continue
+        worked_on = entry.week_start_date + timedelta(days=offset)
+        key = _get_month_key(worked_on)
+        buckets[key] = round(buckets.get(key, 0.0) + hours, 4)
+    return buckets
+
+
 def time_entry_output(db: Session, entry: models.TimeLogEntry):
     task = db.query(models.WbsNode).filter_by(id=entry.task_id).first()
     employee = db.query(models.Employee).filter_by(id=entry.employee_id).first()
@@ -1977,6 +2002,7 @@ def engineer_dashboard_data(db: Session, employee_id: int, project_id: int | Non
                 "total_hours_approved": 0.0,
                 "total_hours_pending": 0.0,
                 "consumption_pct": 0.0,
+                "governance_consumption_pct": 0.0,
                 "governance_status": "normal",
                 "governance_threshold_pct": None,
                 "governance_exceeded": False,
@@ -2004,11 +2030,9 @@ def engineer_dashboard_data(db: Session, employee_id: int, project_id: int | Non
     projects = db.query(models.Project).filter(models.Project.id.in_(project_ids)).all()
     project_by_id = {project.id: project for project in projects}
 
-    # Get all time entries for this engineer across their projects. Following
-    # the app's governance rule (same as the executive dashboard), consumption
-    # and threshold status count ALL LOGGED hours (approved + pending) — a time
-    # log the engineer just saved must move the dashboard immediately. SPI
-    # stays approved-only (earned value), so pending hours do not inflate it.
+    # Get all time entries for this engineer across their projects. Everything the
+    # dashboard shows is recomputed from these live rows on every request, so the
+    # numbers can never be a cached or stale snapshot.
     entries_query = db.query(models.TimeLogEntry).filter(
         models.TimeLogEntry.employee_id == employee_id,
         models.TimeLogEntry.project_id.in_(approved_ids),
@@ -2016,8 +2040,35 @@ def engineer_dashboard_data(db: Session, employee_id: int, project_id: int | Non
     if project_id:
         entries_query = entries_query.filter(models.TimeLogEntry.project_id == project_id)
     entries = entries_query.all()
-    approved_entries = [entry for entry in entries if entry.approval_status == "approved"]
-    pending_entries = [entry for entry in entries if entry.approval_status == "pending_review"]
+
+    # Resolve the REAL approval state of each entry. The engineer's approval
+    # workflow is week-level: a Lead approves a week on Timeline & Logs, which is
+    # recorded on WeeklyHoursSubmission. An individual TimeLogEntry is therefore
+    # approved either because the entry itself was approved, or because its week
+    # was approved. This is read-only dashboard logic, so the Lead/BU Head
+    # approval screens keep their own behaviour untouched.
+    submission_status_by_week = {
+        (row.project_id, row.week_start_date): row.status
+        for row in db.query(models.WeeklyHoursSubmission)
+        .filter(
+            models.WeeklyHoursSubmission.employee_id == employee_id,
+            models.WeeklyHoursSubmission.project_id.in_(approved_ids),
+        )
+        .all()
+    }
+
+    def _effective_status(entry) -> str:
+        week_status = submission_status_by_week.get((entry.project_id, entry.week_start_date))
+        if entry.approval_status == "approved":
+            return "approved"
+        if week_status == "approved":
+            return "approved"
+        if week_status == "rejected":
+            return "rejected"
+        return entry.approval_status or "pending_review"
+
+    approved_entries = [entry for entry in entries if _effective_status(entry) == "approved"]
+    pending_entries = [entry for entry in entries if _effective_status(entry) == "pending_review"]
 
     # Aggregate by project
     per_project = {}
@@ -2116,18 +2167,17 @@ def engineer_dashboard_data(db: Session, employee_id: int, project_id: int | Non
             for month_key, hours in distributed.items():
                 monthly_planned[month_key] += hours
 
-    # Aggregate ALL LOGGED consumed hours by month (approved + pending),
-    # splitting normal vs exceeded per project, so new time logs move the chart.
-    for entry in entries:
-        total = time_entry_total(entry)
-        if total <= 0:
-            continue
-        month_key = _get_month_key(entry.week_start_date)
-        project_row = per_project.get(entry.project_id)
-        if project_row and project_row.get("exceeded"):
-            monthly_consumed_exceeded[month_key] += total
-        else:
-            monthly_consumed_normal[month_key] += total
+    # Aggregate APPROVED consumed hours into the REAL month each logged day falls
+    # in, splitting normal vs exceeded per project. Bucketing per day (rather than
+    # per week start) is what keeps a month correct when a single week straddles a
+    # month boundary.
+    for entry in approved_entries:
+        for month_key, hours in time_entry_hours_by_month(entry).items():
+            project_row = per_project.get(entry.project_id)
+            if project_row and project_row.get("exceeded"):
+                monthly_consumed_exceeded[month_key] += hours
+            else:
+                monthly_consumed_normal[month_key] += hours
 
     # Collect all months that have data and sort them
     all_months = sorted(set(monthly_planned.keys()) | set(monthly_consumed_normal.keys()) | set(monthly_consumed_exceeded.keys()))
@@ -2135,8 +2185,10 @@ def engineer_dashboard_data(db: Session, employee_id: int, project_id: int | Non
     monthly_breakdown = []
     for month_key in all_months:
         planned = round(monthly_planned.get(month_key, 0.0), 1)
-        normal = round(monthly_consumed_normal.get(month_key, 0.0), 1)
-        exceeded = round(monthly_consumed_exceeded.get(month_key, 0.0), 1)
+        # Consumed hours keep 2 decimals so the bars always reconcile exactly
+        # with the headline approved total instead of hiding sub-0.05h amounts.
+        normal = round(monthly_consumed_normal.get(month_key, 0.0), 2)
+        exceeded = round(monthly_consumed_exceeded.get(month_key, 0.0), 2)
         try:
             year, month = map(int, month_key.split("-"))
             month_label = date(year, month, 1).strftime("%b %Y")
@@ -2150,22 +2202,23 @@ def engineer_dashboard_data(db: Session, employee_id: int, project_id: int | Non
             "exceeded_threshold": exceeded,
         })
 
-    # Compute totals across all projects. Total hours consumption is the
-    # engineer's all LOGGED hours (approved + pending): a freshly saved time
-    # log updates the card immediately, matching the governance rule on the
-    # executive dashboard. Approved and pending totals are still reported
-    # separately for the card foot / transparency.
+    # Compute totals across all projects. "Total Hours Consumption" and the
+    # monthly bars report APPROVED hours only, so the headline figure is always
+    # the real sum of approved daily logs. The governance threshold deliberately
+    # keeps its existing approved+pending basis (the same rule the executive
+    # dashboard uses), reported separately as governance_consumption_pct.
     total_scheduled = sum(p["scheduled_hours"] for p in per_project.values())
     total_approved = sum(p["approved_hours"] for p in per_project.values())
     total_pending = sum(p["pending_hours"] for p in per_project.values())
     total_logged = sum(p["logged_hours"] for p in per_project.values())
 
-    consumption_pct = round((total_logged / total_scheduled) * 100, 1) if total_scheduled else 0.0
+    consumption_pct = round((total_approved / total_scheduled) * 100, 1) if total_scheduled else 0.0
+    governance_consumption_pct = round((total_logged / total_scheduled) * 100, 1) if total_scheduled else 0.0
 
     # Governance threshold status (use max threshold across projects, or first project's threshold)
     thresholds = [p["governance_threshold_pct"] for p in per_project.values() if p["governance_threshold_pct"] is not None]
     governance_threshold = max(thresholds) if thresholds else None
-    governance_exceeded = governance_threshold is not None and consumption_pct > governance_threshold
+    governance_exceeded = governance_threshold is not None and governance_consumption_pct > governance_threshold
     governance_status = "exceeded" if governance_exceeded else "normal"
 
     # SPI = approved_hours / scheduled_hours
@@ -2222,11 +2275,12 @@ def engineer_dashboard_data(db: Session, employee_id: int, project_id: int | Non
 
     return {
         "summary": {
-            "total_hours_consumption": round(total_logged, 2),
+            "total_hours_consumption": round(total_approved, 2),
             "total_hours_scheduled": total_scheduled,
             "total_hours_approved": round(total_approved, 2),
             "total_hours_pending": round(total_pending, 2),
             "consumption_pct": consumption_pct,
+            "governance_consumption_pct": governance_consumption_pct,
             "governance_status": governance_status,
             "governance_threshold_pct": governance_threshold,
             "governance_exceeded": governance_exceeded,

@@ -121,6 +121,9 @@ export function EngineerPerformanceDashboardPage() {
 
   const isExceeded = summary?.governance_exceeded;
   const threshold = summary?.governance_threshold_pct;
+  // Governance keeps its own approved+pending percentage, which is deliberately
+  // different from the approved-only consumption percentage on the first card.
+  const governancePct = summary?.governance_consumption_pct ?? summary?.consumption_pct;
 
   return (
     <main className="timeline-page">
@@ -183,7 +186,7 @@ export function EngineerPerformanceDashboardPage() {
             </>
           ) : hasData && isExceeded ? (
             <>
-              <strong className="ed-card-value">EXCEEDED ({formatPercent(summary.consumption_pct)})</strong>
+              <strong className="ed-card-value">EXCEEDED ({formatPercent(governancePct)})</strong>
               <span className="ed-card-sub">Threshold: {formatPercent(threshold)}</span>
             </>
           ) : hasData ? (
@@ -192,7 +195,7 @@ export function EngineerPerformanceDashboardPage() {
                 NORMAL <ShieldCheck size={18} className="ed-card-inline-icon" />
               </strong>
               <span className="ed-card-sub">
-                Consumption {formatPercent(summary.consumption_pct)} at the {formatPercent(threshold)} threshold
+                Consumption {formatPercent(governancePct)} at the {formatPercent(threshold)} threshold
               </span>
             </>
           ) : (

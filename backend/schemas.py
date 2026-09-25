@@ -62,9 +62,9 @@ class EngineerDashboardProjectOut(BaseModel):
     project_code: str
     client_organization: str
     project_lead: str
-    contract_value: Optional[float] = 0
-    contract_currency: str = "USD"
-    governance_threshold_pct: Optional[float] = 80
+    contract_value: Optional[float] = None
+    contract_currency: Optional[str] = None
+    governance_threshold_pct: Optional[float] = None
 
 
 class EngineerDashboardMonthlyOut(BaseModel):
@@ -81,6 +81,7 @@ class EngineerDashboardSummaryOut(BaseModel):
     total_hours_approved: float
     total_hours_pending: float
     consumption_pct: float
+    governance_consumption_pct: float
     governance_status: str
     governance_threshold_pct: Optional[float]
     governance_exceeded: bool
