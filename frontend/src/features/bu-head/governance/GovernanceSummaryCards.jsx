@@ -66,13 +66,13 @@ export function GovernanceSummaryCards({ data }) {
         foot={budget ? formatPercent(budget.percent) : 'No project data'}
       />
       <StatCard
-        label="Total Hours Consumption"
+        label="Approved Hours Consumption"
         value={hours ? formatHours(hours.hours) : NOT_AVAILABLE}
         sub={hours ? `(${formatPercent(hours.percent)})` : NO_PROJECT}
         progress={{ tone: 'orange', percent: hours?.percent }}
         foot={
           hours
-            ? `${formatHours(hours.approved)} approved / ${formatHours(hours.pending)} pending of ${formatHours(hours.scheduled)} baseline (WBS ${formatHours(hours.wbs_planned)})`
+            ? `of ${formatHours(hours.scheduled)} baseline (WBS ${formatHours(hours.wbs_planned)}) · ${formatHours(hours.pending)} pending review, not yet counted`
             : 'No project data'
         }
       />

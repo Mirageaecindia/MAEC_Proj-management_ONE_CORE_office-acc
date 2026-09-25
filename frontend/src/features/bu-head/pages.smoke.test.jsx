@@ -32,15 +32,15 @@ const PROJECT = {
 
 const DASHBOARD = {
   project: { id: 1, project_name: 'Hotel Tower', contract_currency: 'USD' },
-  summary: { scheduled_hours: 100, logged_hours: 90, approved_hours: 70, pending_hours: 20 },
+  summary: { scheduled_hours: 100, logged_hours: 110, approved_hours: 90, pending_hours: 20 },
   commercial_budget_burn: { currency: 'USD', total: 100000, consumed: 90000, remaining: 10000, percent: 90 },
-  hours_consumption: { hours: 90, scheduled: 100, wbs_planned: 120, approved: 70, pending: 20, percent: 90 },
+  hours_consumption: { hours: 90, scheduled: 100, wbs_planned: 120, approved: 90, pending: 20, percent: 90 },
   governance_status: {
     status: 'exceeded',
     level: 'warning',
     configured: true,
     baseline_hours: 100,
-    logged_hours: 90,
+    approved_hours: 90,
     lock_reason: null,
     threshold_pct: 80,
     consumption_pct: 90,
@@ -188,7 +188,8 @@ describe('BU Head pages render with API data', () => {
     renderAt(<ExecutiveDashboardPage />, '/executive-dashboard?projectId=1');
     expect(await screen.findByText('ALERT (90.0%)')).toBeTruthy();
     expect(screen.getByText('Alert Threshold Reached')).toBeTruthy();
-    expect(screen.getByText(/baseline \(WBS 120.0 Hrs\)/)).toBeTruthy();
+    expect(screen.getByText(/20.0 Hrs pending review, not yet counted/)).toBeTruthy();
+    expect(screen.getByText(/90.0 Hrs of 100.0 Hrs baseline hours approved/)).toBeTruthy();
     expect(screen.getByText('$90,000.00')).toBeTruthy();
     expect(screen.getByText('Scope creep')).toBeTruthy();
     expect(screen.getByText('Sep 2026')).toBeTruthy();
@@ -205,7 +206,7 @@ describe('BU Head pages render with API data', () => {
         ...DASHBOARD.governance_status,
         level: 'hard_stop',
         consumption_pct: 100,
-        logged_hours: 100,
+        approved_hours: 100,
         soft_locked: true,
         lock_reason: 'auto',
       },

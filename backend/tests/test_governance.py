@@ -3,7 +3,8 @@
 Reference scenario (see `governed`): two WBS nodes of 40h + 60h assigned to one
 engineer whose discipline is "Mechanical Engineer"; 30h approved + 20h pending
 logged. Contract 100,000 USD, threshold 80%, target effort 100h, so the
-governance baseline is 100h (target + approved extensions) and usage is 50%.
+governance baseline is 100h (target + approved extensions) and usage, which
+counts approved hours only, is 30%.
 The alert/auto-lock workflow itself is covered in test_governance_workflow.py.
 """
 
@@ -35,14 +36,15 @@ def test_dashboard_figures_for_reference_scenario(client, world, governed):
         "logged_hours": 50.0,
         "pending_hours": 20.0,
         "pending_entries": 1,
-        "consumption_pct": 50.0,
+        "rejected_hours": 0.0,
+        "consumption_pct": 30.0,
     }
     assert data["commercial_budget_burn"] == {
         "currency": "USD",
         "total": 100000.0,
-        "consumed": 50000.0,
-        "remaining": 50000.0,
-        "percent": 50.0,
+        "consumed": 30000.0,
+        "remaining": 70000.0,
+        "percent": 30.0,
     }
     assert data["spi"] == {"value": 0.3, "note": "Behind plan — 30 earned of 100 planned baseline hours."}
     assert data["governance_status"]["status"] == "normal"
@@ -56,7 +58,7 @@ def test_dashboard_figures_for_reference_scenario(client, world, governed):
             "month": "2026-09",
             "month_label": "Sep 2026",
             "planned_baseline": 100.0,
-            "normal_consumption": 50.0,
+            "normal_consumption": 30.0,  # approved hours only
             "exceeded_threshold": 0.0,
         }
     ]
@@ -64,7 +66,7 @@ def test_dashboard_figures_for_reference_scenario(client, world, governed):
 
 def test_project_at_alert_threshold_reports_warning_and_splits_the_chart(client, make, world, governed):
     project_id, _, node_b, _ = governed
-    make.time_entry(project_id, node_b, world.emp1, 40, status="approved", week=date(2026, 9, 14))
+    make.time_entry(project_id, node_b, world.emp1, 60, status="approved", week=date(2026, 9, 14))
 
     data = _dashboard(client, world.bu_h, project_id)
 
@@ -76,6 +78,24 @@ def test_project_at_alert_threshold_reports_warning_and_splits_the_chart(client,
     assert data["monthly_data"][0]["exceeded_threshold"] == 10.0
     # The per-discipline breakdown stays informational.
     assert [e["discipline"] for e in data["exceptions"]] == ["Mechanical Engineer"]
+
+
+def test_usage_counts_approved_hours_only(client, make, world, governed):
+    project_id, node_a, node_b, _ = governed
+    make.time_entry(project_id, node_a, world.emp1, 25, status="rejected", week=date(2026, 9, 14))
+    # Approving the engineer's whole week approves its pending rows too (weekly route).
+    week = models.WeeklyHoursSubmission(
+        project_id=project_id, employee_id=world.emp1.id, week_start_date=date(2026, 9, 7), status="approved"
+    )
+    make._save(week)
+
+    data = _dashboard(client, world.bu_h, project_id)
+
+    assert data["summary"]["approved_hours"] == 50.0  # 30 row-approved + 20 week-approved
+    assert data["summary"]["pending_hours"] == 0.0
+    assert data["summary"]["rejected_hours"] == 25.0
+    assert data["summary"]["logged_hours"] == 50.0  # rejected hours excluded
+    assert data["summary"]["consumption_pct"] == 50.0
 
 
 def test_baseline_is_bu_head_target_plus_approved_extensions(client, db, world, governed):
@@ -90,9 +110,9 @@ def test_baseline_is_bu_head_target_plus_approved_extensions(client, db, world, 
 
     assert data["hours_consumption"]["scheduled"] == 600.0  # 500 target + 100 approved extensions
     assert data["hours_consumption"]["wbs_planned"] == 100
-    assert data["hours_consumption"]["percent"] == 8.3  # 50 / 600
+    assert data["hours_consumption"]["percent"] == 5.0  # 30 approved / 600
     assert data["governance_status"]["wbs_exceeds_target"] is False
-    assert data["commercial_budget_burn"]["consumed"] == 10000.0  # contract x 50 / 500 target
+    assert data["commercial_budget_burn"]["consumed"] == 6000.0  # contract x 30 approved / 500 target
 
     project.target_effort_hours = 80
     project.extension_approved_hours = None
@@ -132,9 +152,9 @@ def test_stop_execution_soft_locks_timesheets(client, db, world, governed):
     action = response.json()
     assert action["action"] == "stop_execution"
     assert action["discipline"] == "Mechanical Engineer"
-    assert action["consumption_pct"] == 50.0
+    assert action["consumption_pct"] == 30.0
     assert action["threshold_pct"] == 80
-    assert action["consumption_hours"] == 50.0
+    assert action["consumption_hours"] == 30.0
     assert action["comments"] == "Over budget"
     assert action["created_by"] == "Test BU Head"
     assert _dashboard(client, world.bu_h, project_id)["governance_status"]["soft_locked"] is True
@@ -227,7 +247,7 @@ def test_approving_extension_raises_the_baseline(client, db, world, governed):
     assert [a["action"] for a in data["governance_actions"]] == ["approve_extension", "extension_request"]
     # Roadmap 5.2 / 6.3 (fixed): approved hours raise the baseline (100 + 40).
     assert data["summary"]["baseline_hours"] == 140.0
-    assert data["summary"]["consumption_pct"] == 35.7
+    assert data["summary"]["consumption_pct"] == 21.4  # 30 approved / 140
     assert client.post(url, json={"decision": "approve"}, headers=world.bu_h).status_code == 409
 
 

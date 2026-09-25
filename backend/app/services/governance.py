@@ -221,6 +221,6 @@ class GovernanceService:
             discipline=discipline or status["governance_status"]["max_discipline"],
             consumption_pct=status["governance_status"]["consumption_pct"],
             threshold_pct=project.governance_threshold_pct,
-            consumption_hours=status["summary"]["logged_hours"],
+            consumption_hours=status["summary"]["approved_hours"],
             **fields,
         )

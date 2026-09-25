@@ -1,7 +1,8 @@
 """Project governance rules (BU Head decisions, 2026-09-25).
 
 - Baseline = the BU Head's Target Effort Hours + approved extension hours.
-- Levels, whole project: logged hours below the alert threshold -> NORMAL;
+- Usage = approved hours only (pending and rejected hours do not count).
+- Levels, whole project: usage below the alert threshold -> NORMAL;
   at/above the threshold -> WARNING (alert only); at/above 100% of the
   baseline -> HARD_STOP (timesheets lock automatically).
 """
@@ -23,7 +24,7 @@ LOCK_AUTO = "auto"  # 100% of the baseline was reached
 @dataclass(frozen=True)
 class GovernanceReading:
     baseline_hours: float
-    logged_hours: float
+    approved_hours: float
     consumption_pct: float
     threshold_pct: float | None
     level: str
@@ -48,16 +49,16 @@ def governance_level(consumption_pct: float, threshold_pct: float | None, baseli
 
 
 def read_governance(
-    logged_hours: float,
+    approved_hours: float,
     target_effort_hours: float | None,
     extension_approved_hours: float | None,
     threshold_pct: float | None,
 ) -> GovernanceReading:
     baseline = governance_baseline(target_effort_hours, extension_approved_hours)
-    pct = round(logged_hours / baseline * 100, 1) if baseline > 0 else 0.0
+    pct = round(approved_hours / baseline * 100, 1) if baseline > 0 else 0.0
     return GovernanceReading(
         baseline_hours=round(baseline, 2),
-        logged_hours=round(logged_hours, 2),
+        approved_hours=round(approved_hours, 2),
         consumption_pct=pct,
         threshold_pct=threshold_pct,
         level=governance_level(pct, threshold_pct, baseline),
@@ -65,13 +66,13 @@ def read_governance(
 
 
 def split_monthly_consumption(
-    monthly_logged: dict[str, float], alert_hours: float | None
+    monthly_hours: dict[str, float], alert_hours: float | None
 ) -> dict[str, tuple[float, float]]:
-    """month -> (normal, exceeded): hours logged after cumulative consumption
-    passed the alert level (threshold x baseline) count as exceeded."""
+    """month -> (normal, exceeded): hours after cumulative usage passed the
+    alert level (threshold x baseline) count as exceeded."""
     result, cumulative = {}, 0.0
-    for key in sorted(monthly_logged):
-        hours = monthly_logged[key]
+    for key in sorted(monthly_hours):
+        hours = monthly_hours[key]
         if alert_hours is None:
             result[key] = (hours, 0.0)
         else:

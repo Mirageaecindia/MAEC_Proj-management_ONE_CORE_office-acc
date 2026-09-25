@@ -1,9 +1,11 @@
 """Governance figures for one project: consumption, threshold status, SPI,
 budget burn, per-discipline breakdown and the monthly chart.
 
-Consumption and the governance level are measured at project level against
-the BU Head's baseline (target effort hours + approved extensions); see
-app/domain/governance.py. WBS planned hours drive SPI, the planned series of
+Consumption and the governance level are APPROVED hours measured at project
+level against the BU Head's baseline (target effort hours + approved
+extensions); see app/domain/governance.py. An hour is approved when its row or
+its engineer's week was approved (app/domain/timesheets.effective_status);
+rejected hours never count. WBS planned hours drive SPI, the planned series of
 the monthly chart and the (informational) per-discipline breakdown.
 
 Every figure is derived from stored rows (wbs_nodes, time_log_entries,
@@ -18,11 +20,9 @@ from sqlalchemy.orm import Session
 import models
 from app.domain.calendar import distribute_hours_over_months, month_key, month_label
 from app.domain.governance import NORMAL, read_governance, split_monthly_consumption
-from app.domain.timesheets import entry_total
+from app.domain.timesheets import APPROVED, PENDING_REVIEW, effective_status, entry_total
 from app.repositories.work import WorkRepository
 
-APPROVED = "approved"
-PENDING_REVIEW = "pending_review"
 UNASSIGNED = "Unassigned"
 
 
@@ -34,27 +34,33 @@ class ProjectMetricsService:
         nodes = self.work.nodes_for_project(project.id)
         entries = self.work.entries_for_project(project.id)
         totals = {entry.id: entry_total(entry) for entry in entries}
+        weeks = self.work.week_statuses(project.id)
+        statuses = {
+            entry.id: effective_status(entry.approval_status, weeks.get((entry.employee_id, entry.week_start_date)))
+            for entry in entries
+        }
 
         scheduled_hours = sum(node.estimated_hours or 0 for node in nodes)
-        logged_hours = sum(totals.values())
-        approved_hours = sum(totals[e.id] for e in entries if e.approval_status == APPROVED)
-        pending = [e for e in entries if e.approval_status == PENDING_REVIEW]
+        approved_hours = sum(totals[e.id] for e in entries if statuses[e.id] == APPROVED)
+        pending = [e for e in entries if statuses[e.id] == PENDING_REVIEW]
         pending_hours = sum(totals[e.id] for e in pending)
+        logged_hours = approved_hours + pending_hours  # rejected hours excluded
+        rejected_hours = sum(totals.values()) - logged_hours
         threshold = project.governance_threshold_pct
         target = float(project.target_effort_hours or 0)
-        reading = read_governance(logged_hours, target, project.extension_approved_hours, threshold)
+        reading = read_governance(approved_hours, target, project.extension_approved_hours, threshold)
 
         engineer_ids = sorted({node.assigned_engineer_id for node in nodes if node.assigned_engineer_id})
         employees = self.work.employees_by_ids(engineer_ids)
         disciplines_out, exceptions = self._discipline_breakdown(
-            nodes, entries, totals, engineer_ids, employees, threshold
+            nodes, entries, totals, statuses, engineer_ids, employees, threshold
         )
         max_discipline = max(disciplines_out, key=lambda d: d["consumption_pct"], default=None)
 
         currency = project.contract_currency or "USD"
         contract_value = float(project.contract_value or 0)
-        # Budget burn is proportional to hours used of the commercial target (no rate card yet).
-        budget_consumed = round(contract_value * (logged_hours / target), 2) if target and contract_value else 0.0
+        # Budget burn is proportional to approved hours of the commercial target (no rate card yet).
+        budget_consumed = round(contract_value * (approved_hours / target), 2) if target and contract_value else 0.0
         budget_pct = round(budget_consumed / contract_value * 100, 1) if contract_value else 0.0
         alert_hours = reading.baseline_hours * threshold / 100 if reading.configured and threshold is not None else None
 
@@ -81,6 +87,7 @@ class ProjectMetricsService:
                 "logged_hours": round(logged_hours, 2),
                 "pending_hours": round(pending_hours, 2),
                 "pending_entries": len(pending),
+                "rejected_hours": round(rejected_hours, 2),
                 "consumption_pct": reading.consumption_pct,
             },
             "commercial_budget_burn": {
@@ -91,7 +98,7 @@ class ProjectMetricsService:
                 "percent": budget_pct,
             },
             "hours_consumption": {
-                "hours": round(logged_hours, 2),
+                "hours": reading.approved_hours,
                 "scheduled": reading.baseline_hours,
                 "wbs_planned": scheduled_hours,
                 "approved": round(approved_hours, 2),
@@ -106,7 +113,7 @@ class ProjectMetricsService:
                 "threshold_pct": threshold,
                 "consumption_pct": reading.consumption_pct,
                 "baseline_hours": reading.baseline_hours,
-                "logged_hours": reading.logged_hours,
+                "approved_hours": reading.approved_hours,
                 "wbs_exceeds_target": bool(target) and scheduled_hours > target,
                 "max_discipline_pct": max_discipline["consumption_pct"] if max_discipline else reading.consumption_pct,
                 "max_discipline": max_discipline["name"] if max_discipline else None,
@@ -116,12 +123,12 @@ class ProjectMetricsService:
             "spi": self._spi(approved_hours, scheduled_hours),
             "disciplines": disciplines_out,
             "exceptions": exceptions,
-            "monthly_data": self._monthly(nodes, entries, totals, alert_hours),
+            "monthly_data": self._monthly(nodes, entries, totals, statuses, alert_hours),
         }
 
     @staticmethod
-    def _discipline_breakdown(nodes, entries, totals, engineer_ids, employees, threshold):
-        """Hours per engineer, rolled up by the engineer's discipline."""
+    def _discipline_breakdown(nodes, entries, totals, statuses, engineer_ids, employees, threshold):
+        """Hours per engineer (approved + pending; rejected excluded), rolled up by discipline."""
         baseline = defaultdict(float)
         consumed = defaultdict(float)
         approved = defaultdict(float)
@@ -131,13 +138,14 @@ class ProjectMetricsService:
             if node.assigned_engineer_id:
                 baseline[node.assigned_engineer_id] += node.estimated_hours or 0
         for entry in entries:
-            total = totals[entry.id]
-            consumed[entry.employee_id] += total
-            if entry.approval_status == APPROVED:
+            total, status = totals[entry.id], statuses[entry.id]
+            if status == APPROVED:
                 approved[entry.employee_id] += total
-            elif entry.approval_status == PENDING_REVIEW:
+                consumed[entry.employee_id] += total
+            elif status == PENDING_REVIEW:
                 pending[entry.employee_id] += total
                 pending_entries[entry.employee_id] += 1
+                consumed[entry.employee_id] += total
 
         disciplines = defaultdict(
             lambda: {
@@ -205,9 +213,9 @@ class ProjectMetricsService:
         return {"value": value, "note": note}
 
     @staticmethod
-    def _monthly(nodes, entries, totals, alert_hours: float | None) -> list[dict]:
-        """WBS planned hours spread over each node's months vs logged hours per
-        month; logged hours beyond the project's alert level count as exceeded."""
+    def _monthly(nodes, entries, totals, statuses, alert_hours: float | None) -> list[dict]:
+        """WBS planned hours spread over each node's months vs approved hours per
+        month; approved hours beyond the project's alert level count as exceeded."""
         planned = defaultdict(float)
         logged = defaultdict(float)
         for node in nodes:
@@ -218,7 +226,7 @@ class ProjectMetricsService:
                 ).items():
                     planned[key] += hours
         for entry in entries:
-            if totals[entry.id] > 0:
+            if totals[entry.id] > 0 and statuses[entry.id] == APPROVED:
                 logged[month_key(entry.week_start_date)] += totals[entry.id]
         split = split_monthly_consumption(logged, alert_hours)
 

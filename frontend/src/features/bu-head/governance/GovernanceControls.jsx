@@ -13,7 +13,7 @@ function ThresholdAlert({ data }) {
     );
   }
   const governance = data.governance_status;
-  const usage = `${formatHours(governance.logged_hours)} of ${formatHours(governance.baseline_hours)} baseline hours used (${formatPercent(governance.consumption_pct)})`;
+  const usage = `${formatHours(governance.approved_hours)} of ${formatHours(governance.baseline_hours)} baseline hours approved (${formatPercent(governance.consumption_pct)})`;
   if (!governance.configured) {
     return (
       <Alert title="Baseline Not Configured">

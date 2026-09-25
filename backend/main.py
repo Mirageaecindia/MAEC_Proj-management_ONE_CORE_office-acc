@@ -417,7 +417,7 @@ def create_extension_request(
         discipline=data["governance_status"]["max_discipline"],
         consumption_pct=data["governance_status"]["consumption_pct"],
         threshold_pct=project.governance_threshold_pct,
-        consumption_hours=data["summary"]["logged_hours"],
+        consumption_hours=data["summary"]["approved_hours"],
         comments=justification,
         created_by=user.full_name,
         extension_request_id=request.id,
@@ -1334,6 +1334,7 @@ def lead_review_weekly_hours(
     submission.reviewed_by = user.full_name
     submission.reviewed_at = datetime.now(timezone.utc)
     db.commit()
+    enforce_governance(db, project_id)  # usage = approved hours: alerts / auto-lock
     db.refresh(submission)
     return weekly_submission_output(db, submission)
 
@@ -2027,7 +2028,7 @@ def submit_time_log(
         db.add(entry)
     db.commit()
     db.refresh(entry)
-    enforce_governance(db, project_id)  # alerts / auto-lock at 100% of the baseline
+    enforce_governance(db, project_id)  # editing an approved row changes approved hours
     return time_entry_output(db, entry)
 
 
@@ -2051,6 +2052,7 @@ def lead_review_time_log(db: Session, entry_id: int, user: models.User, status: 
     entry.reviewed_by = user.full_name
     entry.reviewed_at = datetime.now(timezone.utc)
     db.commit()
+    enforce_governance(db, entry.project_id)  # usage = approved hours: alerts / auto-lock
     db.refresh(entry)
     return time_entry_output(db, entry)
 
@@ -2306,7 +2308,7 @@ def end_subtask_tracking(
     work_date = session.login_at.date() if session.login_at else today
     upsert_subtask_time_log(db, session.project_id, session.subtask_id, session.employee_id, work_date, final_seconds)
     db.commit()
-    enforce_governance(db, session.project_id)  # alerts / auto-lock at 100% of the baseline
+    enforce_governance(db, session.project_id)  # hours added to an approved row or week count at once
     db.refresh(session)
     total = engineer_active_seconds_on(db, user.employee_id, today)
     return {

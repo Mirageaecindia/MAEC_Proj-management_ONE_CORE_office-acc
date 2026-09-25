@@ -4,7 +4,7 @@ from collections import defaultdict
 
 import models
 from app.core.errors import NotFoundError
-from app.domain.timesheets import entry_total
+from app.domain.timesheets import APPROVED, PENDING_REVIEW, REJECTED, effective_status, entry_total
 from app.repositories.projects import ProjectRepository
 from app.repositories.work import WorkRepository
 
@@ -29,6 +29,7 @@ class WorkSummaryService:
 
         nodes = self.work.nodes_for_project(project_id, order_by_code=True)
         entries = self.work.entries_for_project(project_id)
+        weeks = self.work.week_statuses(project_id)
         node_by_id = {node.id: node for node in nodes}
 
         phase_stats = defaultdict(_stats)
@@ -58,18 +59,21 @@ class WorkSummaryService:
         lead_pending_entries = defaultdict(int)
         task_eng_approved = defaultdict(float)
         for entry in entries:
+            status = effective_status(entry.approval_status, weeks.get((entry.employee_id, entry.week_start_date)))
+            if status == REJECTED:
+                continue  # rejected hours never count
             total = entry_total(entry)
             task = node_by_id.get(entry.task_id)
             lead = task.assigned_lead if task else None
             eng_logged[entry.employee_id] += total
             if lead:
                 lead_logged[lead] += total
-            if entry.approval_status == "approved":
+            if status == APPROVED:
                 eng_approved[entry.employee_id] += total
                 task_eng_approved[(entry.task_id, entry.employee_id)] += total
                 if lead:
                     lead_approved[lead] += total
-            elif entry.approval_status == "pending_review":
+            elif status == PENDING_REVIEW:
                 eng_pending[entry.employee_id] += total
                 if lead:
                     lead_pending_entries[lead] += 1

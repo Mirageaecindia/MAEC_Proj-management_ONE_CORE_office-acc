@@ -33,7 +33,7 @@ MAEC Project Management (code name **ProManage**) is an internal web application
 - **Execution.** Engineers move tasks through a status workflow. Their working time on subtasks is tracked automatically.
 - **Control.** Leads approve timesheets and finished tasks. The BU Head watches hours and budget consumption against the threshold, and can approve or reject requests for more hours or stop execution entirely.
 
-The core idea is **governance of effort**: hours are the unit of cost. Every logged hour counts against the project's baseline (the BU Head's target effort hours plus approved extensions). Crossing the alert threshold notifies the BU Head and the project's Leads, and reaching 100% locks timesheets automatically until the BU Head approves an extension or resumes execution.
+The core idea is **governance of effort**: hours are the unit of cost. Every hour a Lead approves counts against the project's baseline (the BU Head's target effort hours plus approved extensions). Crossing the alert threshold notifies the BU Head and the project's Leads, and reaching 100% locks timesheets automatically until the BU Head approves an extension or resumes execution.
 
 ---
 
@@ -374,15 +374,16 @@ stateDiagram-v2
 |---|---|
 | Baseline hours | `target_effort_hours` + `extension_approved_hours` (whole project) |
 | WBS planned hours | Sum of `estimated_hours` over all WBS nodes (shown for comparison; `wbs_exceeds_target` flags a WBS larger than the target) |
-| Logged hours | All timesheet hours (approved + pending), Mon–Fri |
-| Consumption % | logged ÷ baseline × 100 |
+| Approved hours (usage) | Mon–Fri hours of rows the Lead approved, or rows in a week the Lead approved (`effective_status` in `app/domain/timesheets.py`). Pending and rejected hours never count |
+| Logged hours | Approved + pending (rejected excluded); shown for information, with `rejected_hours` separately |
+| Consumption % | approved ÷ baseline × 100 |
 | Governance level | `normal`; `warning` at ≥ `governance_threshold_pct`; `hard_stop` at ≥ 100%. No baseline (target not set) → not configured, always normal |
 | Per-discipline consumption | Informational: grouped by the engineer's `employees.discipline` (their designation) against the estimated hours of their nodes |
 | SPI (shown as "Schedule Index") | approved hours ÷ WBS planned hours (an earned-hours ratio, not a date-based SPI) |
-| Budget burn | contract value × (logged ÷ target effort hours) |
-| Monthly chart | Planned: each node's estimated hours spread over its months. Logged hours per month are split into normal and "exceeded" at the point cumulative logged hours pass baseline × threshold |
+| Budget burn | contract value × (approved ÷ target effort hours) |
+| Monthly chart | Planned: each node's estimated hours spread over its months. Approved hours per month are split into normal and "exceeded" at the point cumulative approved hours pass baseline × threshold |
 
-**Automatic enforcement** (`app/services/governance_monitor.py`): after every change to logged hours (manual timesheet entry, end of a tracked session) and after an extension decision, the project is re-evaluated. Each level is acted on once, on the way **up**: reaching `warning` notifies the BU Head and the project's Leads; reaching `hard_stop` sets `timesheets_soft_locked` with `lock_reason = auto`, writes an `auto_lock` audit row and notifies them. `governance_alert_level` remembers the last level, so a manual resume above 100% is not re-locked by the next hour, and falling back (after an extension) re-arms the alerts.
+**Automatic enforcement** (`app/services/governance_monitor.py`): whenever approved hours can change (a Lead approving or rejecting a row or a week, an engineer editing a row, a tracked session adding to an approved row) and after an extension decision, the project is re-evaluated. Each level is acted on once, on the way **up**: reaching `warning` notifies the BU Head and the project's Leads; reaching `hard_stop` sets `timesheets_soft_locked` with `lock_reason = auto`, writes an `auto_lock` audit row and notifies them. `governance_alert_level` remembers the last level, so a manual resume above 100% is not re-locked by the next approval, and falling back (after an extension) re-arms the alerts.
 
 **Extension requests:** an allocated Lead requests +N hours with a justification; one pending request per project; the BU Head is notified. Approving adds the hours to `extension_approved_hours` (raising the baseline), lifts any lock and notifies the Lead; rejecting notifies the Lead and keeps any lock. Every step writes a `governance_actions` audit row with a consumption snapshot.
 
@@ -584,7 +585,6 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 **BU Head / governance**
 - Budget burn is proportional to hours, not real cost. There's no rate card, and the resource summary returns hardcoded zeros for commercial figures.
 - "Discipline" in governance is the employee's designation, not Electrical, Mechanical or BIM.
-- Which hours count toward consumption (all logged vs approved only) is still to be decided; today all logged hours count.
 - Booking approval isn't reset when a booking is edited, and the Resource Booking page has no Reject button yet (the API exists).
 - Work Summary counts only the legacy "Completed" status, so completion shows 0 for current data.
 - Timeline & Logs is effectively empty for the BU Head (phase bars and approval states only load for Lead and Engineer). The Gantt viewport is fixed to Sep–Dec 2026 and leaves out the Submission phase.
@@ -630,7 +630,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | **WBS** | Work Breakdown Structure: phases → tasks → subtasks |
 | **STR / ID / RCP / BoH** | Structural, Interior Design, Reflected Ceiling Plan and Back-of-House. Design coordination phases |
 | **Baseline hours** | Planned effort a project is measured against |
-| **Consumption %** | Logged hours as a percentage of baseline hours |
+| **Consumption %** | Approved hours as a percentage of baseline hours |
 | **Threshold** | Consumption % above which governance action is required (default 80%) |
 | **Extension** | Extra hours requested by a Lead and approved by the BU Head |
 | **Soft lock / Stop Execution** | Blocks logging, tracking and approving timesheets: set by the BU Head (manual) or automatically at 100% of the baseline; lifted by Resume or an approved extension |

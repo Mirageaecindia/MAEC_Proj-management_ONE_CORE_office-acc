@@ -1,7 +1,8 @@
 """Keeps a project's governance state in step with its logged hours.
 
-Call `evaluate` (or `enforce_governance` from main.py) after anything that
-changes logged hours or the baseline. Each level is acted on once, when it
+Usage is approved hours only. Call `evaluate` (or `enforce_governance` from
+main.py) after anything that changes approved hours (a Lead approving or
+rejecting rows or weeks, edits to rows) or the baseline. Each level is acted on once, when it
 is first reached:
 - WARNING   -> notify the BU Head and the project's Leads;
 - HARD_STOP -> lock timesheets automatically and notify them.
@@ -36,7 +37,7 @@ class GovernanceMonitor:
 
     def reading(self, project: models.Project) -> GovernanceReading:
         return read_governance(
-            self.work.logged_hours(project.id),
+            self.work.approved_hours(project.id),
             project.target_effort_hours,
             project.extension_approved_hours,
             project.governance_threshold_pct,
@@ -68,7 +69,7 @@ class GovernanceMonitor:
                     action="auto_lock",
                     consumption_pct=reading.consumption_pct,
                     threshold_pct=project.governance_threshold_pct,
-                    consumption_hours=reading.logged_hours,
+                    consumption_hours=reading.approved_hours,
                     comments="Timesheets locked automatically: 100% of the baseline was reached.",
                     created_by=SYSTEM_ACTOR,
                 )
@@ -90,13 +91,13 @@ def _usage_text(project: models.Project, reading: GovernanceReading) -> str:
     threshold = project.governance_threshold_pct
     threshold_text = f"; alert threshold {threshold:g}%" if threshold is not None else ""
     return (
-        f"'{project.project_name}' has used {reading.logged_hours:g} of {reading.baseline_hours:g} baseline hours "
-        f"({reading.consumption_pct:g}%{threshold_text})."
+        f"'{project.project_name}': {reading.approved_hours:g} of {reading.baseline_hours:g} baseline hours "
+        f"approved ({reading.consumption_pct:g}%{threshold_text})."
     )
 
 
 def enforce_governance(db: Session, project_id: int) -> None:
-    """Re-evaluate a project after its logged hours changed (used by Lead/Engineer code in main.py)."""
+    """Re-evaluate a project after its approved hours may have changed (Lead/Engineer code in main.py)."""
     project = db.get(models.Project, project_id)
     if project is None:
         return
