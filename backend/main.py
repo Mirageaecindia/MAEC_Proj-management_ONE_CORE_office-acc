@@ -388,6 +388,9 @@ def create_extension_request(
     requested_hours: float,
     justification: Optional[str],
 ) -> models.ExtensionRequest:
+    # Only a Lead allocated to this project may ask the BU Head for extra hours.
+    if not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
     if not user.full_name:
         raise HTTPException(status_code=400, detail="Lead identity is required.")
     if find_pending_extension_request(db, project.id):
@@ -858,6 +861,9 @@ def submit_resource_bookings(
     project = db.query(models.Project).filter_by(id=project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found.")
+    # Only a Lead allocated to this project may submit its bookings to the BU Head.
+    if not user_can_access_project(db, user, project):
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
     bookings = db.query(models.ResourceBooking).filter_by(project_id=project_id).all()
     if not bookings:
         raise HTTPException(status_code=400, detail="Assign at least one engineer before submitting for approval.")

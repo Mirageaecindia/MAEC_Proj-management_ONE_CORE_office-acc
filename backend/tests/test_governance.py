@@ -252,11 +252,20 @@ def test_extension_decision_guards(client, world, governed):
     assert client.post(missing, json={"decision": "approve"}, headers=world.bu_h).status_code == 404
 
 
-def test_unassigned_lead_can_file_extension_request(client, world, governed):
-    # KNOWN (hand-off to Lead developer): no project-access check on requests.
+def test_only_a_lead_allocated_to_the_project_can_request_an_extension(client, db, world, governed):
     project_id, *_ = governed
 
-    assert _request_extension(client, world.other_lead_h, project_id).status_code == 201
+    unassigned = _request_extension(client, world.other_lead_h, project_id)
+    legacy = client.post(
+        f"/api/projects/{project_id}/governance/request-extension",
+        json={"comments": "Please extend limit by 20 hours"},
+        headers=world.other_lead_h,
+    )
+
+    assert unassigned.status_code == 403
+    assert legacy.status_code == 403
+    assert db.query(models.ExtensionRequest).filter_by(project_id=project_id).count() == 0
+    assert _request_extension(client, world.lead_h, project_id).status_code == 201  # the allocated lead can
 
 
 def test_legacy_bu_extension_endpoints_are_removed(client, world, governed):

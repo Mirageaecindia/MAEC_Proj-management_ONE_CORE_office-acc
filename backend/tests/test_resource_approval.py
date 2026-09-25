@@ -81,6 +81,17 @@ def test_approval_workflow_draft_to_pending_to_approved(client, world, booked_pr
     assert client.post(approve_url, headers=world.bu_h).status_code == 409  # already approved
 
 
+def test_only_a_lead_allocated_to_the_project_can_submit_bookings(client, world, booked_project):
+    project_id, _ = booked_project
+
+    unassigned = client.post(f"/api/projects/{project_id}/resource-bookings/submit", headers=world.other_lead_h)
+
+    assert unassigned.status_code == 403
+    summary = client.get(f"/api/projects/{project_id}/resource-summary", headers=world.bu_h).json()
+    assert summary["approval_status"] == "draft"  # nothing was submitted to the BU Head
+    _submit(client, world, project_id)  # the allocated lead can
+
+
 def test_approve_requires_bookings_and_bu_head_role(client, world, booked_project):
     empty_project_id = world.create_project()["id"]
     project_id, _ = booked_project

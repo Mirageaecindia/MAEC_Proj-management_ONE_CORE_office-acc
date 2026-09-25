@@ -181,9 +181,7 @@ one, update that assertion in the same commit.
 ## Known cross-team items
 
 The BU Head suite found these in Lead/Engineer code:
-- Any lead can file an extension request on any project.
-- Lead endpoints that create, update or delete WBS nodes, and submit bookings,
-  have no project-access check.
+- Lead endpoints that create, update or delete WBS nodes have no project-access check.
 - New WBS nodes default to the legacy status "Not Started" (current flow: "To Do").
 - Engineers can't log hours in a week with no existing entry (the timesheet UI
   only shows rows that already exist).

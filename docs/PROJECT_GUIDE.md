@@ -574,7 +574,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 **Security**
 - The Azure client secret and the HR CSV were committed in earlier history (repo on GitHub). The secret must be rotated.
 - Tokens are stored in `localStorage`, so XSS could steal them (httpOnly cookies would be safer). Sessions now expire, and login is rate-limited.
-- Leads can file extension requests on any project. Lead WBS create/update/delete and booking submit have no project-access check (Lead code). The Executive Dashboard is now limited to the Lead's own projects.
+- Lead WBS create/update/delete have no project-access check (Lead code). Extension requests, booking submission and the Executive Dashboard are now limited to Leads allocated to the project.
 
 **BU Head / governance**
 - `target_effort_hours` (the BU Head's baseline) and `extension_approved_hours` are stored but never used. Consumption is measured against the WBS estimate total.
