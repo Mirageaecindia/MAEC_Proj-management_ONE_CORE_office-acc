@@ -1,6 +1,6 @@
 # MAEC ProManage: prioritised to-do list
 
-Last updated: 2026-09-26 (S3–S8 and C10 done). Owner:
+Last updated: 2026-09-26 (S3–S8, C10 and N14(d) done). Sajjad is the only person pushing to `main`. Owner:
 Sajjad, who now owns all three roles (BU Head, Lead, Engineer) plus the
 SharePoint integration.
 
@@ -63,7 +63,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | S4 | ✅ **Done.** Tracked time is capped at the wall-clock time since `login_at` on session sync and end | Anyone calling the API could claim 8 h a minute after starting | `main.py` `cap_to_elapsed`, `tests/test_tracking_cap.py` | S |
 | S5 | ✅ **Done.** The public `/uploads` mount was removed: nothing was ever stored there. The authenticated, project-checked download endpoint is built with the first real files (C3, SOW upload). A test fails if any public mount comes back | Anyone with a file URL could have downloaded it | `main.py`, `tests/test_uploads.py`, `CLAUDE.md` | S |
 | S6 | ✅ **Done.** `users.is_active` (the last change via `schema_upgrades.py`). Login and existing sessions refuse inactive users (generic error); inactive leads are hidden from the Create Project dropdowns and can't be assigned; `create_user.py --deactivate / --activate` (deactivating ends their sessions at once) | A leaver could only be removed by editing the database | `models.py`, `app/core/security.py`, `app/services/auth.py`, `app/repositories/users.py`, `create_user.py`, `tests/test_user_deactivation.py` | S |
-| S7 | ✅ **Done.** `backup_db.py`: consistent snapshot via the SQLite backup API (safe while running), keeps the newest 14; Task Scheduler command and restore steps in its docstring and guide §12. **Still to do by hand:** create the scheduled task on the machine that holds the real database | No backup existed | `backend/backup_db.py`, `tests/test_backup_db.py` | S |
+| S7 | ✅ **Script done and restore-tested.** `backup_db.py` takes a consistent snapshot via the SQLite backup API (safe while running) and keeps the newest 14. Drill run on 2026-09-26: back up the live DB, restore it to a copy, start the real server on it, log in, load projects and a dashboard: passed. **Still to do by hand:** (1) choose an **off-machine** target (another drive or a restricted OneDrive folder; the backups contain personal data, so only you should have access) and pass it with `--dir`; (2) create the nightly scheduled task on the machine that holds the real database | Backups on the same disk die with it (disk failure, ransomware) | `backend/backup_db.py`, `tests/test_backup_db.py` | S |
 | S8 | ✅ **Done.** CLAUDE.md, CONTRIBUTING.md, USERS.md and the guide describe the single owner, the working rules and the new commands | Rules must match reality | docs | S |
 
 ---
@@ -87,7 +87,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | N11 | **Booking planned hours respect the booking %** (20% means 1.6 h a day, not 8) | Resourcing figures are overstated | `main.py` `estimated_hours_from_dates` / booking create and edit | S |
 | N12 | **Allocation cap checked per day:** for each day in the new booking's range, the sum of that day's bookings must stay at or below 100%. Rule: the highest daily total, not the sum of every overlapping booking | Today it adds up every booking regardless of dates. A pairwise-overlap sum is also wrong (A: Jan–Mar 50%, B: Feb 50%, C: Mar 50% plus a new Jan–Mar booking sums to 150%, but no single day exceeds 100%) | `main.py` `engineer_total_allocation` | S |
 | N13 | **Governance visibility:** (1) pending hours as their own prominent figure; (2) **approval lag**, the age of the oldest pending entry; (3) a **warning-only** alert when approved + pending reach the threshold; (4) an "over-baseline, awaiting extension" figure (N14) | Without these the BU Head can't tell "under budget" from "the Lead hasn't approved anything" | `metrics.py`, `governance_monitor.py`, dashboard cards | M |
-| N14 | **Lock behaviour (D8).** Rules: (a) while locked, engineers can log and track; those hours are flagged **over-baseline** and shown in the N13(4) figure; (b) approval (row and week) is blocked while locked; **reject stays allowed** (was C9); (c) after Resume or an extension, approving backlogged hours re-runs the lock check, e.g. a 10 h extension followed by 60 h of backlog approvals must lock again; (d) **fix a gap:** an approved extension that leaves usage at or above 100% must keep the lock. Today it unlocks, and because the level stays "baseline reached" the backlog approvals never re-lock. Tests for every rule | Blocking logging hides work instead of stopping it; rules (c) and (d) stop the lock being bypassed | `main.py` logging and review endpoints (move per rule 2), `app/services/governance.py` `decide_extension`, `governance_monitor.py` | M |
+| N14 | **Lock behaviour (D8).** Rules: (a) while locked, engineers can log and track; those hours are flagged **over-baseline** and shown in the N13(4) figure; (b) approval (row and week) is blocked while locked; **reject stays allowed** (was C9); (c) after Resume or an extension, approving backlogged hours re-runs the lock check, e.g. a 10 h extension followed by 60 h of backlog approvals must lock again; (d) ✅ **done 2026-09-26:** an approved extension that leaves usage at or above 100% keeps the lock, and the Lead is told why. Tests for every rule | Blocking logging hides work instead of stopping it; rules (c) and (d) stop the lock being bypassed | `main.py` logging and review endpoints (move per rule 2), `app/services/governance.py` `decide_extension`, `governance_monitor.py` | M |
 
 ### P1b: BU Head control and project lifecycle
 
@@ -117,7 +117,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | W3 | **One notification system:** move the Resource Booking page's own 5 s-polling banner to the header bell | Duplicate code and polling load | `ResourceBookingPage.jsx`, `NotificationBell.jsx` | S |
 | W4 | **Portfolio dashboard:** all projects with level, burn, locks and approval lag | The BU Head's home screen | new page + aggregate endpoint | L |
 | W5 | **Exports** (CSV/PDF) of the dashboard, Work Summary and timesheets | Reporting upward | export endpoints | M |
-| W6 | **User management page:** create users, set discipline and office, reset password, deactivate (the CLI covers deactivation until then via S6) | Admin tasks without a terminal | new page + endpoints | M |
+| W6 | **User management page:** create users, set discipline and office, reset password, deactivate (the CLI covers deactivation until then via S6). **Deactivating must list the person's bookings and WBS assignments for reassignment**, so a leaver's tasks don't sit orphaned (see C7) | Admin tasks without a terminal | new page + endpoints | M |
 
 ---
 
@@ -164,8 +164,12 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
 
 ## Suggested order
 
-1. **Now (P0):** S1 → S2 (both need you: Azure access and a team moment); schedule the S7 backup task; E3. S3–S8 are done.
-2. **Sprint A:** **E4 Alembic first**, then N2 (7-day hours), C1 archive, C2 edit, C4 reject button, C8, N5, N8, N11, N12, N13.
+1. **Now (P0), needs you:**
+   - **S1:** find who holds the Azure admin role and get the secret rotated this week.
+   - **S2:** list **every clone** (you, Subhika, the Engineer dev, the previous developer, old laptops, CI, GitHub forks). One stale clone pushed later brings the history back.
+   - **S7:** choose the off-machine backup folder and schedule the task.
+   - S3–S8 and N14(d) are done.
+2. **Sprint A:** N2 pre-check (done: the only known database has no timesheet rows, so counting weekend hours trips nothing), **E4 Alembic first**, then E3, N2 (7-day hours), C1 archive, C2 edit, C4 reject button, C8, N5, N8, N11, N12, N13.
 3. **Sprint B (timesheets and lock):** N1 timesheet model (tell the previous Engineer developer first), N9 single approval route, N14 lock rules, C6, C7, C10, C12. Lead/Engineer features move into `app/` as they are touched.
 4. **Sprint C (calendar and cost):** N3 office field, N4 EV/SPI/CPI, N6 rate card, N7 disciplines, N10, C3 (after S5), C5.
 5. **Sprint D:** W1–W3.
@@ -186,4 +190,5 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
 | Governance: baseline = target + extensions, alert at threshold, auto-lock at 100%, resume, notifications, header bell | `095de9c` |
 | Governance usage counts approved hours only (row or week approval); rejected hours excluded | `288c2ac` |
 | `/api/server-date` returns real UTC | Subhika's UTC change |
-| P0 S3–S8 and C10: Lead WBS access checks, tracked-time cap, no public uploads, user deactivation, SQLite backups, ownership docs, WBS delete cleans sessions | this sprint |
+| P0 S3–S8 and C10: Lead WBS access checks, tracked-time cap, no public uploads, user deactivation, SQLite backups, ownership docs, WBS delete cleans sessions | `cea05fc` |
+| N14(d): an extension too small to get below 100% keeps the lock | this sprint |

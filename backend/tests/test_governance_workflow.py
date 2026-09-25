@@ -339,3 +339,35 @@ def test_dropping_back_into_the_warning_band_does_not_alert_again(client, db, wo
     assert project.governance_alert_level == WARNING  # 100 of 120 baseline hours
     assert project.timesheets_soft_locked is False
     assert _notifications(client, world.bu_h, project_id, "threshold_warning") == []
+
+
+def test_extension_too_small_to_get_below_the_baseline_keeps_the_lock(client, db, world, governed):
+    # TODO N14(d): otherwise the unlock would stick, and because the level stays
+    # hard_stop, later approvals would never lock the project again.
+    project_id, node_a, *_ = governed
+    _log_and_approve(client, world, node_a, "2026-09-14", mon_hours=20, tue_hours=20, wed_hours=20, thu_hours=20)
+    assert _project(db, project_id).timesheets_soft_locked is True  # 110 of 100 approved
+
+    def approve_extension(hours):
+        request_id = client.post(
+            f"/api/projects/{project_id}/extension-requests", json={"requested_hours": hours}, headers=world.lead_h
+        ).json()["id"]
+        decided = client.post(
+            f"/api/projects/{project_id}/extension-requests/{request_id}/decision",
+            json={"decision": "approve"},
+            headers=world.bu_h,
+        )
+        assert decided.status_code == 200, decided.text
+
+    approve_extension(5)  # 110 of 105 = 104.8%
+
+    project = _project(db, project_id)
+    assert project.timesheets_soft_locked is True
+    assert project.lock_reason == "auto"
+    decided = _notifications(client, world.lead_h, project_id, "extension_decided")
+    assert "Timesheets stay locked" in decided[0]["message"]
+    assert _notifications(client, world.lead_h, project_id, "execution_resumed") == []
+
+    approve_extension(20)  # 110 of 125 = 88%: below 100%, so it resumes
+
+    assert _project(db, project_id).timesheets_soft_locked is False

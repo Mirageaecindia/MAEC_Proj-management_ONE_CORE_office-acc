@@ -12,7 +12,7 @@ import models
 import schemas
 from app.core.errors import NO_PROJECT_ACCESS, ConflictError, ForbiddenError, NotFoundError
 from app.core.roles import Role
-from app.domain.governance import LOCK_MANUAL
+from app.domain.governance import HARD_STOP, LOCK_MANUAL
 from app.repositories.governance import GovernanceRepository
 from app.repositories.projects import ProjectRepository
 from app.services import notifications as notify
@@ -136,11 +136,14 @@ class GovernanceService:
                 requested_hours=request.requested_hours,
             )
         )
-        if status == "approved" and project.timesheets_soft_locked:
-            # BU Head decision: an approved extension resumes a stopped project.
+        # The baseline may have risen: re-arm or re-evaluate alerts first.
+        reading = self.monitor.evaluate(project)
+        still_over = reading.level == HARD_STOP
+        if status == "approved" and project.timesheets_soft_locked and not still_over:
+            # BU Head decision: an approved extension resumes a stopped project,
+            # but never while usage is still at/above 100% of the new baseline.
             self._resume(project, decided_by, "Resumed automatically: extension approved.")
-        # The baseline may have risen: re-arm or re-evaluate alerts.
-        self.monitor.evaluate(project)
+        stays_locked = status == "approved" and project.timesheets_soft_locked
         notify.notify_users(
             self.db,
             [request.requested_by_user_id],
@@ -148,7 +151,12 @@ class GovernanceService:
             notify.EXTENSION_DECIDED,
             f"Extension {status}",
             f"Your request for {request.requested_hours:g} extra hours on '{project.project_name}' was {status}."
-            + (f" Comment: {comments}" if comments else ""),
+            + (f" Comment: {comments}" if comments else "")
+            + (
+                f" Timesheets stay locked: {reading.consumption_pct:g}% of the new baseline is already used."
+                if stays_locked
+                else ""
+            ),
             project.id,
             decided_by,
         )
