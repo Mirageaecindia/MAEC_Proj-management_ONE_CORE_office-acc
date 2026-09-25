@@ -1,6 +1,6 @@
 # MAEC ProManage: prioritised to-do list
 
-Last updated: 2026-09-26 (S3–S8, C10 and N14(d) done). Sajjad is the only person pushing to `main`. Owner:
+Last updated: 2026-09-26. Sajjad is the only person pushing to `main`. **The app is not deployed:** it will be deployed once, when the whole app is developed (see the go-live checklist). All databases today hold test data. Owner:
 Sajjad, who now owns all three roles (BU Head, Lead, Engineer) plus the
 SharePoint integration.
 
@@ -174,6 +174,23 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
 4. **Sprint C (calendar and cost):** N3 office field, N4 EV/SPI/CPI, N6 rate card, N7 disciplines, N10, C3 (after S5), C5.
 5. **Sprint D:** W1–W3.
 6. **Then:** W4–W6, E5–E9, P4 SharePoint.
+
+---
+
+## Go-live checklist (before the first deployment)
+
+Nothing here is urgent while the app is in development. All of it must be done before real users and real data arrive.
+
+- [ ] **S1:** rotate the Azure client secret (needs Azure credentials).
+- [ ] **S2:** purge the HR CSV and the old secret from git history; ask Subhika to delete her clone.
+- [ ] **E5:** database decision (SQLite or Postgres), foreign keys, indexes. With Postgres or several workers, run `alembic upgrade head` as a deploy step instead of at startup.
+- [ ] **E8:** tokens in httpOnly cookies. **E9:** single-port production build, structured logging, error monitoring.
+- [ ] **S7:** `backup_db.py --dir <off-machine folder>` scheduled nightly (or the managed database's own backups), plus a restore drill on the production setup.
+- [ ] **CORS and settings:** production origin in the CORS list, `DATABASE_URL`, `.env` values on the server only.
+- [ ] **Clean start:** a fresh production database (no test projects or accounts), real accounts via `create_user.py`, and the legacy `project_leads` seed removed (E7).
+- [ ] **SP6:** SharePoint end-to-end test against the real tenant.
+- [ ] Delete `app/core/legacy_schema.py` (only needed to adopt pre-Alembic development databases).
+- [ ] Full test suites, lint and build green on the release commit.
 
 ---
 
