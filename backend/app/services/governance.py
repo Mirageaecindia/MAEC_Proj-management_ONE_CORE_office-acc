@@ -10,10 +10,11 @@ from sqlalchemy.orm import Session
 
 import models
 import schemas
-from app.core.errors import ConflictError, NotFoundError
+from app.core.errors import NO_PROJECT_ACCESS, ConflictError, ForbiddenError, NotFoundError
 from app.core.roles import Role
 from app.repositories.governance import GovernanceRepository
 from app.repositories.projects import ProjectRepository
+from app.services.access import user_can_access_project
 from app.services.metrics import ProjectMetricsService
 
 PROJECT_NOT_FOUND = "Project not found."
@@ -84,6 +85,9 @@ class GovernanceService:
 
     def executive_dashboard(self, user: models.User, project_id: int) -> dict:
         project = self._project(project_id)
+        # Commercial data: a Lead may only see projects they are assigned to.
+        if user.role == Role.LEAD and not user_can_access_project(self.db, user, project):
+            raise ForbiddenError(NO_PROJECT_ACCESS)
         data = self.metrics.dashboard_data(project)
         # A Lead only sees the extension requests they raised themselves.
         requested_by = user.id if user.role == Role.LEAD else None

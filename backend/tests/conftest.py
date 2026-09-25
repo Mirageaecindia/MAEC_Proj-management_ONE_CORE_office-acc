@@ -26,6 +26,7 @@ import main
 from app.core import security
 from app.core.database import Base, SessionLocal, engine
 from app.integrations.sharepoint import get_document_storage
+from app.services.auth import get_login_throttle
 from fakes import FakeDocumentStorage
 
 # PBKDF2 is intentionally slow (100k rounds). Tests log in hundreds of times,
@@ -43,7 +44,9 @@ def pytest_sessionfinish(session, exitstatus):
 
 @pytest.fixture(autouse=True)
 def clean_db():
-    """Every test starts from empty tables (this also drops the CSV seed)."""
+    """Every test starts from empty tables (this also drops the CSV seed) and a
+    fresh login throttle, so failed logins never leak between tests."""
+    get_login_throttle.cache_clear()
     with engine.begin() as connection:
         for table in reversed(Base.metadata.sorted_tables):
             connection.execute(table.delete())

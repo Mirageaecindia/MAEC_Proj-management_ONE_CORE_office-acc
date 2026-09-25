@@ -181,8 +181,6 @@ one, update that assertion in the same commit.
 ## Known cross-team items
 
 The BU Head suite found these in Lead/Engineer code:
-- Any lead can read any project's Executive Dashboard, including contract value
-  (`GET /executive-dashboard` has no project-access check for leads).
 - Any lead can file an extension request on any project.
 - Lead endpoints that create, update or delete WBS nodes, and submit bookings,
   have no project-access check.

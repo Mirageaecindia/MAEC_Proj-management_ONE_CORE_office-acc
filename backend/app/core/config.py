@@ -19,6 +19,12 @@ class Settings(BaseSettings):
 
     database_url: str = DEFAULT_DATABASE_URL
 
+    # Sessions expire this many hours after login.
+    session_ttl_hours: float = 12
+    # This many failed logins for one username within the window lock it out for the window.
+    login_max_failed_attempts: int = 5
+    login_lockout_minutes: int = 15
+
     azure_client_id: str = ""
     azure_client_secret: str = ""
     azure_tenant_id: str = ""

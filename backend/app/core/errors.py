@@ -22,6 +22,10 @@ class BadRequestError(DomainError):
     status_code = 400
 
 
+class UnauthorizedError(DomainError):
+    status_code = 401
+
+
 class ForbiddenError(DomainError):
     status_code = 403
 
@@ -32,6 +36,10 @@ class NotFoundError(DomainError):
 
 class ConflictError(DomainError):
     status_code = 409
+
+
+class TooManyRequestsError(DomainError):
+    status_code = 429
 
 
 class UnexpectedError(DomainError):

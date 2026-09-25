@@ -240,6 +240,8 @@ MAEC_project_management/
 
 ### 6.2 Authentication and authorization
 - **Login:** `POST /api/auth/login` checks the PBKDF2 hash and returns a random 64-character token. The token is stored in `login_sessions` and sent as `Authorization: Bearer <token>`.
+- **Session expiry:** a token stops working `SESSION_TTL_HOURS` (default 12) after login. It is then deleted, and each login purges older expired sessions.
+- **Brute-force protection:** `LOGIN_MAX_FAILED_ATTEMPTS` (default 5) failed logins for one username lock it for `LOGIN_LOCKOUT_MINUTES` (default 15). Further attempts get HTTP 429 with `Retry-After`. The counter is in memory (per process).
 - **`get_current_user`** (in `app/core/security.py`) resolves the token to a user on every request, or returns 401. `GET /api/auth/me` restores the session on page refresh. Logout deletes the token.
 - **Role gate:** routers in `app/` use the dependency guards `require_bu_head`, `require_lead_or_bu_head` and `require_any_role`. The endpoints in `main.py` call `require_role(user.role, {...})`. Both return 403 for roles that aren't allowed.
 - **Project scope:** `user_can_access_project` (in `app/services/access.py`) decides who can see a project.
@@ -571,8 +573,8 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 
 **Security**
 - The Azure client secret and the HR CSV were committed in earlier history (repo on GitHub). The secret must be rotated.
-- Tokens never expire and are stored in `localStorage`. There's no login rate limiting.
-- Leads can read any project's Executive Dashboard (including contract value) and file extension requests on any project. Lead WBS create/update/delete and booking submit have no project-access check.
+- Tokens are stored in `localStorage`, so XSS could steal them (httpOnly cookies would be safer). Sessions now expire, and login is rate-limited.
+- Leads can file extension requests on any project. Lead WBS create/update/delete and booking submit have no project-access check (Lead code). The Executive Dashboard is now limited to the Lead's own projects.
 
 **BU Head / governance**
 - `target_effort_hours` (the BU Head's baseline) and `extension_approved_hours` are stored but never used. Consumption is measured against the WBS estimate total.

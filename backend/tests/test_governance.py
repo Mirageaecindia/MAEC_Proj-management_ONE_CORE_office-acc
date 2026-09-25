@@ -115,9 +115,9 @@ def test_dashboard_access(client, world, governed):
 
     assert client.get(f"/api/projects/{project_id}/executive-dashboard", headers=world.eng_h).status_code == 403
     assert client.get("/api/projects/999999/executive-dashboard", headers=world.bu_h).status_code == 404
-    # KNOWN (hand-off to Lead developer): any lead can read any project's
-    # commercial dashboard, including leads not assigned to the project.
-    assert client.get(f"/api/projects/{project_id}/executive-dashboard", headers=world.other_lead_h).status_code == 200
+    # A lead not assigned to the project must not see its commercial data (P0 fix).
+    assert client.get(f"/api/projects/{project_id}/executive-dashboard", headers=world.other_lead_h).status_code == 403
+    assert client.get(f"/api/projects/{project_id}/executive-dashboard", headers=world.lead_h).status_code == 200
 
 
 # --- Stop execution (soft lock) ---------------------------------------------------------

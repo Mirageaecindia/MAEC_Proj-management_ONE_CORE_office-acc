@@ -7,11 +7,13 @@ the token, never from a client-supplied header, query parameter or storage.
 
 import hashlib
 import secrets
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 import models
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.roles import ALL_ROLES, Role
 
@@ -19,6 +21,7 @@ PBKDF2_ITERATIONS = 100_000
 _ALGO = "pbkdf2_sha256"
 
 FORBIDDEN_FOR_ROLE = "This action is not allowed for the current role."
+SESSION_ERROR = "Session expired or invalid — please log in again."
 
 
 def hash_password(password: str) -> str:
@@ -49,17 +52,36 @@ def bearer_token(authorization: str | None) -> str | None:
     return authorization.split(" ", 1)[1].strip() or None
 
 
+def as_utc(value: datetime) -> datetime:
+    """SQLite returns naive datetimes; stored timestamps are UTC."""
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def session_is_expired(created_at: datetime | None, ttl_hours: float, now: datetime | None = None) -> bool:
+    """A session expires `ttl_hours` after login. A missing timestamp counts as expired."""
+    if created_at is None:
+        return True
+    return (now or datetime.now(UTC)) - as_utc(created_at) > timedelta(hours=ttl_hours)
+
+
 def get_current_user(
     authorization: str | None = Header(None),
     db: Session = Depends(get_db),
 ) -> models.User:
-    """FastAPI dependency returning the authenticated user, or 401."""
-    SESSION_ERROR = "Session expired or invalid — please log in again."
+    """FastAPI dependency returning the authenticated user, or 401.
+
+    Expired sessions are deleted on first use, so a stolen or forgotten token
+    stops working after SESSION_TTL_HOURS.
+    """
     token = bearer_token(authorization)
     if not token:
         raise HTTPException(status_code=401, detail=SESSION_ERROR)
     session = db.query(models.LoginSession).filter_by(token=token).first()
     if not session:
+        raise HTTPException(status_code=401, detail=SESSION_ERROR)
+    if session_is_expired(session.created_at, get_settings().session_ttl_hours):
+        db.delete(session)
+        db.commit()
         raise HTTPException(status_code=401, detail=SESSION_ERROR)
     user = db.get(models.User, session.user_id)
     if not user:
