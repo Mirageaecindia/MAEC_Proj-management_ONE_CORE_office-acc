@@ -3,6 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import maecLogo from '../assets/maec-logo.png';
+import { NotificationBell } from './NotificationBell';
 
 const allTabs = [
   { label: 'Projects', path: '/created-projects', roles: ['bu_head'] },
@@ -15,6 +16,9 @@ const allTabs = [
   { label: 'Performance Dashboard', path: '/engineer-performance-dashboard', roles: ['engineer'] },
   { label: 'SharePoint Mirror', path: '/sharepoint-mirror', roles: ['lead', 'engineer', 'bu_head'] },
 ];
+
+/** Roles that receive notifications (governance alerts, booking and extension decisions). */
+const NOTIFIED_ROLES = ['bu_head', 'lead'];
 
 const ROLE_LABELS = {
   bu_head: 'BU Head',
@@ -68,6 +72,7 @@ export function MaecHeader({ subtitle }) {
           <strong className="brand-title">{displaySubtitle}</strong>
         </NavLink>
         <div className="user-menu">
+          {NOTIFIED_ROLES.includes(role) && <NotificationBell />}
           <div className="account-control" ref={menuRef}>
             <button
               className="account-pill"

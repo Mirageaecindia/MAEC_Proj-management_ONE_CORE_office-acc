@@ -109,6 +109,8 @@ in `main.py`. See also the merge-conflict rules in `CLAUDE.md`.)
 | `extension_request_output`, `find_pending_extension_request` | `app/services/governance.py` |
 | `booking_approval_status`, `BOOKING_APPROVAL_LABELS` | `app/services/booking_approval.py` |
 | `create_bu_head_notification` | `app/services/notifications.py` |
+| `enforce_governance` (call after changing logged hours) | `app/services/governance_monitor.py` |
+| `upgrade_schema` (adds new columns at startup) | `app/core/schema_upgrades.py` |
 | `sharepoint_service.py` | `app/integrations/sharepoint/graph.py` |
 
 Removed as dead code: `POST /governance/approve-extension` and
@@ -124,10 +126,10 @@ can adopt it whenever their owners choose.
 ```
 frontend/src/
   api/          client.js (base URL, token, ApiError) + one module per domain; queryClient.js
-  hooks/        TanStack Query hooks (useProjects, useGovernance, useSharePointMirror,
+  hooks/        TanStack Query hooks (useProjects, useGovernance, useNotifications, useSharePointMirror,
                 useProjectSelection) and queryKeys.js
   components/   shared UI: PageHeader, ProjectSwitcher, StatCard, MonthlyHoursChart,
-                ConfirmDialog, Feedback (ErrorBanner, Notice, EmptyState)
+                ConfirmDialog, Feedback (ErrorBanner, Notice, EmptyState), NotificationBell
   constants/    currencies, SharePoint disciplines
   utils/        format.js (hours, %, money, dates, bytes)
   providers/    QueryProvider (cache, 401 -> logout, cleared on user change)

@@ -4,56 +4,47 @@ import { NOT_AVAILABLE, formatDecimal, formatHours, formatMoney, formatPercent }
 
 const NO_PROJECT = 'No project selected';
 
-function GovernanceStatusCard({ governance }) {
-  if (!governance) {
-    return (
-      <StatCard
-        label="Governance Threshold Status"
-        value={NOT_AVAILABLE}
-        sub={NO_PROJECT}
-        className="ed-card-ok"
-      />
-    );
-  }
-  const { status, threshold_pct: threshold, soft_locked: softLocked } = governance;
-  const exceeded = status === 'exceeded';
-  const softLock = softLocked && <span className="ed-softlock">Timesheets Soft-Locked for Approval</span>;
+const LEVEL_CARDS = {
+  normal: { value: 'NORMAL', className: 'ed-card-ok' },
+  warning: { value: 'ALERT', className: 'ed-card-warning' },
+  hard_stop: { value: 'BASELINE REACHED', className: 'ed-card-danger' },
+};
 
-  if (threshold === null || threshold === undefined) {
+function GovernanceStatusCard({ governance }) {
+  const label = 'Governance Threshold Status';
+  if (!governance) {
+    return <StatCard label={label} value={NOT_AVAILABLE} sub={NO_PROJECT} className="ed-card-ok" />;
+  }
+  if (!governance.configured) {
     return (
       <StatCard
-        label="Governance Threshold Status"
+        label={label}
         value="NOT CONFIGURED"
-        sub="No governance threshold is configured for this project."
+        sub="Set target effort hours to enable governance."
         className="ed-card-ok"
       />
     );
   }
-  if (exceeded) {
-    const spike = governance.max_discipline_pct ?? governance.consumption_pct ?? 0;
-    return (
-      <StatCard
-        label="Governance Threshold Status"
-        value={`EXCEEDED (${formatPercent(spike)})`}
-        sub={`Threshold: ${formatPercent(threshold)}`}
-        className="ed-card-danger"
-      >
-        {softLock}
-      </StatCard>
-    );
-  }
+  const { value, className } = LEVEL_CARDS[governance.level] ?? LEVEL_CARDS.normal;
+  const threshold =
+    governance.threshold_pct == null
+      ? 'no alert threshold'
+      : `alert at ${formatPercent(governance.threshold_pct)}`;
+  const lockText =
+    governance.lock_reason === 'auto' ? 'Timesheets Locked Automatically' : 'Timesheets Soft-Locked';
   return (
     <StatCard
-      label="Governance Threshold Status"
+      label={label}
       value={
         <>
-          NORMAL <ShieldCheck size={18} className="ed-card-inline-icon" />
+          {value} ({formatPercent(governance.consumption_pct)})
+          {governance.level === 'normal' && <ShieldCheck size={18} className="ed-card-inline-icon" />}
         </>
       }
-      sub={`Consumption ${formatPercent(governance.consumption_pct)} at the ${formatPercent(threshold)} threshold`}
-      className="ed-card-ok"
+      sub={`Of the baseline; ${threshold}, lock at 100%`}
+      className={className}
     >
-      {softLock}
+      {governance.soft_locked && <span className="ed-softlock">{lockText}</span>}
     </StatCard>
   );
 }
@@ -81,7 +72,7 @@ export function GovernanceSummaryCards({ data }) {
         progress={{ tone: 'orange', percent: hours?.percent }}
         foot={
           hours
-            ? `${formatHours(hours.approved)} approved / ${formatHours(hours.pending)} pending of ${formatHours(hours.scheduled)}`
+            ? `${formatHours(hours.approved)} approved / ${formatHours(hours.pending)} pending of ${formatHours(hours.scheduled)} baseline (WBS ${formatHours(hours.wbs_planned)})`
             : 'No project data'
         }
       />

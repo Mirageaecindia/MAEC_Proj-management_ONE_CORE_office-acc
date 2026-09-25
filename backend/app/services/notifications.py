@@ -1,4 +1,6 @@
-"""Role-targeted notifications (today: booking approvals for the BU Head)."""
+"""Notifications: addressed to a role (e.g. every BU Head) or to specific users."""
+
+from collections.abc import Iterable
 
 from sqlalchemy.orm import Session
 
@@ -7,7 +9,15 @@ from app.core.errors import ForbiddenError, NotFoundError
 from app.core.roles import Role
 from app.repositories.notifications import NotificationRepository
 
+# Notification types
 RESOURCE_BOOKING_APPROVAL = "resource_booking_approval"
+RESOURCE_BOOKING_APPROVED = "resource_booking_approved"
+RESOURCE_BOOKING_REJECTED = "resource_booking_rejected"
+EXTENSION_REQUESTED = "extension_requested"
+EXTENSION_DECIDED = "extension_decided"
+THRESHOLD_WARNING = "threshold_warning"
+EXECUTION_LOCKED = "execution_locked"
+EXECUTION_RESUMED = "execution_resumed"
 
 
 def notification_output(notification: models.Notification) -> dict:
@@ -25,17 +35,18 @@ def notification_output(notification: models.Notification) -> dict:
     }
 
 
-def create_bu_head_notification(
+def notify_role(
     db: Session,
+    role: str,
     notification_type: str,
     title: str,
     message: str,
     project_id: int | None = None,
     actor_name: str | None = None,
 ) -> models.Notification:
-    """Queue a notification for the BU Head (used by the Lead booking submit in main.py)."""
+    """One notification visible to every user of `role`. Caller commits."""
     notification = models.Notification(
-        recipient_role=Role.BU_HEAD,
+        recipient_role=role,
         notification_type=notification_type,
         title=title,
         message=message,
@@ -45,6 +56,68 @@ def create_bu_head_notification(
     db.add(notification)
     db.flush()
     return notification
+
+
+def notify_users(
+    db: Session,
+    user_ids: Iterable[int | None],
+    role: str,
+    notification_type: str,
+    title: str,
+    message: str,
+    project_id: int | None = None,
+    actor_name: str | None = None,
+) -> None:
+    """One notification per distinct user id (None ids are skipped). Caller commits."""
+    for user_id in sorted({uid for uid in user_ids if uid}):
+        db.add(
+            models.Notification(
+                recipient_role=role,
+                recipient_user_id=user_id,
+                notification_type=notification_type,
+                title=title,
+                message=message,
+                project_id=project_id,
+                actor_name=actor_name,
+            )
+        )
+    db.flush()
+
+
+def project_lead_user_ids(project: models.Project) -> list[int]:
+    """The real Lead accounts assigned to a project (Electrical, Mechanical, BIM)."""
+    ids = (
+        project.project_lead_electrical_user_id,
+        project.project_lead_mechanical_user_id,
+        project.project_lead_bim_user_id,
+    )
+    return [user_id for user_id in ids if user_id]
+
+
+def notify_project_leads(
+    db: Session, project: models.Project, notification_type: str, title: str, message: str, actor_name: str | None
+) -> None:
+    notify_users(
+        db, project_lead_user_ids(project), Role.LEAD, notification_type, title, message, project.id, actor_name
+    )
+
+
+def create_bu_head_notification(
+    db: Session,
+    notification_type: str,
+    title: str,
+    message: str,
+    project_id: int | None = None,
+    actor_name: str | None = None,
+) -> models.Notification:
+    """Queue a notification for the BU Head (used by Lead code in main.py)."""
+    return notify_role(db, Role.BU_HEAD, notification_type, title, message, project_id, actor_name)
+
+
+def is_recipient(notification: models.Notification, user: models.User) -> bool:
+    if notification.recipient_user_id is not None:
+        return notification.recipient_user_id == user.id
+    return notification.recipient_role == user.role
 
 
 class NotificationService:
@@ -59,7 +132,7 @@ class NotificationService:
         notification = self.notifications.get(notification_id)
         if not notification:
             raise NotFoundError("Notification not found.")
-        if notification.recipient_role != user.role and notification.recipient_user_id != user.id:
+        if not is_recipient(notification, user):
             raise ForbiddenError("This notification is not for you.")
         notification.is_read = True
         self.db.commit()

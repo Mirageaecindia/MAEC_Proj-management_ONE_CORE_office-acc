@@ -1,10 +1,13 @@
-import { formatDateTime, formatHours } from '../../../utils/format';
+import { formatDateTime, formatHours, formatPercent } from '../../../utils/format';
 
 const ACTION_TEXT = {
   extension_request: (entry) => `Requested extension of ${formatHours(entry.requested_hours)}`,
   approve_extension: (entry) => `Approved extension of ${formatHours(entry.requested_hours)}`,
   reject_extension: (entry) => `Rejected extension of ${formatHours(entry.requested_hours)}`,
   stop_execution: () => 'Stopped execution',
+  auto_lock: (entry) =>
+    `Timesheets locked automatically at ${formatPercent(entry.consumption_pct)} of the baseline`,
+  resume_execution: () => 'Resumed execution',
 };
 
 function describe(entry) {

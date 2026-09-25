@@ -33,7 +33,7 @@ MAEC Project Management (code name **ProManage**) is an internal web application
 - **Execution.** Engineers move tasks through a status workflow. Their working time on subtasks is tracked automatically.
 - **Control.** Leads approve timesheets and finished tasks. The BU Head watches hours and budget consumption against the threshold, and can approve or reject requests for more hours or stop execution entirely.
 
-The core idea is **governance of effort**: hours are the unit of cost. Every logged hour counts against the baseline, and management intervenes when a discipline exceeds the agreed threshold.
+The core idea is **governance of effort**: hours are the unit of cost. Every logged hour counts against the project's baseline (the BU Head's target effort hours plus approved extensions). Crossing the alert threshold notifies the BU Head and the project's Leads, and reaching 100% locks timesheets automatically until the BU Head approves an extension or resumes execution.
 
 ---
 
@@ -105,10 +105,11 @@ Step by step:
    - The engineer moves statuses forward. A task can be submitted only once all its subtasks are Done.
 5. **Review (Lead).** The Lead approves or rejects timesheet entries (Timeline & Logs), and approves submitted tasks (Task Details).
 6. **Governance (BU Head).**
-   - The Executive Dashboard shows budget burn, hours consumption, threshold status per discipline, an SPI-style index and a monthly chart.
-   - When a discipline exceeds the threshold, the Lead can request an extension of N hours, and the BU Head approves or rejects it.
-   - The BU Head can **Stop the Execution**, which soft-locks timesheets: engineers can't log hours and Leads can't approve them.
-   - Every action is written to the governance audit log.
+   - The Executive Dashboard shows budget burn, hours consumption against the baseline, the governance level (normal / alert / baseline reached), an SPI-style index and a monthly chart.
+   - Reaching the alert threshold notifies the BU Head and the project's Leads. Reaching 100% of the baseline **locks timesheets automatically** and notifies them.
+   - An allocated Lead can request an extension of N hours (the BU Head is notified). Approving it raises the baseline and lifts the lock; the Lead is notified of either decision.
+   - The BU Head can **Stop the Execution** (soft-lock timesheets) and **Resume Execution** at any time. While locked, engineers can't log hours or start tracking, and Leads can't approve.
+   - Every action, including the automatic lock, is written to the governance audit log.
 7. **Oversight (BU Head).** The Project Work Summary shows per-lead and per-engineer contribution. The SharePoint Mirror shows the project's live folder tree and files.
 
 ---
@@ -207,9 +208,9 @@ MAEC_project_management/
         ├── assets/maec-logo.png
         ├── api/               client.js (base URL, bearer token, ApiError), projects/governance/sharepoint.js,
         │                      queryClient.js (TanStack Query defaults, 401 -> logout)
-        ├── hooks/             useProjects, useGovernance, useSharePointMirror, useProjectSelection, queryKeys
+        ├── hooks/             useProjects, useGovernance, useNotifications, useSharePointMirror, useProjectSelection, queryKeys
         ├── components/        MaecHeader (top bar + tabs), PageHeader, ProjectSwitcher, StatCard,
-        │                      MonthlyHoursChart, ConfirmDialog, Feedback (ErrorBanner/Notice/EmptyState)
+        │                      MonthlyHoursChart, ConfirmDialog, Feedback (ErrorBanner/Notice/EmptyState), NotificationBell
         ├── constants/         currencies, SharePoint disciplines
         ├── utils/format.js    Hours, %, money, dates, bytes
         ├── providers/QueryProvider.jsx   Query cache (cleared when the user changes)
@@ -278,15 +279,15 @@ There are no database foreign keys. Relationships are plain integer columns and 
 | `users` | Login accounts | `username` (unique), `password_hash`, `full_name`, `role` (`bu_head`/`lead`/`engineer`), `discipline` (leads), `employee_id` (engineers) |
 | `login_sessions` | Bearer tokens | `token` (unique), `user_id` |
 | `employees` | HR roster (seeded from CSV) | `employee_code`, `name`, `role_title`, `discipline` (= designation) |
-| `projects` | A project and its commercial baseline | `project_name`, `project_code` (unique), `client_organization`, `project_lead` + `project_lead_{electrical,mechanical,bim}` and matching `_user_id` columns, `start_date`, `target_end_date`, `contract_value`, `contract_currency`, `target_effort_hours`, `governance_threshold_pct`, `timesheets_soft_locked`, `extension_status`, `extension_approved_hours`, `sharepoint_disciplines` (JSON list), `sharepoint_site_url` |
+| `projects` | A project and its commercial baseline | `project_name`, `project_code` (unique), `client_organization`, `project_lead` + `project_lead_{electrical,mechanical,bim}` and matching `_user_id` columns, `start_date`, `target_end_date`, `contract_value`, `contract_currency`, `target_effort_hours`, `governance_threshold_pct`, `timesheets_soft_locked`, `lock_reason` (`manual`/`auto`), `governance_alert_level` (last level acted on), `extension_status`, `extension_approved_hours`, `sharepoint_disciplines` (JSON list), `sharepoint_site_url` |
 | `resource_bookings` | Engineer allocated to a project | `project_id`, `employee_id`, `planned_hours`, `utilization_rate` (%), `start_date`, `end_date`, `approval_status` (`draft` → `pending_approval` → `approved`), `submitted_at`, `approved_at` |
 | `wbs_nodes` | Tasks (level 1) and subtasks (level 2) | `project_id`, `parent_id`, `wbs_code`, `task_name`, `phase`, `assigned_lead(_user_id)`, `assigned_engineer_id`, `estimated_hours`, `deliverable_status`, `start_date`, `end_date`, `target_due_date`, `actual_start_datetime`, `actual_end_datetime`, `description`, `severity` |
 | `wbs_node_history` | Status changes and comments per node | `node_id`, `user_name`, `action` (`status_change`/`comment`), `old_status`, `new_status`, `comment` |
 | `time_log_entries` | Weekly timesheet row (one per project × task × employee × week) | `week_start_date` (Monday), `mon_hours` … `sun_hours`, `approval_status` (`pending_review`/`approved`/`rejected`), `reviewed_by`, `reviewed_at` |
 | `time_sessions` | Automatic tracking session on a subtask | `subtask_id`, `task_id`, `employee_id`, `login_at`, `logout_at`, `active_seconds`, `status` (`active`/`ended`) |
 | `extension_requests` | Lead's request for extra hours | `requested_hours`, `justification`, `status` (`pending`/`approved`/`rejected`), `decision_comments`, `decided_by`, `decided_at` |
-| `governance_actions` | Audit log of governance events | `action` (`extension_request`, `approve_extension`, `reject_extension`, `stop_execution`), plus a snapshot: `discipline`, `consumption_pct`, `threshold_pct`, `consumption_hours`, `comments`, `created_by`, `requested_hours` |
-| `notifications` | Role-targeted notifications | `recipient_role`, `recipient_user_id`, `notification_type` (only `resource_booking_approval` today), `title`, `message`, `project_id`, `is_read` |
+| `governance_actions` | Audit log of governance events | `action` (`extension_request`, `approve_extension`, `reject_extension`, `stop_execution`, `resume_execution`, `auto_lock` by "System"), plus a snapshot: `discipline`, `consumption_pct`, `threshold_pct`, `consumption_hours`, `comments`, `created_by`, `requested_hours` |
+| `notifications` | Role-targeted notifications | `recipient_role`, `recipient_user_id`, `notification_type` (`resource_booking_approval`/`_approved`/`_rejected`, `extension_requested`/`_decided`, `threshold_warning`, `execution_locked`, `execution_resumed`); `recipient_user_id` set = personal, null = everyone with `recipient_role`, `title`, `message`, `project_id`, `is_read` |
 | `gantt_tasks` | **Legacy**, replaced by `wbs_nodes` | Still has endpoints; unused by the UI |
 | `project_leads` | **Legacy** lead lookup, replaced by `users` with role `lead` | Seeded, unused |
 
@@ -368,21 +369,24 @@ stateDiagram-v2
 - Draft → Lead **Submit** (every booking on the project becomes `pending_approval`, plus a notification to the BU Head) → BU Head **Approve** (every booking becomes `approved`) or **Reject** (every booking goes back to `draft` so the Lead can adjust and re-submit). Either decision marks the notification read.
 - **Approval grants the booked engineers access to the project** (its WBS, timesheets and dashboard). Editing an approved booking doesn't reset its approval yet (see §13).
 
-### 7.7 Governance calculations (`executive_dashboard_data`)
+### 7.7 Governance calculations (`app/services/metrics.py`, rules in `app/domain/governance.py`)
 | Figure | Formula |
 |---|---|
-| Scheduled (baseline) hours | Sum of `estimated_hours` over all WBS nodes of the project |
+| Baseline hours | `target_effort_hours` + `extension_approved_hours` (whole project) |
+| WBS planned hours | Sum of `estimated_hours` over all WBS nodes (shown for comparison; `wbs_exceeds_target` flags a WBS larger than the target) |
 | Logged hours | All timesheet hours (approved + pending), Mon–Fri |
-| Consumption % | logged ÷ scheduled × 100 |
-| Per-discipline consumption | Grouped by the engineer's `employees.discipline` (which is their designation); baseline = estimated hours of that engineer's nodes |
-| Threshold status | `exceeded` when any discipline's consumption % is above `governance_threshold_pct` |
-| SPI (shown as "Schedule Index") | approved hours ÷ scheduled hours (an earned-hours ratio, not a date-based SPI) |
-| Budget burn | contract value × (logged ÷ scheduled) |
-| Monthly chart | Each node's estimated hours spread evenly over the months between its start and due dates (planned), against logged hours per month, split into normal and over-threshold |
+| Consumption % | logged ÷ baseline × 100 |
+| Governance level | `normal`; `warning` at ≥ `governance_threshold_pct`; `hard_stop` at ≥ 100%. No baseline (target not set) → not configured, always normal |
+| Per-discipline consumption | Informational: grouped by the engineer's `employees.discipline` (their designation) against the estimated hours of their nodes |
+| SPI (shown as "Schedule Index") | approved hours ÷ WBS planned hours (an earned-hours ratio, not a date-based SPI) |
+| Budget burn | contract value × (logged ÷ target effort hours) |
+| Monthly chart | Planned: each node's estimated hours spread over its months. Logged hours per month are split into normal and "exceeded" at the point cumulative logged hours pass baseline × threshold |
 
-**Extension requests:** a Lead requests +N hours with a justification, and a project can have only one pending request at a time. The BU Head approves or rejects it. On approval the hours are added to `extension_approved_hours`, but that value is not yet used in any calculation. Every step writes a `governance_actions` audit row containing a snapshot of the current consumption.
+**Automatic enforcement** (`app/services/governance_monitor.py`): after every change to logged hours (manual timesheet entry, end of a tracked session) and after an extension decision, the project is re-evaluated. Each level is acted on once, on the way **up**: reaching `warning` notifies the BU Head and the project's Leads; reaching `hard_stop` sets `timesheets_soft_locked` with `lock_reason = auto`, writes an `auto_lock` audit row and notifies them. `governance_alert_level` remembers the last level, so a manual resume above 100% is not re-locked by the next hour, and falling back (after an extension) re-arms the alerts.
 
-**Stop execution:** the BU Head must enter a comment. It sets `timesheets_soft_locked = true` and writes an audit row. There is currently no way to unlock.
+**Extension requests:** an allocated Lead requests +N hours with a justification; one pending request per project; the BU Head is notified. Approving adds the hours to `extension_approved_hours` (raising the baseline), lifts any lock and notifies the Lead; rejecting notifies the Lead and keeps any lock. Every step writes a `governance_actions` audit row with a consumption snapshot.
+
+**Stop / resume execution:** Stop needs a comment, sets the lock with `lock_reason = manual` and notifies the Leads; stopping an already locked project is refused (409). Resume (comment optional) lifts a manual or automatic lock, writes a `resume_execution` audit row and notifies the Leads; resuming an unlocked project is refused (409).
 
 ---
 
@@ -420,7 +424,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | POST | `/api/projects/{id}/resource-bookings/submit` | Lead | Submit for BU Head approval |
 | POST | `/api/projects/{id}/resource-bookings/approve` | BU Head | Approve all bookings of the project (grants engineer access) |
 | POST | `/api/projects/{id}/resource-bookings/reject` | BU Head | Send a pending submission back to draft |
-| GET | `/api/notifications` | all | Latest 50 notifications for the user's role or user ID |
+| GET | `/api/notifications` | all | Latest 50: the user's personal notifications plus role-wide ones (shown in the header bell for BU Head and Lead) |
 | POST | `/api/notifications/{id}/read` | recipient | Mark as read |
 
 **WBS and tasks**
@@ -459,7 +463,8 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | GET | `/api/engineer-performance` | Engineer | Older engineer summary (unused by the UI) |
 | POST | `/api/projects/{id}/extension-requests` | Lead | Request +N hours |
 | POST | `/api/projects/{id}/extension-requests/{request_id}/decision` | BU Head | `{decision: approve\|reject, comments}` |
-| POST | `/api/projects/{id}/governance/stop-execution` | BU Head | Soft-lock timesheets (comment required) |
+| POST | `/api/projects/{id}/governance/stop-execution` | BU Head | Soft-lock timesheets (comment required; 409 if already locked) |
+| POST | `/api/projects/{id}/governance/resume-execution` | BU Head | Lift a manual or automatic lock (`{comments}` optional; 409 if not locked) |
 | POST | `/api/projects/{id}/governance/request-extension` | Lead | **Legacy** duplicate of `POST extension-requests` (the BU Head legacy `approve-extension` / `reject-extension` were removed in Phase 1) |
 
 **Utility:** `GET /health` → `{status: ok}` · `GET /api/server-date` → the server's local date and time.
@@ -518,7 +523,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | `/login` | `pages/LoginPage.jsx` | public | Sign-in form | `auth/login` |
 | `/created-projects` | `features/bu-head/CreatedProjectsPage.jsx` | BU Head | Project cards, search, delete with confirmation | `GET/DELETE projects` |
 | `/create-project` | `features/bu-head/CreateProjectPage.jsx` | BU Head | Project and commercial baseline form, SharePoint discipline checkboxes, threshold slider | `project-leads`, `POST projects` |
-| `/executive-dashboard` | `features/bu-head/ExecutiveDashboardPage.jsx` | BU Head | 4 KPI cards, monthly chart, extension review (approve/reject), Stop Execution, audit log; NEXT goes to Work Summary | `executive-dashboard`, `extension-requests/…/decision`, `governance/stop-execution` |
+| `/executive-dashboard` | `features/bu-head/ExecutiveDashboardPage.jsx` | BU Head | 4 KPI cards (incl. governance level), monthly chart, extension review (approve/reject), Stop / Resume Execution, audit log; NEXT goes to Work Summary | `executive-dashboard`, `extension-requests/…/decision`, `governance/stop-execution`, `governance/resume-execution` |
 | `/executive-dashboard` | `pages/lead/ExecutiveDashboardPage.jsx` | Lead | Same KPIs, plus the extension request form and request status | `executive-dashboard`, `POST extension-requests` |
 | `/project-work-summary` | `features/bu-head/ProjectWorkSummaryPage.jsx` | BU Head | Lead oversight table, engineer contribution per task | `work-summary` |
 | `/resource-booking` | `pages/shared/ResourceBookingPage.jsx` | Lead, BU Head | Booking table, assign/edit/delete (Lead), Submit (Lead), Approve (BU Head), notification banner, engineer assignment timeline; refreshes every 5 s for the BU Head | `resource-bookings*`, `resource-summary`, `resource-bookings/gantt`, `employees`, `notifications` |
@@ -577,12 +582,10 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 - Lead WBS create/update/delete have no project-access check (Lead code). Extension requests, booking submission and the Executive Dashboard are now limited to Leads allocated to the project.
 
 **BU Head / governance**
-- `target_effort_hours` (the BU Head's baseline) and `extension_approved_hours` are stored but never used. Consumption is measured against the WBS estimate total.
 - Budget burn is proportional to hours, not real cost. There's no rate card, and the resource summary returns hardcoded zeros for commercial figures.
 - "Discipline" in governance is the employee's designation, not Electrical, Mechanical or BIM.
-- There's no resume after Stop Execution. Stop can be repeated. Crossing the threshold neither alerts nor locks automatically.
-- Extension requests don't notify the BU Head, and decisions don't notify the Lead.
-- Booking approval has no reject step, doesn't restrict assignment, and isn't reset when a booking is edited.
+- Which hours count toward consumption (all logged vs approved only) is still to be decided; today all logged hours count.
+- Booking approval isn't reset when a booking is edited, and the Resource Booking page has no Reject button yet (the API exists).
 - Work Summary counts only the legacy "Completed" status, so completion shows 0 for current data.
 - Timeline & Logs is effectively empty for the BU Head (phase bars and approval states only load for Lead and Engineer). The Gantt viewport is fixed to Sep–Dec 2026 and leaves out the Submission phase.
 - The Create Project lead dropdowns are empty until leads have a discipline (`create_user.py` can't set one). A SharePoint failure message is lost because the page redirects straight after saving.
@@ -608,7 +611,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | 3 | SharePoint rebuild: `DocumentStorage` interface, resilient Graph client, background provisioning + retry, folder IDs stored, lazy mirror with subfolder files | |
 | 4 | Project lifecycle: lead discipline fix, edit project, end date/scope/SOW upload, status and archive | |
 | 5 | Metrics engine: one aggregate-SQL metrics service, correct baseline (effort + extensions), status normalization, discipline mapping, rate card | |
-| 6 | Governance workflow: states and resume, threshold policy (alert/lock), extension effects, notifications, unified audit | |
+| 6 | Governance workflow: states and resume, threshold policy (alert/lock), extension effects, notifications, unified audit | **Done**: baseline = target + extensions, alert at threshold, auto-lock at 100%, resume, notification bell |
 | 7 | Resource approval: reject/send back, re-approval on edit, real summary figures | |
 | 8 | BU Head dashboards: portfolio view, dashboard and work-summary fixes, BU Timeline view, exports | |
 | 9 | Hardening and release: session expiry, rate limiting, logging, Postgres decision, single-port production build | |
@@ -630,7 +633,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | **Consumption %** | Logged hours as a percentage of baseline hours |
 | **Threshold** | Consumption % above which governance action is required (default 80%) |
 | **Extension** | Extra hours requested by a Lead and approved by the BU Head |
-| **Soft lock / Stop Execution** | BU Head action that blocks logging and approving timesheets |
+| **Soft lock / Stop Execution** | Blocks logging, tracking and approving timesheets: set by the BU Head (manual) or automatically at 100% of the baseline; lifted by Resume or an approved extension |
 | **SPI** | Schedule Performance Index. Here, approved hours ÷ baseline hours |
 | **Utilization / booking %** | Share of an engineer's capacity booked on a project |
 | **Bench** | Engineer capacity not booked on any project |

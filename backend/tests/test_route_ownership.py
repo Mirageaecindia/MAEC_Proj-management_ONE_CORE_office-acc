@@ -37,6 +37,8 @@ SHARED_HELPERS = {
     "decide_extension_request",
     "record_governance_action",
     "EXTENSION_STATUS_LABELS",
+    "enforce_governance",
+    "upgrade_schema",
 }
 
 HTTP_METHODS = {"get", "post", "put", "delete", "patch"}

@@ -2,43 +2,14 @@
 
 Reference scenario (see `governed`): two WBS nodes of 40h + 60h assigned to one
 engineer whose discipline is "Mechanical Engineer"; 30h approved + 20h pending
-logged. Contract 100,000 USD, threshold 80%, target effort 500h.
+logged. Contract 100,000 USD, threshold 80%, target effort 100h, so the
+governance baseline is 100h (target + approved extensions) and usage is 50%.
+The alert/auto-lock workflow itself is covered in test_governance_workflow.py.
 """
 
 from datetime import date
 
-import pytest
-
 import models
-
-
-@pytest.fixture
-def governed(client, make, world):
-    project = world.create_project(
-        total_contract_value=100000, alert_override_threshold_pct=80, target_effort_hours=500
-    )
-    project_id = project["id"]
-    # The engineer must be booked and the booking APPROVED before they can log
-    # hours (access is only granted by BU Head approval of the assignment).
-    booking = client.post(
-        f"/api/projects/{project_id}/resource-bookings",
-        json={
-            "employee_id": world.emp1.id,
-            "planned_hours": 100,
-            "utilization_rate": 50,
-            "start_date": "2026-09-01",
-            "end_date": "2026-09-30",
-        },
-        headers=world.lead_h,
-    )
-    assert booking.status_code == 200, booking.text
-    assert client.post(f"/api/projects/{project_id}/resource-bookings/submit", headers=world.lead_h).status_code == 200
-    assert client.post(f"/api/projects/{project_id}/resource-bookings/approve", headers=world.bu_h).status_code == 200
-    node_a = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, estimated_hours=40)
-    node_b = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, estimated_hours=60)
-    make.time_entry(project_id, node_a, world.emp1, 30, status="approved")
-    pending = make.time_entry(project_id, node_b, world.emp1, 20, status="pending_review")
-    return project_id, node_a, node_b, pending
 
 
 def _dashboard(client, headers, project_id):
@@ -57,6 +28,9 @@ def test_dashboard_figures_for_reference_scenario(client, world, governed):
 
     assert data["summary"] == {
         "scheduled_hours": 100,
+        "baseline_hours": 100.0,
+        "target_effort_hours": 100.0,
+        "extension_approved_hours": 0.0,
         "approved_hours": 30.0,
         "logged_hours": 50.0,
         "pending_hours": 20.0,
@@ -72,6 +46,8 @@ def test_dashboard_figures_for_reference_scenario(client, world, governed):
     }
     assert data["spi"] == {"value": 0.3, "note": "Behind plan — 30 earned of 100 planned baseline hours."}
     assert data["governance_status"]["status"] == "normal"
+    assert data["governance_status"]["level"] == "normal"
+    assert data["governance_status"]["baseline_hours"] == 100.0
     assert data["governance_status"]["max_discipline"] == "Mechanical Engineer"
     assert data["governance_status"]["soft_locked"] is False
     assert data["exceptions"] == []
@@ -86,28 +62,42 @@ def test_dashboard_figures_for_reference_scenario(client, world, governed):
     ]
 
 
-def test_consumption_over_threshold_raises_discipline_exception(client, make, world, governed):
+def test_project_at_alert_threshold_reports_warning_and_splits_the_chart(client, make, world, governed):
     project_id, _, node_b, _ = governed
     make.time_entry(project_id, node_b, world.emp1, 40, status="approved", week=date(2026, 9, 14))
 
     data = _dashboard(client, world.bu_h, project_id)
 
-    assert data["governance_status"]["status"] == "exceeded"
-    assert data["governance_status"]["max_discipline_pct"] == 90.0
+    assert data["governance_status"]["status"] == "exceeded"  # at/above the alert threshold
+    assert data["governance_status"]["level"] == "warning"
+    assert data["governance_status"]["consumption_pct"] == 90.0
+    # Monthly chart: hours after cumulative usage passed 80h (80% of 100h) count as exceeded.
+    assert data["monthly_data"][0]["normal_consumption"] == 80.0
+    assert data["monthly_data"][0]["exceeded_threshold"] == 10.0
+    # The per-discipline breakdown stays informational.
     assert [e["discipline"] for e in data["exceptions"]] == ["Mechanical Engineer"]
-    assert data["monthly_data"][0]["exceeded_threshold"] == 90.0
-    assert data["monthly_data"][0]["normal_consumption"] == 0.0
 
 
-def test_baseline_ignores_bu_head_target_effort_hours(client, world, governed):
-    # KNOWN (roadmap 5.2): consumption is measured against the WBS estimate
-    # total (100h), not the BU Head's 500h target effort baseline.
+def test_baseline_is_bu_head_target_plus_approved_extensions(client, db, world, governed):
+    # Roadmap 5.2 (fixed): the BU Head's target effort hours, not the WBS total.
     project_id, *_ = governed
+    project = db.get(models.Project, project_id)
+    project.target_effort_hours = 500
+    project.extension_approved_hours = 100
+    db.commit()
 
     data = _dashboard(client, world.bu_h, project_id)
 
-    assert data["hours_consumption"]["scheduled"] == 100
-    assert data["hours_consumption"]["percent"] == 50.0
+    assert data["hours_consumption"]["scheduled"] == 600.0  # 500 target + 100 approved extensions
+    assert data["hours_consumption"]["wbs_planned"] == 100
+    assert data["hours_consumption"]["percent"] == 8.3  # 50 / 600
+    assert data["governance_status"]["wbs_exceeds_target"] is False
+    assert data["commercial_budget_burn"]["consumed"] == 10000.0  # contract x 50 / 500 target
+
+    project.target_effort_hours = 80
+    project.extension_approved_hours = None
+    db.commit()
+    assert _dashboard(client, world.bu_h, project_id)["governance_status"]["wbs_exceeds_target"] is True
 
 
 def test_dashboard_access(client, world, governed):
@@ -159,18 +149,33 @@ def test_stop_execution_soft_locks_timesheets(client, db, world, governed):
     assert approve_hours.status_code == 409
 
 
-def test_stop_execution_is_not_idempotent_and_cannot_be_undone(client, db, world, governed):
-    # KNOWN (roadmap 6.1): repeated stops each add an audit row, and there is
-    # no resume endpoint.
-    project_id, *_ = governed
-    url = f"/api/projects/{project_id}/governance/stop-execution"
+def test_stop_is_refused_when_already_stopped_and_resume_reopens(client, db, world, governed):
+    # Roadmap 6.1 (fixed): stop is idempotent-safe and execution can be resumed.
+    project_id, node_a, _, _ = governed
+    stop_url = f"/api/projects/{project_id}/governance/stop-execution"
+    resume_url = f"/api/projects/{project_id}/governance/resume-execution"
 
-    client.post(url, json={"comments": "first"}, headers=world.bu_h)
-    client.post(url, json={"comments": "second"}, headers=world.bu_h)
+    assert client.post(resume_url, json={}, headers=world.bu_h).status_code == 409  # not stopped yet
+    assert client.post(stop_url, json={"comments": "first"}, headers=world.bu_h).status_code == 200
+    assert client.post(stop_url, json={"comments": "second"}, headers=world.bu_h).status_code == 409
+    assert db.get(models.Project, project_id).lock_reason == "manual"
 
-    assert db.query(models.GovernanceAction).filter_by(project_id=project_id, action="stop_execution").count() == 2
-    resume = client.post(f"/api/projects/{project_id}/governance/resume-execution", json={}, headers=world.bu_h)
-    assert resume.status_code in (404, 405)
+    assert client.post(resume_url, json={"comments": "Budget agreed"}, headers=world.lead_h).status_code == 403
+    resumed = client.post(resume_url, json={"comments": "Budget agreed"}, headers=world.bu_h)
+
+    assert resumed.status_code == 200
+    assert resumed.json()["action"] == "resume_execution"
+    assert resumed.json()["comments"] == "Budget agreed"
+    db.expire_all()
+    project = db.get(models.Project, project_id)
+    assert project.timesheets_soft_locked is False
+    assert project.lock_reason is None
+    log_hours = client.post(
+        f"/api/projects/{project_id}/timesheet-entries",
+        json={"task_id": node_a.id, "week_start_date": "2026-09-21", "mon_hours": 2},
+        headers=world.eng_h,
+    )
+    assert log_hours.status_code == 200
 
 
 # --- Extension requests -----------------------------------------------------------------
@@ -203,7 +208,7 @@ def test_extension_request_appears_in_bu_head_queue(client, world, governed):
     assert _request_extension(client, world.lead_h, project_id, hours=0).status_code == 422
 
 
-def test_approving_extension_records_hours_but_does_not_change_consumption(client, db, world, governed):
+def test_approving_extension_raises_the_baseline(client, db, world, governed):
     project_id, *_ = governed
     request_id = _request_extension(client, world.lead_h, project_id).json()["id"]
     url = f"/api/projects/{project_id}/extension-requests/{request_id}/decision"
@@ -220,8 +225,9 @@ def test_approving_extension_records_hours_but_does_not_change_consumption(clien
     data = _dashboard(client, world.bu_h, project_id)
     assert data["current_extension_request"] is None
     assert [a["action"] for a in data["governance_actions"]] == ["approve_extension", "extension_request"]
-    # KNOWN (roadmap 5.2 / 6.3): approved hours never reach the baseline.
-    assert data["summary"]["consumption_pct"] == 50.0
+    # Roadmap 5.2 / 6.3 (fixed): approved hours raise the baseline (100 + 40).
+    assert data["summary"]["baseline_hours"] == 140.0
+    assert data["summary"]["consumption_pct"] == 35.7
     assert client.post(url, json={"decision": "approve"}, headers=world.bu_h).status_code == 409
 
 

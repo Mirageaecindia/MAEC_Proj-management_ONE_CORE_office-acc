@@ -8,13 +8,15 @@ class NotificationRepository:
         self.db = db
 
     def recent_for(self, user: models.User, limit: int = 50) -> list[models.Notification]:
-        """Notifications addressed to the user's role or to the user directly, newest first."""
+        """Notifications for this user, newest first: those addressed to them
+        personally, plus role-wide ones (no recipient user) for their role."""
+        N = models.Notification
         return (
-            self.db.query(models.Notification)
+            self.db.query(N)
             .filter(
-                (models.Notification.recipient_role == user.role) | (models.Notification.recipient_user_id == user.id)
+                (N.recipient_user_id == user.id) | (N.recipient_user_id.is_(None) & (N.recipient_role == user.role))
             )
-            .order_by(models.Notification.created_at.desc(), models.Notification.id.desc())
+            .order_by(N.created_at.desc(), N.id.desc())
             .limit(limit)
             .all()
         )

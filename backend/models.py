@@ -45,6 +45,11 @@ class Project(Base):
     contract_currency = Column(String(10), nullable=False, default="USD")
     governance_threshold_pct = Column(Float, nullable=False, default=80)
     timesheets_soft_locked = Column(Boolean, nullable=False, default=False)
+    # Governance state (app/domain/governance.py): why timesheets are locked
+    # ('manual' | 'auto') and the last alert level notified, so each level is
+    # announced once when crossed rather than on every logged hour.
+    lock_reason = Column(String(20), nullable=True)
+    governance_alert_level = Column(String(20), nullable=True)
     extension_status = Column(String(20), nullable=True, index=True)
     extension_approved_hours = Column(Float, nullable=True)
     sharepoint_site_url = Column(String(500), nullable=True)

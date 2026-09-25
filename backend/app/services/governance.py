@@ -1,4 +1,4 @@
-"""BU Head governance: executive dashboard, extension decisions, stop execution.
+"""BU Head governance: executive dashboard, extension decisions, stop/resume execution.
 
 Every governance event is persisted as a GovernanceAction carrying a snapshot
 of the project's consumption at that moment (the audit log).
@@ -12,9 +12,12 @@ import models
 import schemas
 from app.core.errors import NO_PROJECT_ACCESS, ConflictError, ForbiddenError, NotFoundError
 from app.core.roles import Role
+from app.domain.governance import LOCK_MANUAL
 from app.repositories.governance import GovernanceRepository
 from app.repositories.projects import ProjectRepository
+from app.services import notifications as notify
 from app.services.access import user_can_access_project
+from app.services.governance_monitor import GovernanceMonitor
 from app.services.metrics import ProjectMetricsService
 
 PROJECT_NOT_FOUND = "Project not found."
@@ -77,11 +80,13 @@ class GovernanceService:
         projects: ProjectRepository,
         governance: GovernanceRepository,
         metrics: ProjectMetricsService,
+        monitor: GovernanceMonitor,
     ):
         self.db = db
         self.projects = projects
         self.governance = governance
         self.metrics = metrics
+        self.monitor = monitor
 
     def executive_dashboard(self, user: models.User, project_id: int) -> dict:
         project = self._project(project_id)
@@ -131,6 +136,22 @@ class GovernanceService:
                 requested_hours=request.requested_hours,
             )
         )
+        if status == "approved" and project.timesheets_soft_locked:
+            # BU Head decision: an approved extension resumes a stopped project.
+            self._resume(project, decided_by, "Resumed automatically: extension approved.")
+        # The baseline may have risen: re-arm or re-evaluate alerts.
+        self.monitor.evaluate(project)
+        notify.notify_users(
+            self.db,
+            [request.requested_by_user_id],
+            Role.LEAD,
+            notify.EXTENSION_DECIDED,
+            f"Extension {status}",
+            f"Your request for {request.requested_hours:g} extra hours on '{project.project_name}' was {status}."
+            + (f" Comment: {comments}" if comments else ""),
+            project.id,
+            decided_by,
+        )
         self.db.commit()
         self.db.refresh(request)
         return extension_request_output(self.db, request, project)
@@ -139,17 +160,50 @@ class GovernanceService:
         self, user: models.User, project_id: int, payload: schemas.GovernanceActionBase
     ) -> models.GovernanceAction:
         project = self._project(project_id)
+        if project.timesheets_soft_locked:
+            raise ConflictError("Execution is already stopped for this project.")
+        actor = user.full_name or user.username
         action = self._audit_action(
-            project,
-            "stop_execution",
-            discipline=payload.discipline,
-            comments=payload.comments,
-            created_by=user.full_name,
+            project, "stop_execution", discipline=payload.discipline, comments=payload.comments, created_by=actor
         )
         self.governance.add(action)
         project.timesheets_soft_locked = True
+        project.lock_reason = LOCK_MANUAL
+        notify.notify_project_leads(
+            self.db,
+            project,
+            notify.EXECUTION_LOCKED,
+            "Execution stopped by BU Head",
+            f"Timesheets on '{project.project_name}' are locked. Reason: {payload.comments}",
+            actor,
+        )
         self.db.commit()
         self.db.refresh(action)
+        return action
+
+    def resume_execution(self, user: models.User, project_id: int, comments: str | None) -> models.GovernanceAction:
+        project = self._project(project_id)
+        if not project.timesheets_soft_locked:
+            raise ConflictError("Execution is not stopped for this project.")
+        action = self._resume(project, user.full_name or user.username, comments)
+        self.db.commit()
+        self.db.refresh(action)
+        return action
+
+    def _resume(self, project: models.Project, actor: str, comments: str | None) -> models.GovernanceAction:
+        """Unlock timesheets, audit it and tell the project's Leads. The caller commits."""
+        project.timesheets_soft_locked = False
+        project.lock_reason = None
+        action = self._audit_action(project, "resume_execution", comments=comments, created_by=actor)
+        self.governance.add(action)
+        notify.notify_project_leads(
+            self.db,
+            project,
+            notify.EXECUTION_RESUMED,
+            "Execution resumed",
+            f"Timesheets on '{project.project_name}' are open again." + (f" {comments}" if comments else ""),
+            actor,
+        )
         return action
 
     def _project(self, project_id: int) -> models.Project:
@@ -165,7 +219,7 @@ class GovernanceService:
             project_id=project.id,
             action=action,
             discipline=discipline or status["governance_status"]["max_discipline"],
-            consumption_pct=status["governance_status"]["max_discipline_pct"],
+            consumption_pct=status["governance_status"]["consumption_pct"],
             threshold_pct=project.governance_threshold_pct,
             consumption_hours=status["summary"]["logged_hours"],
             **fields,

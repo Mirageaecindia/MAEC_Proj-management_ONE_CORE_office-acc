@@ -24,6 +24,7 @@ from auth import get_current_user
 from database import Base, SessionLocal, engine, get_db
 from app.api import api_router
 from app.core.errors import register_exception_handlers
+from app.core.schema_upgrades import upgrade_schema
 from app.core.security import require_role
 from app.domain.calendar import distribute_hours_over_months as _distribute_hours_over_months
 from app.domain.calendar import month_key as _get_month_key
@@ -37,7 +38,8 @@ from app.services.access import (
 from app.services.booking_approval import BOOKING_APPROVAL_LABELS, booking_approval_status
 from app.services.governance import extension_request_output, find_pending_extension_request
 from app.services.metrics import executive_dashboard_data
-from app.services.notifications import create_bu_head_notification
+from app.services.governance_monitor import enforce_governance
+from app.services.notifications import EXTENSION_REQUESTED, create_bu_head_notification
 
 logger = logging.getLogger(__name__)
 
@@ -308,6 +310,7 @@ def add_resource_booking_approval_columns():
 
 
 add_resource_booking_approval_columns()
+upgrade_schema(engine)  # app-owned column additions (app/core/schema_upgrades.py)
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -412,7 +415,7 @@ def create_extension_request(
         project_id=project.id,
         action="extension_request",
         discipline=data["governance_status"]["max_discipline"],
-        consumption_pct=data["governance_status"]["max_discipline_pct"],
+        consumption_pct=data["governance_status"]["consumption_pct"],
         threshold_pct=project.governance_threshold_pct,
         consumption_hours=data["summary"]["logged_hours"],
         comments=justification,
@@ -422,6 +425,14 @@ def create_extension_request(
     )
     project.extension_status = "pending"
     db.add(action)
+    create_bu_head_notification(
+        db,
+        EXTENSION_REQUESTED,
+        "Extension request pending approval",
+        f"{user.full_name} requested {requested_hours:g} extra hours on '{project.project_name}'.",
+        project_id=project.id,
+        actor_name=user.full_name,
+    )
     db.commit()
     db.refresh(request)
     return request
@@ -2016,6 +2027,7 @@ def submit_time_log(
         db.add(entry)
     db.commit()
     db.refresh(entry)
+    enforce_governance(db, project_id)  # alerts / auto-lock at 100% of the baseline
     return time_entry_output(db, entry)
 
 
@@ -2204,6 +2216,12 @@ def start_subtask_tracking(
         )
     if not node_assigned_to_engineer(node, user):
         raise HTTPException(status_code=403, detail="You may only track working time on subtasks assigned to you.")
+    project = db.query(models.Project).filter_by(id=node.project_id).first()
+    if project and project.timesheets_soft_locked:
+        raise HTTPException(
+            status_code=409,
+            detail="Timesheets are soft-locked by the BU Head — working time cannot be tracked.",
+        )
     existing = db.query(models.TimeSession).filter_by(employee_id=user.employee_id, status="active").first()
     if existing:
         raise HTTPException(
@@ -2288,6 +2306,7 @@ def end_subtask_tracking(
     work_date = session.login_at.date() if session.login_at else today
     upsert_subtask_time_log(db, session.project_id, session.subtask_id, session.employee_id, work_date, final_seconds)
     db.commit()
+    enforce_governance(db, session.project_id)  # alerts / auto-lock at 100% of the baseline
     db.refresh(session)
     total = engineer_active_seconds_on(db, user.employee_id, today)
     return {

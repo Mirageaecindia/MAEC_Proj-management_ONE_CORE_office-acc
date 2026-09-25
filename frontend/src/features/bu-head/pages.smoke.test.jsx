@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
+import { NotificationBell } from '../../components/NotificationBell';
 import { SharePointMirrorPage } from '../sharepoint/SharePointMirrorPage';
 import { CreatedProjectsPage } from './CreatedProjectsPage';
 import { CreateProjectPage } from './CreateProjectPage';
@@ -33,9 +34,14 @@ const DASHBOARD = {
   project: { id: 1, project_name: 'Hotel Tower', contract_currency: 'USD' },
   summary: { scheduled_hours: 100, logged_hours: 90, approved_hours: 70, pending_hours: 20 },
   commercial_budget_burn: { currency: 'USD', total: 100000, consumed: 90000, remaining: 10000, percent: 90 },
-  hours_consumption: { hours: 90, scheduled: 100, approved: 70, pending: 20, percent: 90 },
+  hours_consumption: { hours: 90, scheduled: 100, wbs_planned: 120, approved: 70, pending: 20, percent: 90 },
   governance_status: {
     status: 'exceeded',
+    level: 'warning',
+    configured: true,
+    baseline_hours: 100,
+    logged_hours: 90,
+    lock_reason: null,
     threshold_pct: 80,
     consumption_pct: 90,
     max_discipline_pct: 90,
@@ -113,8 +119,26 @@ const MIRROR = {
   target_location: 'https://sp/hotel-tower',
 };
 
+const NOTIFICATIONS = [
+  {
+    id: 3,
+    notification_type: 'threshold_warning',
+    title: 'Alert threshold reached',
+    message: "'Hotel Tower' has used 90 of 100 baseline hours (90%).",
+    project_id: 1,
+    is_read: false,
+    created_at: '2026-09-21T09:00:00Z',
+  },
+  { id: 2, title: 'Old notice', message: 'Seen already', project_id: 1, is_read: true, created_at: null },
+];
+
+let dashboard = DASHBOARD;
+
 const ROUTES = [
-  [/\/api\/projects\/1\/executive-dashboard$/, DASHBOARD],
+  [/\/api\/notifications$/, NOTIFICATIONS],
+  [/\/api\/notifications\/3\/read$/, null],
+  [/\/api\/projects\/1\/governance\/resume-execution$/, { id: 11, action: 'resume_execution' }],
+  [/\/api\/projects\/1\/executive-dashboard$/, () => dashboard],
   [/\/api\/projects\/1\/work-summary$/, WORK_SUMMARY],
   [/\/api\/projects\/1\/sharepoint-mirror$/, MIRROR],
   [/\/api\/project-leads/, [{ id: 2, name: 'Anita Kumar', title: 'Electrical' }]],
@@ -123,7 +147,8 @@ const ROUTES = [
 
 function fakeApi(url) {
   const match = ROUTES.find(([pattern]) => pattern.test(url));
-  const [status, body] = match ? [200, match[1]] : [404, { detail: `No fixture for ${url}` }];
+  const fixture = match && (typeof match[1] === 'function' ? match[1]() : match[1]);
+  const [status, body] = match ? [200, fixture] : [404, { detail: `No fixture for ${url}` }];
   return Promise.resolve(new Response(JSON.stringify(body), { status }));
 }
 
@@ -139,6 +164,7 @@ function renderAt(ui, route) {
 describe('BU Head pages render with API data', () => {
   beforeEach(() => vi.stubGlobal('fetch', vi.fn(fakeApi)));
   afterEach(() => {
+    dashboard = DASHBOARD;
     cleanup();
     vi.unstubAllGlobals();
   });
@@ -160,12 +186,60 @@ describe('BU Head pages render with API data', () => {
 
   it('Executive Dashboard shows KPIs, the pending request and the audit log', async () => {
     renderAt(<ExecutiveDashboardPage />, '/executive-dashboard?projectId=1');
-    expect(await screen.findByText('EXCEEDED (90.0%)')).toBeTruthy();
+    expect(await screen.findByText('ALERT (90.0%)')).toBeTruthy();
+    expect(screen.getByText('Alert Threshold Reached')).toBeTruthy();
+    expect(screen.getByText(/baseline \(WBS 120.0 Hrs\)/)).toBeTruthy();
     expect(screen.getByText('$90,000.00')).toBeTruthy();
     expect(screen.getByText('Scope creep')).toBeTruthy();
     expect(screen.getByText('Sep 2026')).toBeTruthy();
     expect(screen.getByText(/Requested extension of 40.0 Hrs/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Approve Extension' }).disabled).toBe(false);
+    expect(screen.getByRole('button', { name: 'Stop the Execution' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Resume Execution' })).toBeNull();
+  });
+
+  it('Executive Dashboard offers Resume instead of Stop while timesheets are locked', async () => {
+    dashboard = {
+      ...DASHBOARD,
+      governance_status: {
+        ...DASHBOARD.governance_status,
+        level: 'hard_stop',
+        consumption_pct: 100,
+        logged_hours: 100,
+        soft_locked: true,
+        lock_reason: 'auto',
+      },
+    };
+    renderAt(<ExecutiveDashboardPage />, '/executive-dashboard?projectId=1');
+
+    expect(await screen.findByText('BASELINE REACHED (100.0%)')).toBeTruthy();
+    expect(screen.getAllByText('Timesheets Locked Automatically').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Stop the Execution' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Resume Execution' }));
+
+    await vi.waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringMatching(/governance\/resume-execution$/),
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    );
+  });
+
+  it('Notification bell shows the unread count and marks a notification read', async () => {
+    renderAt(<NotificationBell />, '/');
+
+    const bell = await screen.findByRole('button', { name: 'Notifications (1 unread)' });
+    fireEvent.click(bell);
+    expect(screen.getByText('Alert threshold reached')).toBeTruthy();
+    expect(screen.getByText('Old notice')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark read' }));
+
+    await vi.waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringMatching(/notifications\/3\/read$/),
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    );
   });
 
   it('Work Summary shows chips and lead oversight', async () => {

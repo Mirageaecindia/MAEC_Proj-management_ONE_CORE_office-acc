@@ -22,7 +22,11 @@ function useDashboardMutation(projectId, mutationFn) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.executiveDashboard(projectId) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.executiveDashboard(projectId) });
+      // Governance actions notify Leads and may clear the BU Head's pending alerts.
+      queryClient.invalidateQueries({ queryKey: queryKeys.notifications });
+    },
   });
 }
 
@@ -37,5 +41,12 @@ export function useDecideExtension(projectId) {
 export function useStopExecution(projectId) {
   return useDashboardMutation(projectId, ({ comments, discipline }) =>
     governanceApi.stopExecution(projectId, { comments, discipline }),
+  );
+}
+
+/** BU Head lifts a soft lock (manual or automatic) without an extension. */
+export function useResumeExecution(projectId) {
+  return useDashboardMutation(projectId, ({ comments }) =>
+    governanceApi.resumeExecution(projectId, { comments }),
   );
 }

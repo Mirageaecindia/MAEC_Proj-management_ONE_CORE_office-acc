@@ -1,7 +1,7 @@
 import { AlertTriangle, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { ErrorBanner } from '../../../components/Feedback';
-import { useDecideExtension, useStopExecution } from '../../../hooks/useGovernance';
+import { useDecideExtension, useResumeExecution, useStopExecution } from '../../../hooks/useGovernance';
 import { formatDateTime, formatHours, formatPercent } from '../../../utils/format';
 
 function ThresholdAlert({ data }) {
@@ -12,32 +12,42 @@ function ThresholdAlert({ data }) {
       </Alert>
     );
   }
-  const { governance_status: governance, exceptions } = data;
-  const threshold = governance.threshold_pct;
-  if (threshold === null || threshold === undefined) {
+  const governance = data.governance_status;
+  const usage = `${formatHours(governance.logged_hours)} of ${formatHours(governance.baseline_hours)} baseline hours used (${formatPercent(governance.consumption_pct)})`;
+  if (!governance.configured) {
     return (
-      <Alert title="Threshold Not Configured">
-        Consumption is {formatPercent(governance.consumption_pct)}; no project governance threshold is
-        configured.
+      <Alert title="Baseline Not Configured">
+        Set the project's target effort hours to enable threshold alerts and the automatic lock.
       </Alert>
     );
   }
-  if (governance.status === 'exceeded') {
+  if (governance.soft_locked) {
     return (
-      <Alert title="Threshold Action Required">
-        {exceptions
-          .map(
-            (exception) =>
-              `${exception.discipline} is at ${formatPercent(exception.consumption_pct)} against the ${formatPercent(exception.threshold_pct)} threshold`,
-          )
-          .join(' ')}
+      <Alert
+        title={governance.lock_reason === 'auto' ? 'Timesheets Locked Automatically' : 'Execution Stopped'}
+      >
+        {usage}. Approve an extension or resume execution to reopen timesheets.
       </Alert>
     );
   }
+  if (governance.level === 'hard_stop') {
+    return <Alert title="Baseline Exceeded — Execution Resumed">{usage}.</Alert>;
+  }
+  if (governance.level === 'warning') {
+    return (
+      <Alert title="Alert Threshold Reached">
+        {usage}, above the {formatPercent(governance.threshold_pct)} alert threshold. Timesheets lock
+        automatically at 100%.
+      </Alert>
+    );
+  }
+  const threshold =
+    governance.threshold_pct == null
+      ? 'No alert threshold is configured'
+      : `Alert threshold ${formatPercent(governance.threshold_pct)}`;
   return (
     <Alert ok title="Within Threshold">
-      Current consumption is {formatPercent(governance.consumption_pct)} against the{' '}
-      {formatPercent(threshold)} threshold.
+      {usage}. {threshold}; timesheets lock automatically at 100%.
     </Alert>
   );
 }
@@ -82,19 +92,27 @@ function PendingRequest({ request, projectName }) {
   );
 }
 
-/** BU Head actions: review the pending extension request, approve/reject it, or stop execution. */
+/** BU Head actions: review the pending extension request, approve/reject it, stop or resume execution. */
 export function GovernanceControls({ projectId, projectName, data }) {
   const [comments, setComments] = useState('');
   const decide = useDecideExtension(projectId);
   const stop = useStopExecution(projectId);
+  const resume = useResumeExecution(projectId);
   const pendingRequest = data?.extension_requests?.find((request) => request.status === 'pending') ?? null;
-  const busy = decide.isPending || stop.isPending;
-  const actionError = decide.error || stop.error;
+  const locked = Boolean(data?.governance_status?.soft_locked);
+  const mutations = [decide, stop, resume];
+  const busy = mutations.some((mutation) => mutation.isPending);
+  const actionError = decide.error || stop.error || resume.error;
 
   const clearComments = { onSuccess: () => setComments('') };
 
+  /** Clear the other actions' errors so only the latest action's outcome is shown. */
+  function resetOthers(active) {
+    mutations.filter((mutation) => mutation !== active).forEach((mutation) => mutation.reset());
+  }
+
   function handleDecision(decision) {
-    stop.reset();
+    resetOthers(decide);
     decide.mutate(
       { requestId: pendingRequest.id, decision, comments: comments.trim() || null },
       clearComments,
@@ -102,11 +120,16 @@ export function GovernanceControls({ projectId, projectName, data }) {
   }
 
   function handleStop() {
-    decide.reset();
+    resetOthers(stop);
     stop.mutate(
       { comments: comments.trim(), discipline: data?.exceptions?.[0]?.discipline ?? null },
       clearComments,
     );
+  }
+
+  function handleResume() {
+    resetOthers(resume);
+    resume.mutate({ comments: comments.trim() || null }, clearComments);
   }
 
   return (
@@ -114,7 +137,7 @@ export function GovernanceControls({ projectId, projectName, data }) {
       <div className="allocation-header">
         <div>
           <h2>BU Head Governance Controls</h2>
-          <p>Review extension requests, approve or reject them, or halt execution.</p>
+          <p>Review extension requests, approve or reject them, or stop and resume execution.</p>
         </div>
       </div>
 
@@ -130,7 +153,7 @@ export function GovernanceControls({ projectId, projectName, data }) {
 
       <label className="ed-field-label" htmlFor="ed-comments">
         BU Head Decision Comments / Justification{' '}
-        <span className="ed-optional-label">(optional for extension decisions)</span>
+        <span className="ed-optional-label">(required to stop execution)</span>
       </label>
       <textarea
         id="ed-comments"
@@ -142,14 +165,20 @@ export function GovernanceControls({ projectId, projectName, data }) {
       />
 
       <div className="ed-buttons">
-        <button
-          type="button"
-          className="ed-btn ed-btn-stop"
-          disabled={!projectId || !comments.trim() || busy}
-          onClick={handleStop}
-        >
-          {stop.isPending ? 'Stopping…' : 'Stop the Execution'}
-        </button>
+        {locked ? (
+          <button type="button" className="ed-btn ed-btn-resume" disabled={busy} onClick={handleResume}>
+            {resume.isPending ? 'Resuming…' : 'Resume Execution'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="ed-btn ed-btn-stop"
+            disabled={!projectId || !comments.trim() || busy}
+            onClick={handleStop}
+          >
+            {stop.isPending ? 'Stopping…' : 'Stop the Execution'}
+          </button>
+        )}
         <button
           type="button"
           className="ed-btn ed-btn-approve"

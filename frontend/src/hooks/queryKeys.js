@@ -4,5 +4,6 @@ export const queryKeys = {
   projectLeads: (discipline) => ['project-leads', discipline],
   executiveDashboard: (projectId) => ['executive-dashboard', projectId],
   workSummary: (projectId) => ['work-summary', projectId],
+  notifications: ['notifications'],
   sharepointMirror: (projectId) => ['sharepoint-mirror', projectId],
 };

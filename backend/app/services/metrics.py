@@ -1,6 +1,11 @@
 """Governance figures for one project: consumption, threshold status, SPI,
 budget burn, per-discipline breakdown and the monthly chart.
 
+Consumption and the governance level are measured at project level against
+the BU Head's baseline (target effort hours + approved extensions); see
+app/domain/governance.py. WBS planned hours drive SPI, the planned series of
+the monthly chart and the (informational) per-discipline breakdown.
+
 Every figure is derived from stored rows (wbs_nodes, time_log_entries,
 employees, projects). `executive_dashboard_data` is also imported by the
 Lead extension-request code in main.py to snapshot figures into the audit log.
@@ -12,6 +17,7 @@ from sqlalchemy.orm import Session
 
 import models
 from app.domain.calendar import distribute_hours_over_months, month_key, month_label
+from app.domain.governance import NORMAL, read_governance, split_monthly_consumption
 from app.domain.timesheets import entry_total
 from app.repositories.work import WorkRepository
 
@@ -34,30 +40,23 @@ class ProjectMetricsService:
         approved_hours = sum(totals[e.id] for e in entries if e.approval_status == APPROVED)
         pending = [e for e in entries if e.approval_status == PENDING_REVIEW]
         pending_hours = sum(totals[e.id] for e in pending)
-        consumption_pct = round(logged_hours / scheduled_hours * 100, 1) if scheduled_hours else 0.0
+        threshold = project.governance_threshold_pct
+        target = float(project.target_effort_hours or 0)
+        reading = read_governance(logged_hours, target, project.extension_approved_hours, threshold)
 
         engineer_ids = sorted({node.assigned_engineer_id for node in nodes if node.assigned_engineer_id})
         employees = self.work.employees_by_ids(engineer_ids)
-
-        threshold = project.governance_threshold_pct
         disciplines_out, exceptions = self._discipline_breakdown(
             nodes, entries, totals, engineer_ids, employees, threshold
         )
-
         max_discipline = max(disciplines_out, key=lambda d: d["consumption_pct"], default=None)
-        max_pct = max_discipline["consumption_pct"] if max_discipline else consumption_pct
-        over_threshold = threshold is not None and (
-            bool(exceptions) or (max_discipline is not None and max_pct > threshold)
-        )
 
         currency = project.contract_currency or "USD"
         contract_value = float(project.contract_value or 0)
-        budget_consumed = (
-            round(contract_value * (logged_hours / scheduled_hours), 2) if scheduled_hours and contract_value else 0.0
-        )
+        # Budget burn is proportional to hours used of the commercial target (no rate card yet).
+        budget_consumed = round(contract_value * (logged_hours / target), 2) if target and contract_value else 0.0
         budget_pct = round(budget_consumed / contract_value * 100, 1) if contract_value else 0.0
-
-        exceeded_disciplines = {d["name"] for d in disciplines_out if d["exceeded"]}
+        alert_hours = reading.baseline_hours * threshold / 100 if reading.configured and threshold is not None else None
 
         return {
             "project": {
@@ -75,11 +74,14 @@ class ProjectMetricsService:
             },
             "summary": {
                 "scheduled_hours": scheduled_hours,
+                "baseline_hours": reading.baseline_hours,
+                "target_effort_hours": target,
+                "extension_approved_hours": float(project.extension_approved_hours or 0),
                 "approved_hours": round(approved_hours, 2),
                 "logged_hours": round(logged_hours, 2),
                 "pending_hours": round(pending_hours, 2),
                 "pending_entries": len(pending),
-                "consumption_pct": consumption_pct,
+                "consumption_pct": reading.consumption_pct,
             },
             "commercial_budget_burn": {
                 "currency": currency,
@@ -90,23 +92,31 @@ class ProjectMetricsService:
             },
             "hours_consumption": {
                 "hours": round(logged_hours, 2),
-                "scheduled": scheduled_hours,
+                "scheduled": reading.baseline_hours,
+                "wbs_planned": scheduled_hours,
                 "approved": round(approved_hours, 2),
                 "pending": round(pending_hours, 2),
-                "percent": consumption_pct,
+                "percent": reading.consumption_pct,
             },
             "governance_status": {
-                "status": "exceeded" if over_threshold else "normal",
+                # 'exceeded' = at/above the alert threshold (kept for existing clients); see `level`.
+                "status": "normal" if reading.level == NORMAL else "exceeded",
+                "level": reading.level,
+                "configured": reading.configured,
                 "threshold_pct": threshold,
-                "consumption_pct": consumption_pct,
-                "max_discipline_pct": max_pct,
+                "consumption_pct": reading.consumption_pct,
+                "baseline_hours": reading.baseline_hours,
+                "logged_hours": reading.logged_hours,
+                "wbs_exceeds_target": bool(target) and scheduled_hours > target,
+                "max_discipline_pct": max_discipline["consumption_pct"] if max_discipline else reading.consumption_pct,
                 "max_discipline": max_discipline["name"] if max_discipline else None,
                 "soft_locked": bool(project.timesheets_soft_locked),
+                "lock_reason": project.lock_reason if project.timesheets_soft_locked else None,
             },
             "spi": self._spi(approved_hours, scheduled_hours),
             "disciplines": disciplines_out,
             "exceptions": exceptions,
-            "monthly_data": self._monthly(nodes, entries, totals, employees, exceeded_disciplines),
+            "monthly_data": self._monthly(nodes, entries, totals, alert_hours),
         }
 
     @staticmethod
@@ -195,12 +205,11 @@ class ProjectMetricsService:
         return {"value": value, "note": note}
 
     @staticmethod
-    def _monthly(nodes, entries, totals, employees, exceeded_disciplines) -> list[dict]:
-        """Planned hours spread over each node's months vs logged hours per month,
-        split by whether the engineer's discipline is over threshold."""
+    def _monthly(nodes, entries, totals, alert_hours: float | None) -> list[dict]:
+        """WBS planned hours spread over each node's months vs logged hours per
+        month; logged hours beyond the project's alert level count as exceeded."""
         planned = defaultdict(float)
-        normal = defaultdict(float)
-        exceeded = defaultdict(float)
+        logged = defaultdict(float)
         for node in nodes:
             if node.estimated_hours and node.estimated_hours > 0:
                 end = node.target_due_date or node.end_date
@@ -209,23 +218,19 @@ class ProjectMetricsService:
                 ).items():
                     planned[key] += hours
         for entry in entries:
-            total = totals[entry.id]
-            if total <= 0:
-                continue
-            employee = employees.get(entry.employee_id)
-            discipline = employee.discipline if employee else UNASSIGNED
-            bucket = exceeded if discipline in exceeded_disciplines else normal
-            bucket[month_key(entry.week_start_date)] += total
+            if totals[entry.id] > 0:
+                logged[month_key(entry.week_start_date)] += totals[entry.id]
+        split = split_monthly_consumption(logged, alert_hours)
 
         return [
             {
                 "month": key,
                 "month_label": month_label(key),
                 "planned_baseline": round(planned.get(key, 0.0), 1),
-                "normal_consumption": round(normal.get(key, 0.0), 1),
-                "exceeded_threshold": round(exceeded.get(key, 0.0), 1),
+                "normal_consumption": round(split.get(key, (0.0, 0.0))[0], 1),
+                "exceeded_threshold": round(split.get(key, (0.0, 0.0))[1], 1),
             }
-            for key in sorted(set(planned) | set(normal) | set(exceeded))
+            for key in sorted(set(planned) | set(logged))
         ]
 
 

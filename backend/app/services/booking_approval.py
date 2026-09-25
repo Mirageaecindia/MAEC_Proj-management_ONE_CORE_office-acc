@@ -16,6 +16,7 @@ from app.repositories.bookings import BookingRepository
 from app.repositories.notifications import NotificationRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.work import WorkRepository
+from app.services import notifications as notify
 from app.services.access import user_can_access_project
 from app.services.notifications import RESOURCE_BOOKING_APPROVAL
 
@@ -112,9 +113,19 @@ class BookingApprovalService:
         return project, bookings
 
     def _close_submission(self, project: models.Project, status: str) -> dict:
-        """The BU Head has decided, so the 'pending approval' notification is done."""
+        """The BU Head has decided: clear the pending notification and tell the project's Leads."""
         for notification in self.notifications.unread(Role.BU_HEAD, RESOURCE_BOOKING_APPROVAL, project.id):
             notification.is_read = True
+        approved = status == APPROVED
+        notify.notify_project_leads(
+            self.db,
+            project,
+            notify.RESOURCE_BOOKING_APPROVED if approved else notify.RESOURCE_BOOKING_REJECTED,
+            "Resource booking approved" if approved else "Resource booking returned to draft",
+            f"The BU Head {'approved' if approved else 'rejected'} the resource booking for '{project.project_name}'."
+            + ("" if approved else " Adjust it and submit again."),
+            "BU Head",
+        )
         self.db.commit()
         return {"status": status, "status_label": BOOKING_APPROVAL_LABELS[status]}
 

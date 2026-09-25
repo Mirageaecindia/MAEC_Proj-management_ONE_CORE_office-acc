@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 import models
 import schemas
@@ -41,6 +42,22 @@ def stop_execution(
 ):
     """Soft-lock timesheets: engineers cannot log hours and leads cannot approve them."""
     return service.stop_execution(user, project_id, payload)
+
+
+class ResumeExecutionRequest(BaseModel):
+    comments: str | None = None
+
+
+@router.post("/governance/resume-execution", response_model=schemas.GovernanceActionOut)
+def resume_execution(
+    project_id: int,
+    payload: ResumeExecutionRequest | None = None,
+    user: models.User = Depends(require_bu_head),
+    service: GovernanceService = Depends(get_governance_service),
+):
+    """Unlock timesheets after a manual stop or an automatic hard stop."""
+    comments = (payload.comments or "").strip() or None if payload else None
+    return service.resume_execution(user, project_id, comments)
 
 
 @router.get("/work-summary")

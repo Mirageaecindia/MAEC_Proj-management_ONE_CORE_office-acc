@@ -20,6 +20,7 @@ from app.services.auth import AuthService, LoginThrottle, get_login_throttle
 from app.services.booking_approval import BookingApprovalService
 from app.services.documents import ProjectDocumentService
 from app.services.governance import GovernanceService
+from app.services.governance_monitor import GovernanceMonitor
 from app.services.metrics import ProjectMetricsService
 from app.services.notifications import NotificationService
 from app.services.projects import ProjectService
@@ -45,8 +46,9 @@ def get_document_service(
 
 
 def get_governance_service(db: Session = Depends(get_db)) -> GovernanceService:
+    work = WorkRepository(db)
     return GovernanceService(
-        db, ProjectRepository(db), GovernanceRepository(db), ProjectMetricsService(WorkRepository(db))
+        db, ProjectRepository(db), GovernanceRepository(db), ProjectMetricsService(work), GovernanceMonitor(db, work)
     )
 
 

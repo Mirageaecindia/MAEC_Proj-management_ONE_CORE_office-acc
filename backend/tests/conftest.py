@@ -127,3 +127,35 @@ def world(make, client):
     w.project_payload = project_payload
     w.create_project = create_project
     return w
+
+
+@pytest.fixture
+def governed(client, make, world):
+    """Governance reference scenario: target 100h, threshold 80%, 50h logged (30 approved + 20 pending).
+
+    Returns (project_id, node_a, node_b, pending_entry). Engineer `world.engineer` is booked (approved)."""
+    project = world.create_project(
+        total_contract_value=100000, alert_override_threshold_pct=80, target_effort_hours=100
+    )
+    project_id = project["id"]
+    # The engineer must be booked and the booking APPROVED before they can log
+    # hours (access is only granted by BU Head approval of the assignment).
+    booking = client.post(
+        f"/api/projects/{project_id}/resource-bookings",
+        json={
+            "employee_id": world.emp1.id,
+            "planned_hours": 100,
+            "utilization_rate": 50,
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-30",
+        },
+        headers=world.lead_h,
+    )
+    assert booking.status_code == 200, booking.text
+    assert client.post(f"/api/projects/{project_id}/resource-bookings/submit", headers=world.lead_h).status_code == 200
+    assert client.post(f"/api/projects/{project_id}/resource-bookings/approve", headers=world.bu_h).status_code == 200
+    node_a = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, estimated_hours=40)
+    node_b = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, estimated_hours=60)
+    make.time_entry(project_id, node_a, world.emp1, 30, status="approved")
+    pending = make.time_entry(project_id, node_b, world.emp1, 20, status="pending_review")
+    return project_id, node_a, node_b, pending
