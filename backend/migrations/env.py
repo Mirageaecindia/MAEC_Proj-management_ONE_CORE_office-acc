@@ -16,7 +16,9 @@ def _run(connection) -> None:
 
 
 if context.is_offline_mode():
-    context.configure(url=get_settings().database_url, target_metadata=Base.metadata, literal_binds=True)
+    context.configure(
+        url=get_settings().database_url, target_metadata=Base.metadata, literal_binds=True, render_as_batch=True
+    )
     with context.begin_transaction():
         context.run_migrations()
 elif (connection := context.config.attributes.get("connection")) is not None:
