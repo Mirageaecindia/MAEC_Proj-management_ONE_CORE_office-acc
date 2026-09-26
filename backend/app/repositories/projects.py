@@ -13,10 +13,14 @@ PROJECT_CHILD_MODELS = (
     models.ResourceBooking,
     models.TimeLogEntry,
     models.TimeSession,
+    models.WeeklyHoursSubmission,
     models.GovernanceAction,
     models.ExtensionRequest,
     models.Notification,
 )
+
+# Rows that make a project's history worth keeping: such a project is archived, not deleted.
+_HISTORY_MODELS = tuple(model for model in PROJECT_CHILD_MODELS if model is not models.Notification)
 
 
 class ProjectRepository:
@@ -29,9 +33,11 @@ class ProjectRepository:
     def get_by_code(self, project_code: str) -> models.Project | None:
         return self.db.query(models.Project).filter_by(project_code=project_code).first()
 
-    def list(self, ids: Collection[int] | None = None) -> list[models.Project]:
-        """All projects newest first, optionally restricted to `ids`."""
+    def list(self, ids: Collection[int] | None = None, *, include_archived: bool = False) -> list[models.Project]:
+        """Projects newest first, optionally restricted to `ids`; archived ones only on request."""
         query = self.db.query(models.Project)
+        if not include_archived:
+            query = query.filter(models.Project.archived_at.is_(None))
         if ids is not None:
             if not ids:
                 return []
@@ -40,6 +46,17 @@ class ProjectRepository:
 
     def add(self, project: models.Project) -> None:
         self.db.add(project)
+
+    def has_history(self, project_id: int) -> bool:
+        return any(
+            self.db.query(model.id).filter_by(project_id=project_id).first() is not None for model in _HISTORY_MODELS
+        )
+
+    def active_sessions(self, project_id: int) -> list[models.TimeSession]:
+        return self.db.query(models.TimeSession).filter_by(project_id=project_id, status="active").all()
+
+    def pending_extension_requests(self, project_id: int) -> list[models.ExtensionRequest]:
+        return self.db.query(models.ExtensionRequest).filter_by(project_id=project_id, status="pending").all()
 
     def delete_with_children(self, project: models.Project) -> None:
         for model in PROJECT_CHILD_MODELS:

@@ -1,8 +1,9 @@
 """Project lifecycle owned by the BU Head: lead lookup, create (with SharePoint
-provisioning), list, read and delete."""
+provisioning), list, read, archive/unarchive and delete."""
 
 import json
 import logging
+from datetime import UTC, datetime
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -10,15 +11,22 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from app.core.errors import NO_PROJECT_ACCESS, BadRequestError, ConflictError, ForbiddenError, NotFoundError
+from app.core.roles import Role
 from app.integrations.sharepoint import DocumentStorage, SharePointError
 from app.repositories.projects import ProjectRepository
 from app.repositories.users import UserRepository
+from app.services import notifications as notify
 from app.services.access import user_can_access_project, visible_project_ids
+from app.services.archive_guard import ARCHIVED_READ_ONLY
+from app.services.tracking import end_session
 
 logger = logging.getLogger(__name__)
 
 DUPLICATE_CODE = "Project Code already exists"
 PROJECT_NOT_FOUND = "Project not found"
+HAS_HISTORY = "This project has recorded work or history. Archive it instead of deleting it."
+
+EXTENSION_CANCELLED = "cancelled"
 
 # Query-string discipline -> users.discipline value.
 LEAD_DISCIPLINES = {"electrical": "Electrical", "mechanical": "Mechanical", "bim": "BIM"}
@@ -82,8 +90,11 @@ class ProjectService:
         )
         return data
 
-    def list_for(self, user: models.User) -> list[models.Project]:
-        return self.projects.list(visible_project_ids(self.db, user))
+    def list_for(self, user: models.User, include_archived: bool = False) -> list[models.Project]:
+        """Archived projects are listed only for the BU Head, and only on request."""
+        return self.projects.list(
+            visible_project_ids(self.db, user), include_archived=include_archived and user.role == Role.BU_HEAD
+        )
 
     def get_for(self, user: models.User, project_id: int) -> models.Project:
         project = self.projects.get(project_id)
@@ -94,13 +105,75 @@ class ProjectService:
         return project
 
     def delete(self, project_id: int) -> dict:
-        """Delete the project and every row it owns. The SharePoint folder is kept."""
-        project = self.projects.get(project_id)
-        if not project:
-            raise NotFoundError(PROJECT_NOT_FOUND)
+        """Delete a project created by mistake. A project with any recorded work
+        or history is archived instead, so its audit log survives. The SharePoint
+        folder is kept."""
+        project = self._project(project_id)
+        if project.archived_at is not None:
+            raise ConflictError(ARCHIVED_READ_ONLY)
+        if self.projects.has_history(project_id):
+            raise ConflictError(HAS_HISTORY)
         self.projects.delete_with_children(project)
         self.db.commit()
         return {"ok": True, "deleted_project_id": project_id}
+
+    def archive(self, user: models.User, project_id: int, comments: str | None) -> models.Project:
+        """Close a project: read-only, hidden from Leads and Engineers, out of the
+        allocation cap and governance. Active tracking sessions are ended (their
+        time banked) and a pending extension request is cancelled."""
+        project = self._project(project_id)
+        if project.archived_at is not None:
+            raise ConflictError("This project is already archived.")
+        now = datetime.now(UTC)
+        actor = user.full_name or user.username
+        for session in self.projects.active_sessions(project_id):
+            end_session(self.db, session, now)
+        for request in self.projects.pending_extension_requests(project_id):
+            request.status = project.extension_status = EXTENSION_CANCELLED
+            request.decided_by, request.decided_at = actor, now
+            request.decision_comments = "Closed automatically: project archived."
+        self.db.add(
+            models.GovernanceAction(project_id=project.id, action="archive", comments=comments, created_by=actor)
+        )
+        notify.notify_project_leads(
+            self.db,
+            project,
+            notify.PROJECT_ARCHIVED,
+            "Project archived",
+            f"'{project.project_name}' was archived by the BU Head. It is read-only and no longer listed for you.",
+            actor,
+        )
+        # Last: the read-only guard allows the writes above only while the project is still active.
+        project.archived_at = now
+        self.db.commit()
+        return project
+
+    def unarchive(self, user: models.User, project_id: int, comments: str | None) -> models.Project:
+        """Reopen a project exactly as it was, including its timesheet lock."""
+        project = self._project(project_id)
+        if project.archived_at is None:
+            raise ConflictError("This project is not archived.")
+        actor = user.full_name or user.username
+        project.archived_at = None  # first, so the guard allows the audit entry
+        self.db.add(
+            models.GovernanceAction(project_id=project.id, action="unarchive", comments=comments, created_by=actor)
+        )
+        notify.notify_project_leads(
+            self.db,
+            project,
+            notify.PROJECT_UNARCHIVED,
+            "Project reopened",
+            f"'{project.project_name}' was reopened by the BU Head.",
+            actor,
+        )
+        self.db.commit()
+        return project
+
+    def _project(self, project_id: int) -> models.Project:
+        project = self.projects.get(project_id)
+        if not project:
+            raise NotFoundError(PROJECT_NOT_FOUND)
+        return project
 
     def _resolve_lead(self, user_id: int | None, display_name: str) -> tuple[str, int | None]:
         """(display name, lead user id). With an id, the name comes from the real account."""

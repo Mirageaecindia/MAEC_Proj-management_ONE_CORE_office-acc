@@ -1447,3 +1447,12 @@ tr.clickable-row:hover td { background: #f0f7fd !important; }
 .notification-item p { margin: 4px 0; color: #4f6378; font-size: 11px; line-height: 1.45; }
 .notification-item small { color: #8a93a0; font-size: 10px; }
 .notification-mark-read { flex: 0 0 auto; padding: 0; color: #1f5f99; background: none; border: 0; font-size: 10px; cursor: pointer; }
+
+/* Created Projects: archive */
+.created-projects-filter { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; color: #4f6378; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.created-project-actions { flex: 0 0 auto; display: flex; gap: 6px; }
+.created-project-action { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; color: #1f5f99; background: #fff; border: 1px solid #cfe0ee; border-radius: 5px; font-size: 10px; font-weight: 700; text-decoration: none; cursor: pointer; transition: background .15s, border-color .15s; }
+.created-project-action:hover { background: #f1f7fc; border-color: #b6d0e5; }
+.created-project-archived { flex: 0 0 auto; padding: 3px 10px; color: #6b5b2e; background: #f7f0dc; border: 1px solid #e8dab0; border-radius: 12px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.created-project-card-archived { background: #fbfbf9; }
+.created-project-card-archived .created-project-fields { opacity: .75; }

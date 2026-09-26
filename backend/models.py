@@ -54,6 +54,8 @@ class Project(Base):
     governance_alert_level = Column(String(20), nullable=True)
     extension_status = Column(String(20), nullable=True, index=True)
     extension_approved_hours = Column(Float, nullable=True)
+    # Set when the BU Head archives the project; archived projects are read-only (app/services/archive_guard.py).
+    archived_at = Column(DateTime(timezone=True), nullable=True, index=True)
     sharepoint_site_url = Column(String(500), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

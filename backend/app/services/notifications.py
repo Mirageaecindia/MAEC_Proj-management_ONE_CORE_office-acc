@@ -18,6 +18,8 @@ EXTENSION_DECIDED = "extension_decided"
 THRESHOLD_WARNING = "threshold_warning"
 EXECUTION_LOCKED = "execution_locked"
 EXECUTION_RESUMED = "execution_resumed"
+PROJECT_ARCHIVED = "project_archived"
+PROJECT_UNARCHIVED = "project_unarchived"
 
 
 def notification_output(notification: models.Notification) -> dict:

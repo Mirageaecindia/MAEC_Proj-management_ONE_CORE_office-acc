@@ -16,6 +16,7 @@ from app.repositories.notifications import NotificationRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.users import UserRepository
 from app.repositories.work import WorkRepository
+from app.services import archive_guard
 from app.services.auth import AuthService, LoginThrottle, get_login_throttle
 from app.services.booking_approval import BookingApprovalService
 from app.services.documents import ProjectDocumentService
@@ -25,6 +26,8 @@ from app.services.metrics import ProjectMetricsService
 from app.services.notifications import NotificationService
 from app.services.projects import ProjectService
 from app.services.work_summary import WorkSummaryService
+
+archive_guard.install()  # archived projects are read-only for every database session
 
 
 def get_auth_service(

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 import models
 import schemas
@@ -8,6 +9,14 @@ from app.services.documents import ProjectDocumentService
 from app.services.projects import ProjectService
 
 router = APIRouter(tags=["projects"])
+
+
+class ProjectCommentRequest(BaseModel):
+    comments: str | None = None
+
+    @property
+    def text(self) -> str | None:
+        return (self.comments or "").strip() or None
 
 
 @router.get("/project-leads", response_model=list[schemas.ProjectLeadOut])
@@ -32,11 +41,13 @@ async def create_project(
 
 @router.get("/projects", response_model=list[schemas.ProjectOut])
 def list_projects(
+    include_archived: bool = False,
     user: models.User = Depends(get_current_user),
     service: ProjectService = Depends(get_project_service),
 ):
-    """Projects visible to the caller: all for the BU Head, assigned ones for Leads and Engineers."""
-    return service.list_for(user)
+    """Projects visible to the caller: all for the BU Head, assigned ones for Leads and Engineers.
+    Archived projects are listed only for the BU Head, with `include_archived=true`."""
+    return service.list_for(user, include_archived)
 
 
 @router.get("/projects/{project_id}", response_model=schemas.ProjectOut)
@@ -55,6 +66,28 @@ def delete_project(
     service: ProjectService = Depends(get_project_service),
 ):
     return service.delete(project_id)
+
+
+@router.post("/projects/{project_id}/archive", response_model=schemas.ProjectOut)
+def archive_project(
+    project_id: int,
+    payload: ProjectCommentRequest | None = None,
+    user: models.User = Depends(require_bu_head),
+    service: ProjectService = Depends(get_project_service),
+):
+    """Archive: read-only, hidden from Leads and Engineers, out of the allocation cap and governance."""
+    return service.archive(user, project_id, payload.text if payload else None)
+
+
+@router.post("/projects/{project_id}/unarchive", response_model=schemas.ProjectOut)
+def unarchive_project(
+    project_id: int,
+    payload: ProjectCommentRequest | None = None,
+    user: models.User = Depends(require_bu_head),
+    service: ProjectService = Depends(get_project_service),
+):
+    """Reopen an archived project exactly as it was (its timesheet lock included)."""
+    return service.unarchive(user, project_id, payload.text if payload else None)
 
 
 @router.get("/projects/{project_id}/sharepoint-mirror")

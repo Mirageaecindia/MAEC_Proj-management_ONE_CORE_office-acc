@@ -1,20 +1,25 @@
 import { useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useProjects } from './useProjects';
+import { useProject, useProjects } from './useProjects';
 
 /**
  * The project a page is showing, kept in the URL (`?projectId=`) so links,
  * refreshes and NEXT buttons land on the same project. Without a parameter
  * the most recent project is selected.
+ *
+ * The switcher lists active projects. A project that isn't in that list (an
+ * archived one the BU Head opened from Created Projects) is fetched on its own
+ * and shown at the top of the switcher.
  */
 export function useProjectSelection() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: projects = [], isLoading, error } = useProjects();
 
   const requestedId = searchParams.get('projectId');
-  const project = requestedId
-    ? (projects.find((p) => String(p.id) === requestedId) ?? null)
-    : (projects[0] ?? null);
+  const listed = requestedId ? projects.find((p) => String(p.id) === requestedId) : projects[0];
+  const { data: unlisted = null } = useProject(requestedId, { enabled: !isLoading && !listed });
+  const project = listed ?? unlisted ?? null;
+  const options = !listed && unlisted ? [unlisted, ...projects] : projects;
 
   const selectProject = useCallback(
     (projectId) =>
@@ -29,5 +34,5 @@ export function useProjectSelection() {
     [setSearchParams],
   );
 
-  return { projects, project, projectId: project?.id ?? null, selectProject, isLoading, error };
+  return { projects: options, project, projectId: project?.id ?? null, selectProject, isLoading, error };
 }

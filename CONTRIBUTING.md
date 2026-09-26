@@ -115,7 +115,7 @@ in `main.py`. See also the merge-conflict rules in `CLAUDE.md`.)
 | `booking_approval_status`, `BOOKING_APPROVAL_LABELS` | `app/services/booking_approval.py` |
 | `create_bu_head_notification` | `app/services/notifications.py` |
 | `enforce_governance` (call after changing logged hours) | `app/services/governance_monitor.py` |
-| `upgrade_schema` (adds new columns at startup) | `app/core/schema_upgrades.py` |
+| `upsert_subtask_time_log` (bank tracked seconds) | `app/services/tracking.py` |
 | `sharepoint_service.py` | `app/integrations/sharepoint/graph.py` |
 
 Removed as dead code: `POST /governance/approve-extension` and

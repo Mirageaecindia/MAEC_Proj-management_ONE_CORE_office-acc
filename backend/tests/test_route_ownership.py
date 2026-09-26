@@ -38,6 +38,7 @@ SHARED_HELPERS = {
     "record_governance_action",
     "EXTENSION_STATUS_LABELS",
     "enforce_governance",
+    "upsert_subtask_time_log",
     "migrate",
 }
 

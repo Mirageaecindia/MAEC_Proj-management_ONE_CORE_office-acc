@@ -40,6 +40,7 @@ from app.services.governance import extension_request_output, find_pending_exten
 from app.services.metrics import executive_dashboard_data
 from app.services.governance_monitor import enforce_governance
 from app.services.notifications import EXTENSION_REQUESTED, create_bu_head_notification
+from app.services.tracking import upsert_subtask_time_log
 
 logger = logging.getLogger(__name__)
 
@@ -279,12 +280,17 @@ def _parse_iso_date(value) -> Optional[date]:
 
 
 def engineer_total_allocation(db: Session, employee_id: int, exclude_booking_id: Optional[int] = None) -> int:
-    """Sum an engineer's real booking percentage across ALL projects.
+    """Sum an engineer's real booking percentage across all ACTIVE projects
+    (archived projects no longer hold anyone's capacity).
 
     Optionally excludes one booking from the total (used when validating an
     edit so the booking's own old value does not count against the cap).
     """
-    query = db.query(models.ResourceBooking).filter_by(employee_id=employee_id)
+    query = (
+        db.query(models.ResourceBooking)
+        .join(models.Project, models.Project.id == models.ResourceBooking.project_id)
+        .filter(models.ResourceBooking.employee_id == employee_id, models.Project.archived_at.is_(None))
+    )
     if exclude_booking_id is not None:
         query = query.filter(models.ResourceBooking.id != exclude_booking_id)
     return sum(booking.utilization_rate or 0 for booking in query.all())
@@ -1812,39 +1818,6 @@ def engineer_active_seconds_on(db: Session, employee_id: int, day: date) -> int:
         if sess.login_at is not None and sess.login_at.date() == day:
             total += sess.active_seconds
     return total
-
-
-def upsert_subtask_time_log(db: Session, project_id: int, task_id: int, employee_id: int, day: date, seconds: int):
-    """Fold automatic tracking seconds into the existing weekly time-log
-    system (one row per project x subtask x engineer x ISO week). The same
-    row a Lead approves from Timelines & Logs is reused, so automatic and
-    manual hours stay in one place with no duplicate time-log system.
-
-    Every day of the week is banked (offices work different weeks); the
-    Lead's approval decides which hours stand.
-    """
-    hours = round(seconds / 3600, 2)
-    if hours <= 0:
-        return None
-    week_start = day - timedelta(days=day.weekday())
-    field = models.DAY_FIELDS[day.weekday()]
-    entry = (
-        db.query(models.TimeLogEntry)
-        .filter_by(project_id=project_id, task_id=task_id, employee_id=employee_id, week_start_date=week_start)
-        .first()
-    )
-    if entry is None:
-        entry = models.TimeLogEntry(
-            project_id=project_id,
-            task_id=task_id,
-            employee_id=employee_id,
-            week_start_date=week_start,
-            approval_status="pending_review",
-        )
-        db.add(entry)
-    current = getattr(entry, field) or 0
-    setattr(entry, field, round(current + hours, 2))
-    return entry
 
 
 def cap_to_elapsed(session: models.TimeSession, active_seconds: int) -> int:

@@ -46,6 +46,8 @@ class GovernanceMonitor:
     def evaluate(self, project: models.Project) -> GovernanceReading:
         """Apply alerts/auto-lock for a level change. The caller commits."""
         reading = self.reading(project)
+        if project.archived_at is not None:
+            return reading  # archived projects are out of governance: no alerts, no lock
         previous = project.governance_alert_level or NORMAL
         if reading.level == previous:
             return reading

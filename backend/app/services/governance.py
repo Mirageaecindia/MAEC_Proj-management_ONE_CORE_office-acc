@@ -26,6 +26,7 @@ EXTENSION_STATUS_LABELS = {
     "pending": "Pending BU Head Approval",
     "approved": "Approved",
     "rejected": "Rejected",
+    "cancelled": "Cancelled (project archived)",
 }
 
 

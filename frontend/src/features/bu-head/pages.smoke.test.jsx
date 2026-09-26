@@ -5,7 +5,7 @@
  * browser ever sees them.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { NotificationBell } from '../../components/NotificationBell';
@@ -134,7 +134,22 @@ const NOTIFICATIONS = [
 
 let dashboard = DASHBOARD;
 
+const ARCHIVED = {
+  ...PROJECT,
+  id: 7,
+  project_name: 'Old Mall',
+  project_code: 'MAEC-007',
+  archived_at: '2026-09-20T10:00:00Z',
+};
+
 const ROUTES = [
+  [/\/api\/projects\?include_archived=true$/, [PROJECT, ARCHIVED]],
+  [/\/api\/projects\/1\/archive$/, { ...PROJECT, archived_at: '2026-09-26T10:00:00Z' }],
+  [/\/api\/projects\/7$/, ARCHIVED],
+  [
+    /\/api\/projects\/7\/executive-dashboard$/,
+    () => ({ ...DASHBOARD, project: { ...DASHBOARD.project, id: 7, archived_at: ARCHIVED.archived_at } }),
+  ],
   [/\/api\/notifications$/, NOTIFICATIONS],
   [/\/api\/notifications\/3\/read$/, null],
   [/\/api\/projects\/1\/governance\/resume-execution$/, { id: 11, action: 'resume_execution' }],
@@ -174,6 +189,42 @@ describe('BU Head pages render with API data', () => {
     expect(await screen.findByText('Hotel Tower')).toBeTruthy();
     expect(screen.getByText('INR ₹250,000.00')).toBeTruthy();
     expect(screen.getByText('1 of 1 projects')).toBeTruthy();
+  });
+
+  it('Created Projects shows archived projects only when asked, with Reopen instead of Archive', async () => {
+    renderAt(<CreatedProjectsPage />, '/created-projects');
+    expect(await screen.findByText('Hotel Tower')).toBeTruthy();
+    expect(screen.queryByText('Old Mall')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Show archived'));
+
+    expect(await screen.findByText('Old Mall')).toBeTruthy();
+    expect(screen.getByText('Archived')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /Reopen/ })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /Archive/ })).toHaveLength(1); // only the active project
+  });
+
+  it('Archiving asks for confirmation, then calls the API', async () => {
+    renderAt(<CreatedProjectsPage />, '/created-projects');
+    fireEvent.click(await screen.findByRole('button', { name: /Archive/ }));
+    expect(screen.getByText('Archive this project?')).toBeTruthy();
+
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive' }));
+
+    await vi.waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringMatching(/\/api\/projects\/1\/archive$/),
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    );
+  });
+
+  it('An archived project opens read-only on the Executive Dashboard', async () => {
+    renderAt(<ExecutiveDashboardPage />, '/executive-dashboard?projectId=7');
+
+    expect(await screen.findByText('Project archived: read-only')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Stop the Execution' }).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Approve Extension' }).disabled).toBe(true);
   });
 
   it('Create Project shows validation errors on an empty submit', async () => {

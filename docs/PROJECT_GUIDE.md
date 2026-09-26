@@ -232,7 +232,7 @@ MAEC_project_management/
 ## 6. Backend
 
 ### 6.1 Startup sequence (`main.py` at import time)
-1. `migrate(engine)` (`app/core/migrations.py`) applies the Alembic migrations in `backend/migrations/` (`upgrade head`). A database created before Alembic (no `alembic_version` table) is adopted once: the old `ALTER TABLE` patches are replayed (`app/core/legacy_schema.py`), missing indexes are created, the schema is compared with the models, and it is stamped at the baseline `0001`. A missing table or column stops startup with an error instead of stamping a wrong schema; smaller differences are logged.
+1. `migrate(engine)` (`app/core/migrations.py`) applies the Alembic migrations in `backend/migrations/` (`upgrade head`). A database created before Alembic (tables but no `alembic_version`) is refused with instructions: the one-off adoption of the old development databases is finished, and production starts from a fresh database.
 2. Seeding: four `project_leads` rows (legacy), and the `employees` table from `backend/data/employee_leads.csv` if it's empty (`Emp No`, `Emp Name` and `Designation` columns; designation is also stored as `discipline`).
 3. The FastAPI app is created. CORS allows `localhost` and `127.0.0.1` on any port. No static folder is served publicly.
 4. The domain-error handler is registered, and the `app` package's routers (auth + BU Head) are included. The Lead/Engineer endpoints declared in `main.py` follow.
@@ -247,6 +247,8 @@ MAEC_project_management/
   - **BU Head:** all projects.
   - **Lead:** projects where they're one of the three project leads, or where they're the assigned lead of any WBS node.
   - **Engineer:** only projects where they have an **approved** resource booking. The BU Head's approval is the only thing that grants access; a draft or pending booking, or a WBS task on its own, grants none.
+  - **Archived projects** are closed to Leads and Engineers (filtered out of `lead_project_ids` / `engineer_approved_project_ids`, so their lists, dashboards and endpoints all drop them). Only the BU Head sees them.
+- **Archived = read-only:** `app/services/archive_guard.py` refuses (409) any database flush that writes an archived project's data, whatever the endpoint. Unarchive first.
 - **Node scope:** `node_assigned_to_engineer` (by employee ID) and `node_assigned_to_lead` (by user ID, with a name fallback).
 
 ### 6.3 Data model
@@ -277,14 +279,14 @@ There are no database foreign keys. Relationships are plain integer columns and 
 | `users` | Login accounts | `username` (unique), `password_hash`, `full_name`, `role` (`bu_head`/`lead`/`engineer`), `discipline` (leads), `employee_id` (engineers), `is_active` (deactivated accounts can't log in) |
 | `login_sessions` | Bearer tokens | `token` (unique), `user_id` |
 | `employees` | HR roster (seeded from CSV) | `employee_code`, `name`, `role_title`, `discipline` (= designation) |
-| `projects` | A project and its commercial baseline | `project_name`, `project_code` (unique), `client_organization`, `project_lead` + `project_lead_{electrical,mechanical,bim}` and matching `_user_id` columns, `start_date`, `target_end_date`, `contract_value`, `contract_currency`, `target_effort_hours`, `governance_threshold_pct`, `timesheets_soft_locked`, `lock_reason` (`manual`/`auto`), `governance_alert_level` (last level acted on), `extension_status`, `extension_approved_hours`, `sharepoint_disciplines` (JSON list), `sharepoint_site_url` |
+$1`sharepoint_disciplines` (JSON list), `sharepoint_site_url`, `archived_at` (set when archived) |
 | `resource_bookings` | Engineer allocated to a project | `project_id`, `employee_id`, `planned_hours`, `utilization_rate` (%), `start_date`, `end_date`, `approval_status` (`draft` → `pending_approval` → `approved`), `submitted_at`, `approved_at` |
 | `wbs_nodes` | Tasks (level 1) and subtasks (level 2) | `project_id`, `parent_id`, `wbs_code`, `task_name`, `phase`, `assigned_lead(_user_id)`, `assigned_engineer_id`, `estimated_hours`, `deliverable_status`, `start_date`, `end_date`, `target_due_date`, `actual_start_datetime`, `actual_end_datetime`, `description`, `severity` |
 | `wbs_node_history` | Status changes and comments per node | `node_id`, `user_name`, `action` (`status_change`/`comment`), `old_status`, `new_status`, `comment` |
 | `time_log_entries` | Weekly timesheet row (one per project × task × employee × week) | `week_start_date` (Monday), `mon_hours` … `sun_hours`, `approval_status` (`pending_review`/`approved`/`rejected`), `reviewed_by`, `reviewed_at` |
 | `time_sessions` | Automatic tracking session on a subtask | `subtask_id`, `task_id`, `employee_id`, `login_at`, `logout_at`, `active_seconds`, `status` (`active`/`ended`) |
 | `extension_requests` | Lead's request for extra hours | `requested_hours`, `justification`, `status` (`pending`/`approved`/`rejected`), `decision_comments`, `decided_by`, `decided_at` |
-| `governance_actions` | Audit log of governance events | `action` (`extension_request`, `approve_extension`, `reject_extension`, `stop_execution`, `resume_execution`, `auto_lock` by "System"), plus a snapshot: `discipline`, `consumption_pct`, `threshold_pct`, `consumption_hours`, `comments`, `created_by`, `requested_hours` |
+$1, `archive`, `unarchive`), plus a snapshot: `discipline`, `consumption_pct`, `threshold_pct`, `consumption_hours`, `comments`, `created_by`, `requested_hours` |
 | `notifications` | Role-targeted notifications | `recipient_role`, `recipient_user_id`, `notification_type` (`resource_booking_approval`/`_approved`/`_rejected`, `extension_requested`/`_decided`, `threshold_warning`, `execution_locked`, `execution_resumed`); `recipient_user_id` set = personal, null = everyone with `recipient_role`, `title`, `message`, `project_id`, `is_read` |
 | `gantt_tasks` | **Legacy**, replaced by `wbs_nodes` | No endpoints any more; table still dropped with its project |
 | `project_leads` | **Legacy** lead lookup, replaced by `users` with role `lead` | Seeded, unused |
@@ -405,9 +407,10 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 |---|---|---|---|
 | GET | `/api/project-leads?discipline=` | all | Lead accounts for the Create Project dropdowns |
 | POST | `/api/projects` | BU Head | Create a project and provision SharePoint (returns `sharepoint_status`: provisioned/failed/error/not_requested) |
-| GET | `/api/projects` | all (scoped) | Project list for the project picker |
+| GET | `/api/projects[?include_archived=true]` | all (scoped) | Project list; archived projects only for the BU Head, on request |
 | GET | `/api/projects/{id}` | all (scoped) | Project detail |
-| DELETE | `/api/projects/{id}` | BU Head | Delete the project and all its rows (SharePoint folder is kept) |
+| DELETE | `/api/projects/{id}` | BU Head | Delete a project **without any history** (created by mistake); otherwise 409, archive it instead. SharePoint folder is kept |
+| POST | `/api/projects/{id}/archive` · `/unarchive` | BU Head | Archive (read-only, hidden from Leads/Engineers, out of the allocation cap and governance; ends active tracking, cancels a pending extension) or reopen exactly as it was, lock included. `{comments}` optional; audited |
 | GET | `/api/projects/{id}/sharepoint-mirror` | all (scoped) | Live folder tree, root files, stats and connection status from Graph |
 
 **People and resourcing**

@@ -4,9 +4,22 @@ import { queryKeys } from './queryKeys';
 
 export const LEAD_DISCIPLINES = ['electrical', 'mechanical', 'bim'];
 
-/** Projects visible to the signed-in user. */
-export function useProjects() {
-  return useQuery({ queryKey: queryKeys.projects, queryFn: projectsApi.list });
+/** Projects visible to the signed-in user; archived ones only for the BU Head, on request. */
+export function useProjects({ includeArchived = false } = {}) {
+  return useQuery({
+    queryKey: queryKeys.projectList(includeArchived),
+    queryFn: () => projectsApi.list({ includeArchived }),
+  });
+}
+
+/** One project by id (the BU Head can read archived ones). */
+export function useProject(projectId, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: queryKeys.project(projectId),
+    queryFn: () => projectsApi.get(projectId),
+    enabled: Boolean(projectId) && enabled,
+    retry: false,
+  });
 }
 
 /** Lead accounts per discipline for the Create Project dropdowns: { electrical: [...], ... }. */
@@ -25,23 +38,27 @@ export function useProjectLeads() {
   });
 }
 
-export function useCreateProject() {
+function useProjectMutation(mutationFn) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: projectsApi.create,
+    mutationFn,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
   });
 }
 
+export function useCreateProject() {
+  return useProjectMutation(projectsApi.create);
+}
+
+/** Only succeeds for a project without history; the others are archived instead. */
 export function useDeleteProject() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: projectsApi.remove,
-    onSuccess: (_result, projectId) => {
-      queryClient.setQueryData(queryKeys.projects, (projects = []) =>
-        projects.filter((p) => p.id !== projectId),
-      );
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-    },
-  });
+  return useProjectMutation(projectsApi.remove);
+}
+
+export function useArchiveProject() {
+  return useProjectMutation(({ projectId, comments }) => projectsApi.archive(projectId, comments));
+}
+
+export function useUnarchiveProject() {
+  return useProjectMutation(({ projectId, comments }) => projectsApi.unarchive(projectId, comments));
 }

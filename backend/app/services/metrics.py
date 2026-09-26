@@ -77,6 +77,7 @@ class ProjectMetricsService:
                 "timesheets_soft_locked": bool(project.timesheets_soft_locked),
                 "extension_status": project.extension_status,
                 "extension_approved_hours": project.extension_approved_hours,
+                "archived_at": project.archived_at.isoformat() if project.archived_at else None,
             },
             "summary": {
                 "scheduled_hours": scheduled_hours,

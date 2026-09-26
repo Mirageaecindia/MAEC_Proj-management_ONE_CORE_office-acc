@@ -8,6 +8,8 @@ const ACTION_TEXT = {
   auto_lock: (entry) =>
     `Timesheets locked automatically at ${formatPercent(entry.consumption_pct)} of the baseline`,
   resume_execution: () => 'Resumed execution',
+  archive: () => 'Archived the project',
+  unarchive: () => 'Reopened the project',
 };
 
 function describe(entry) {

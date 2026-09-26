@@ -7,6 +7,8 @@
 - Engineer: only projects where their employee id has an APPROVED resource
   booking. BU Head approval of the Lead's assignment is the only event that
   grants access; a draft/pending booking or a WBS task alone grants none.
+- Archived projects are closed to Leads and Engineers; only the BU Head sees
+  them (read-only, see app/services/archive_guard.py).
 
 Shared with the Lead/Engineer endpoints in main.py, which import these.
 """
@@ -33,9 +35,11 @@ def engineer_approved_project_ids(db: Session, employee_id: int) -> set[int]:
     """Projects where the engineer has an APPROVED resource booking (their only access grant)."""
     rows = (
         db.query(models.ResourceBooking.project_id)
+        .join(models.Project, models.Project.id == models.ResourceBooking.project_id)
         .filter(
             models.ResourceBooking.employee_id == employee_id,
             models.ResourceBooking.approval_status == "approved",
+            models.Project.archived_at.is_(None),
         )
         .distinct()
         .all()
@@ -62,14 +66,21 @@ def lead_project_ids(db: Session, user: models.User) -> set[int]:
             and_(P.project_lead_mechanical_user_id.is_(None), P.project_lead_mechanical == name),
             and_(P.project_lead_bim_user_id.is_(None), P.project_lead_bim == name),
         )
-    as_project_lead = {project_id for (project_id,) in db.query(P.id).filter(project_condition).all()}
+    active = P.archived_at.is_(None)
+    as_project_lead = {project_id for (project_id,) in db.query(P.id).filter(project_condition, active).all()}
 
     node_conditions = [models.WbsNode.assigned_lead_user_id == user.id]
     if name:
         node_conditions.append(
             and_(models.WbsNode.assigned_lead_user_id.is_(None), models.WbsNode.assigned_lead == name)
         )
-    rows = db.query(models.WbsNode.project_id).filter(or_(*node_conditions)).distinct().all()
+    rows = (
+        db.query(models.WbsNode.project_id)
+        .join(P, P.id == models.WbsNode.project_id)
+        .filter(or_(*node_conditions), active)
+        .distinct()
+        .all()
+    )
     return as_project_lead | {project_id for (project_id,) in rows}
 
 

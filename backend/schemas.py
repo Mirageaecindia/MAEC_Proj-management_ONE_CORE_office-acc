@@ -154,6 +154,7 @@ class ProjectOut(ProjectBase):
     sharepoint_disciplines: Optional[str] = None
     target_effort_hours: Optional[float] = None
     sharepoint_site_url: Optional[str] = None
+    archived_at: Optional[datetime] = None
 
 
 class ProjectCreatePayload(BaseModel):

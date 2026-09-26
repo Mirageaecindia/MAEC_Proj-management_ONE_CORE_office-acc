@@ -222,7 +222,8 @@ def test_get_project(client, world):
 # --- Delete --------------------------------------------------------------------------
 
 
-def test_delete_project_removes_project_and_all_child_rows(client, db, make, world):
+def test_project_with_history_is_not_deleted(client, db, make, world):
+    # TODO C1: deleting wiped the governance audit log; a project with any history is archived instead.
     project_id = world.create_project()["id"]
     node = make.wbs_node(project_id, world.lead_e, engineer=world.emp1)
     make.time_entry(project_id, node, world.emp1, 5)
@@ -253,21 +254,24 @@ def test_delete_project_removes_project_and_all_child_rows(client, db, make, wor
 
     response = client.delete(f"/api/projects/{project_id}", headers=world.bu_h)
 
+    assert response.status_code == 409
+    assert "Archive it instead" in response.json()["detail"]
+    db.expire_all()
+    assert db.get(models.Project, project_id) is not None
+    assert db.query(models.GovernanceAction).filter_by(project_id=project_id).count() == 1
+
+
+def test_project_without_history_is_deleted_with_its_notifications(client, db, world):
+    project_id = world.create_project()["id"]
+    db.add(models.Notification(recipient_role="bu_head", notification_type="t", title="t", project_id=project_id))
+    db.commit()
+
+    response = client.delete(f"/api/projects/{project_id}", headers=world.bu_h)
+
     assert response.status_code == 200
     db.expire_all()
-    child_models = (
-        models.WbsNode,
-        models.WbsNodeHistory,
-        models.TimeLogEntry,
-        models.ResourceBooking,
-        models.GovernanceAction,
-        models.ExtensionRequest,
-        models.Notification,
-        models.TimeSession,
-    )
-    for model in child_models:
-        assert db.query(model).filter_by(project_id=project_id).count() == 0, model.__name__
     assert db.get(models.Project, project_id) is None
+    assert db.query(models.Notification).filter_by(project_id=project_id).count() == 0
 
 
 def test_delete_project_guards(client, world):

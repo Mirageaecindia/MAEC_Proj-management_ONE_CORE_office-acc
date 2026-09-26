@@ -102,6 +102,8 @@ export function GovernanceControls({ projectId, projectName, data }) {
   const locked = Boolean(data?.governance_status?.soft_locked);
   const mutations = [decide, stop, resume];
   const busy = mutations.some((mutation) => mutation.isPending);
+  const archived = Boolean(data?.project?.archived_at);
+  const frozen = busy || archived; // an archived project is read-only
   const actionError = decide.error || stop.error || resume.error;
 
   const clearComments = { onSuccess: () => setComments('') };
@@ -141,6 +143,9 @@ export function GovernanceControls({ projectId, projectName, data }) {
         </div>
       </div>
 
+      {archived && (
+        <Alert title="Project archived: read-only">Reopen it from Created Projects to make any change.</Alert>
+      )}
       <ThresholdAlert data={data} />
 
       {pendingRequest && <PendingRequest request={pendingRequest} projectName={projectName} />}
@@ -161,19 +166,19 @@ export function GovernanceControls({ projectId, projectName, data }) {
         placeholder="Enter comments for the selected governance action"
         value={comments}
         onChange={(event) => setComments(event.target.value)}
-        disabled={!projectId || busy}
+        disabled={!projectId || frozen}
       />
 
       <div className="ed-buttons">
         {locked ? (
-          <button type="button" className="ed-btn ed-btn-resume" disabled={busy} onClick={handleResume}>
+          <button type="button" className="ed-btn ed-btn-resume" disabled={frozen} onClick={handleResume}>
             {resume.isPending ? 'Resuming…' : 'Resume Execution'}
           </button>
         ) : (
           <button
             type="button"
             className="ed-btn ed-btn-stop"
-            disabled={!projectId || !comments.trim() || busy}
+            disabled={!projectId || !comments.trim() || frozen}
             onClick={handleStop}
           >
             {stop.isPending ? 'Stopping…' : 'Stop the Execution'}
@@ -182,7 +187,7 @@ export function GovernanceControls({ projectId, projectName, data }) {
         <button
           type="button"
           className="ed-btn ed-btn-approve"
-          disabled={!pendingRequest || busy}
+          disabled={!pendingRequest || frozen}
           onClick={() => handleDecision('approve')}
         >
           {decide.isPending && decide.variables?.decision === 'approve' ? 'Approving…' : 'Approve Extension'}
@@ -190,7 +195,7 @@ export function GovernanceControls({ projectId, projectName, data }) {
         <button
           type="button"
           className="ed-btn ed-btn-reject"
-          disabled={!pendingRequest || busy}
+          disabled={!pendingRequest || frozen}
           onClick={() => handleDecision('reject')}
         >
           {decide.isPending && decide.variables?.decision === 'reject' ? 'Rejecting…' : 'Reject Extension'}
