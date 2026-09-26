@@ -322,6 +322,23 @@ describe('BU Head pages render with API data', () => {
     );
   });
 
+  it('Budget burn past the contract value shows the overrun (TODO N5)', async () => {
+    dashboard = {
+      ...DASHBOARD,
+      commercial_budget_burn: {
+        currency: 'USD',
+        total: 100000,
+        consumed: 130000,
+        remaining: 0,
+        over_budget: 30000,
+        percent: 130,
+      },
+    };
+    renderAt(<ExecutiveDashboardPage />, '/executive-dashboard?projectId=1');
+
+    expect(await screen.findByText('Over budget by $30,000.00 (130.0% of contract)')).toBeTruthy();
+  });
+
   it('Stop the Execution asks for confirmation before locking', async () => {
     renderAt(<ExecutiveDashboardPage />, '/executive-dashboard?projectId=1');
     await screen.findByText('ALERT (90.0%)');

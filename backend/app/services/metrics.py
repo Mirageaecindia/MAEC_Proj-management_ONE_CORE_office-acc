@@ -95,7 +95,9 @@ class ProjectMetricsService:
                 "currency": currency,
                 "total": round(contract_value, 2),
                 "consumed": budget_consumed,
-                "remaining": round(contract_value - budget_consumed, 2),
+                # Past the contract value nothing remains; the overrun is its own figure.
+                "remaining": round(max(0.0, contract_value - budget_consumed), 2),
+                "over_budget": round(max(0.0, budget_consumed - contract_value), 2),
                 "percent": budget_pct,
             },
             "hours_consumption": {

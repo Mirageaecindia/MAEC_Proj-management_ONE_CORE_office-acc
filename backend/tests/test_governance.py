@@ -44,6 +44,7 @@ def test_dashboard_figures_for_reference_scenario(client, world, governed):
         "total": 100000.0,
         "consumed": 30000.0,
         "remaining": 70000.0,
+        "over_budget": 0.0,
         "percent": 30.0,
     }
     assert data["spi"] == {"value": 0.3, "note": "Behind plan — 30 earned of 100 planned baseline hours."}
@@ -96,6 +97,19 @@ def test_usage_counts_approved_hours_only(client, make, world, governed):
     assert data["summary"]["rejected_hours"] == 25.0
     assert data["summary"]["logged_hours"] == 50.0  # rejected hours excluded
     assert data["summary"]["consumption_pct"] == 50.0
+
+
+def test_budget_burn_past_the_contract_value_is_flagged_as_over_budget(client, make, world, governed):
+    # TODO N5: 130 approved of 100 target hours on a 100,000 contract.
+    project_id, _, node_b, _ = governed
+    make.time_entry(project_id, node_b, world.emp1, 100, status="approved", week=date(2026, 9, 14))
+
+    burn = _dashboard(client, world.bu_h, project_id)["commercial_budget_burn"]
+
+    assert burn["consumed"] == 130000.0
+    assert burn["remaining"] == 0.0  # never negative
+    assert burn["over_budget"] == 30000.0
+    assert burn["percent"] == 130.0
 
 
 def test_baseline_is_bu_head_target_plus_approved_extensions(client, db, world, governed):

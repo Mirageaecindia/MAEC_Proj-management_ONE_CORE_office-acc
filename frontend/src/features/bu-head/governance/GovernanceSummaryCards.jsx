@@ -49,12 +49,22 @@ function GovernanceStatusCard({ governance }) {
   );
 }
 
+/** Past the contract value the card says by how much (TODO N5). */
+function budgetFoot(budget, currency) {
+  if (!budget) return 'No project data';
+  if (budget.over_budget > 0) {
+    return `Over budget by ${formatMoney(budget.over_budget, currency)} (${formatPercent(budget.percent)} of contract)`;
+  }
+  return formatPercent(budget.percent);
+}
+
 /** The four headline KPIs of the Executive Dashboard. `data` is null until a project loads. */
 export function GovernanceSummaryCards({ data }) {
   const currency = data?.project?.contract_currency || 'USD';
   const budget = data?.commercial_budget_burn;
   const hours = data?.hours_consumption;
   const spi = data?.spi;
+  const overBudget = budget?.over_budget > 0;
 
   return (
     <section className="ed-summary-cards">
@@ -62,8 +72,9 @@ export function GovernanceSummaryCards({ data }) {
         label="Commercial Budget Burn"
         value={budget ? formatMoney(budget.consumed, currency) : NOT_AVAILABLE}
         sub={budget ? `of ${formatMoney(budget.total, currency)} contract value` : NO_PROJECT}
-        progress={{ tone: 'blue', percent: budget?.percent }}
-        foot={budget ? formatPercent(budget.percent) : 'No project data'}
+        progress={{ tone: overBudget ? 'red' : 'blue', percent: budget?.percent }}
+        foot={budgetFoot(budget, currency)}
+        className={overBudget ? 'ed-card-danger' : ''}
       />
       <StatCard
         label="Approved Hours Consumption"

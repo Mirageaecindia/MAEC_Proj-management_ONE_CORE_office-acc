@@ -1256,6 +1256,7 @@ tr.clickable-row:hover td { background: #f0f7fd !important; }
 .ed-progress span { display: block; height: 100%; border-radius: 6px; }
 .ed-progress-blue span { background: linear-gradient(90deg, #2f6fae, #3b9bd7); }
 .ed-progress-orange span { background: linear-gradient(90deg, #d97b1a, #f0a14a); }
+.ed-progress-red span { background: linear-gradient(90deg, #c0303e, #e25563); }
 .ed-progress-green span { background: linear-gradient(90deg, #2e9e6b, #57c28b); }
 
 .ed-two-panels { display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px; margin-bottom: 18px; }

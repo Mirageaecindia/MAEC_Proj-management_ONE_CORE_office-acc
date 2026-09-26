@@ -25,7 +25,7 @@ export function StatCard({
   );
 }
 
-/** Horizontal bar; `percent` is clamped to 0–100. tone: blue | orange | green. */
+/** Horizontal bar; `percent` is clamped to 0–100. tone: blue | orange | green | red. */
 export function ProgressBar({ tone = 'blue', percent = 0 }) {
   const width = Math.max(0, Math.min(100, Number(percent) || 0));
   return (
