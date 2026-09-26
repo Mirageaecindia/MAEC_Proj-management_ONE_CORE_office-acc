@@ -189,7 +189,7 @@ class ProjectService:
                     project_id=project.id, action="edit_project", comments="; ".join(changes), created_by=actor
                 )
             )
-        self.monitor.evaluate(project)  # the baseline may have moved: lock or unlock
+        self.monitor.evaluate(project, baseline_raised_by_bu_head=True)  # target may have moved: lock or unlock
         self._notify_lead_changes(project, set(filter(None, old_lead_ids)), new_lead_ids, actor)
         try:
             self.db.commit()

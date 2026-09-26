@@ -6,8 +6,9 @@ rejecting rows or weeks, edits to rows) or the baseline. Each level is acted on 
 is first reached:
 - WARNING   -> notify the BU Head and the project's Leads;
 - HARD_STOP -> lock timesheets automatically and notify them.
-Dropping back (the baseline raised by an extension or a project edit) re-arms
-the alerts and lifts an *automatic* lock; a manual stop is never lifted here.
+Dropping back re-arms the alerts; when the BU Head raised the baseline (an
+extension or a target edit) it also lifts an *automatic* lock. Fewer approved
+hours never reopen, and a manual stop is never lifted here.
 Because only a *rise* into HARD_STOP locks, a BU Head who resumes a project
 manually is not overridden by the next logged hour.
 """
@@ -44,8 +45,12 @@ class GovernanceMonitor:
             project.governance_threshold_pct,
         )
 
-    def evaluate(self, project: models.Project) -> GovernanceReading:
-        """Apply alerts/auto-lock for a level change. The caller commits."""
+    def evaluate(self, project: models.Project, *, baseline_raised_by_bu_head: bool = False) -> GovernanceReading:
+        """Apply alerts/auto-lock for a level change. The caller commits.
+
+        An automatic lock reopens only when the BU Head raised the baseline (an approved
+        extension or a target edit). Fewer approved hours never reopen it: otherwise
+        rejecting old approved rows would be a way round the lock."""
         reading = self.reading(project)
         if project.archived_at is not None:
             return reading  # archived projects are out of governance: no alerts, no lock
@@ -60,9 +65,14 @@ class GovernanceMonitor:
                 self._notify(
                     project, notify.THRESHOLD_WARNING, "Alert threshold reached", _usage_text(project, reading)
                 )
-        elif previous == HARD_STOP and project.timesheets_soft_locked and project.lock_reason == LOCK_AUTO:
-            # Usage fell back under 100% (baseline raised by an extension or an edit): the reason
-            # for the automatic lock is gone. A manual stop is the BU Head's call and stays.
+        elif (
+            baseline_raised_by_bu_head
+            and previous == HARD_STOP
+            and project.timesheets_soft_locked
+            and project.lock_reason == LOCK_AUTO
+        ):
+            # The BU Head's new baseline puts usage back under 100%: the reason for the
+            # automatic lock is gone. A manual stop is the BU Head's call and stays.
             self._auto_resume(project, reading)
         return reading
 

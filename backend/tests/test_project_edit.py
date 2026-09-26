@@ -177,3 +177,18 @@ def test_an_archived_project_cannot_be_edited(client, world, governed):
     client.post(f"/api/projects/{project_id}/archive", json={}, headers=world.bu_h)
 
     assert _edit(client, world, project_id, target_effort_hours=150).status_code == 409
+
+
+def test_fewer_approved_hours_never_reopen_an_automatic_lock(db, make, world, governed):
+    # A Lead rejecting approved rows must not reopen the project: only the BU Head's
+    # baseline changes do (an approved extension or a target edit).
+    project_id, node_a, *_ = governed
+    _reach_auto_lock(db, make, world, project_id, node_a)
+    for entry in db.query(models.TimeLogEntry).filter_by(project_id=project_id, approval_status="approved"):
+        entry.approval_status = "rejected"  # the lock blocks this today; D8 plans to allow rejects while locked
+    db.commit()
+
+    enforce_governance(db, project_id)
+
+    project = _project(db, project_id)
+    assert (project.timesheets_soft_locked, project.lock_reason) == (True, "auto")

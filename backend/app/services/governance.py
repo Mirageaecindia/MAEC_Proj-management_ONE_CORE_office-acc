@@ -138,7 +138,7 @@ class GovernanceService:
             )
         )
         # The baseline may have risen: re-arm or re-evaluate alerts first.
-        reading = self.monitor.evaluate(project)
+        reading = self.monitor.evaluate(project, baseline_raised_by_bu_head=status == "approved")
         still_over = reading.level == HARD_STOP
         if status == "approved" and project.timesheets_soft_locked and not still_over:
             # BU Head decision: an approved extension resumes a stopped project,
