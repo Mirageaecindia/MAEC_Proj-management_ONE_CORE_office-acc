@@ -50,6 +50,19 @@ export function useCreateProject() {
   return useProjectMutation(projectsApi.create);
 }
 
+/** Edits change governance figures too, so the project's dashboards are refreshed. */
+export function useUpdateProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, payload }) => projectsApi.update(projectId, payload),
+    onSuccess: (_project, { projectId }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      queryClient.invalidateQueries({ queryKey: queryKeys.executiveDashboard(projectId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.workSummary(projectId) });
+    },
+  });
+}
+
 /** Only succeeds for a project without history; the others are archived instead. */
 export function useDeleteProject() {
   return useProjectMutation(projectsApi.remove);

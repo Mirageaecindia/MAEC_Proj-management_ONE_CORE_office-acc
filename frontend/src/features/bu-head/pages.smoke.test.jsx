@@ -11,7 +11,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { NotificationBell } from '../../components/NotificationBell';
 import { SharePointMirrorPage } from '../sharepoint/SharePointMirrorPage';
 import { CreatedProjectsPage } from './CreatedProjectsPage';
-import { CreateProjectPage } from './CreateProjectPage';
+import { CreateProjectPage, EditProjectPage } from './CreateProjectPage';
 import { ExecutiveDashboardPage } from './ExecutiveDashboardPage';
 import { ProjectWorkSummaryPage } from './ProjectWorkSummaryPage';
 
@@ -142,7 +142,16 @@ const ARCHIVED = {
   archived_at: '2026-09-20T10:00:00Z',
 };
 
+const EDITABLE = {
+  ...PROJECT,
+  id: 5,
+  project_lead_electrical_user_id: 2,
+  project_lead_mechanical_user_id: 2,
+  project_lead_bim_user_id: 2,
+};
+
 const ROUTES = [
+  [/\/api\/projects\/5$/, EDITABLE],
   [/\/api\/projects\?include_archived=true$/, [PROJECT, ARCHIVED]],
   [/\/api\/projects\/1\/archive$/, { ...PROJECT, archived_at: '2026-09-26T10:00:00Z' }],
   [/\/api\/projects\/7$/, ARCHIVED],
@@ -225,6 +234,35 @@ describe('BU Head pages render with API data', () => {
     expect(await screen.findByText('Project archived: read-only')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Stop the Execution' }).disabled).toBe(true);
     expect(screen.getByRole('button', { name: 'Approve Extension' }).disabled).toBe(true);
+  });
+
+  it('Edit Project is the Create form filled in, without the SharePoint section', async () => {
+    renderAt(<EditProjectPage />, '/edit-project?projectId=5');
+
+    expect(await screen.findByDisplayValue('Hotel Tower')).toBeTruthy();
+    expect(screen.getByDisplayValue('MAEC-001')).toBeTruthy();
+    expect(screen.queryByText(/Automated SharePoint Directory Setup/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeTruthy();
+  });
+
+  it('Edit Project asks before changing the currency, then sends the confirmation', async () => {
+    renderAt(<EditProjectPage />, '/edit-project?projectId=5');
+    await screen.findByDisplayValue('Hotel Tower');
+    await screen.findAllByRole('option', { name: 'Anita Kumar' }); // leads loaded
+
+    fireEvent.change(screen.getByLabelText('Contract currency'), { target: { value: 'USD' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(screen.getByText('Change the currency from INR to USD?')).toBeTruthy();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Change Currency' }));
+
+    await vi.waitFor(() => {
+      const put = fetch.mock.calls.find(([, options]) => options?.method === 'PUT');
+      expect(put[0]).toMatch(/\/api\/projects\/5$/);
+      expect(JSON.parse(put[1].body)).toMatchObject({
+        contract_currency: 'USD',
+        confirm_currency_change: true,
+      });
+    });
   });
 
   it('Create Project shows validation errors on an empty submit', async () => {

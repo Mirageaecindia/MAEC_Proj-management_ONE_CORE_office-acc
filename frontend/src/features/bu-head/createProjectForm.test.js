@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   INITIAL_FORM,
   creationNotice,
+  formFromProject,
   toCreateProjectPayload,
+  toUpdateProjectPayload,
+  updateNotice,
   validateProjectForm,
 } from './createProjectForm';
 
@@ -103,5 +106,50 @@ describe('creationNotice', () => {
     });
     expect(notice.type).toBe('error');
     expect(notice.message).toContain('SharePoint provisioning failed: 403');
+  });
+});
+
+describe('editing a project', () => {
+  const PROJECT = {
+    project_name: 'Hotel Tower',
+    project_code: 'MAEC-001',
+    client_organization: 'Acme',
+    project_lead_electrical_user_id: 1,
+    project_lead_mechanical_user_id: 2,
+    project_lead_bim_user_id: 3,
+    start_date: '2026-09-01',
+    contract_value: 480000.5,
+    contract_currency: 'USD',
+    target_effort_hours: 3840,
+    governance_threshold_pct: 75,
+  };
+
+  it('round-trips a project through the form into the update payload', () => {
+    const form = formFromProject(PROJECT);
+
+    expect(validateProjectForm(form, { requireDisciplines: false })).toEqual({});
+    const payload = toUpdateProjectPayload(form, LEADS);
+    expect(payload).toMatchObject({
+      project_name: 'Hotel Tower',
+      project_lead_electrical_user_id: 1,
+      project_lead_electrical: 'Anita Kumar',
+      total_contract_value: 480000.5,
+      target_effort_hours: 3840,
+      alert_override_threshold_pct: 75,
+      confirm_currency_change: false,
+    });
+    expect(payload).not.toHaveProperty('sharepoint_disciplines');
+  });
+
+  it('only sends the currency confirmation when asked', () => {
+    const payload = toUpdateProjectPayload(formFromProject(PROJECT), LEADS, { confirmCurrencyChange: true });
+
+    expect(payload.confirm_currency_change).toBe(true);
+  });
+
+  it('reports moved WBS nodes after an edit', () => {
+    expect(updateNotice({ project_name: 'Hotel Tower', reassigned_nodes: 2 }).message).toBe(
+      'Project "Hotel Tower" updated. 2 WBS node(s) moved to the new lead.',
+    );
   });
 });

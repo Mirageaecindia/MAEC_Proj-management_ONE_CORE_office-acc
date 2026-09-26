@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, BarChart3, PlusCircle, Search, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, BarChart3, Pencil, PlusCircle, Search, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
@@ -95,6 +95,9 @@ function ProjectCard({ project, onAction }) {
             </button>
           ) : (
             <>
+              <Link className="created-project-action" to={`/edit-project?projectId=${project.id}`}>
+                <Pencil size={14} /> Edit
+              </Link>
               <button type="button" className="created-project-action" onClick={() => onAction('archive')}>
                 <Archive size={14} /> Archive
               </button>

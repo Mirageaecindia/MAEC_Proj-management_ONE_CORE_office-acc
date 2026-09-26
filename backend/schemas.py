@@ -157,13 +157,8 @@ class ProjectOut(ProjectBase):
     archived_at: Optional[datetime] = None
 
 
-class ProjectCreatePayload(BaseModel):
-    """JSON body POSTed by the BU Head 'Create Project' form on /api/projects.
-
-    The frontend form fields map directly onto the existing projects table
-    (plus the ALTER-migrated governance/lead columns) so creation and the
-    'Created Projects' list share one model.
-    """
+class ProjectFields(BaseModel):
+    """Project fields the BU Head sets on the Create Project form and can later edit."""
     project_name: str
     project_code: str
     client_customer: str
@@ -174,7 +169,6 @@ class ProjectCreatePayload(BaseModel):
     project_lead_mechanical_user_id: Optional[int] = None
     project_lead_bim_user_id: Optional[int] = None
     target_start_date: Optional[date] = None
-    sharepoint_disciplines: Optional[List[str]] = None
     total_contract_value: float = 0
     contract_currency: str = "USD"
     target_effort_hours: float = 0
@@ -198,6 +192,21 @@ class ProjectCreatePayload(BaseModel):
     @classmethod
     def non_negative(cls, v: float) -> float:
         return max(0.0, float(v or 0))
+
+
+class ProjectCreatePayload(ProjectFields):
+    """JSON body POSTed by the BU Head 'Create Project' form on /api/projects."""
+    sharepoint_disciplines: Optional[List[str]] = None
+
+
+class ProjectUpdatePayload(ProjectFields):
+    """JSON body PUT to /api/projects/{id}. SharePoint folders are not re-provisioned on edit.
+    Changing the currency relabels amounts without converting them, so it must be confirmed."""
+    confirm_currency_change: bool = False
+
+
+class ProjectUpdateOut(ProjectOut):
+    reassigned_nodes: int = 0
 
 
 class CreateProjectOut(ProjectOut):

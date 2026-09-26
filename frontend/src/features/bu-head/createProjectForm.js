@@ -1,4 +1,4 @@
-/** Create Project form: initial state, validation and request payload (pure functions). */
+/** Create / Edit Project form: initial state, validation and request payloads (pure functions). */
 
 import { isSupportedCurrency } from '../../constants/currencies';
 import { SHAREPOINT_DISCIPLINES } from '../../constants/sharepoint';
@@ -34,8 +34,32 @@ export function parseHours(raw) {
   return Number(String(raw ?? '').replace(/,/g, ''));
 }
 
-/** Field -> error message for every invalid field (empty object when valid). */
-export function validateProjectForm(form) {
+/** Form values for editing an existing project (GET /api/projects/{id}). */
+export function formFromProject(project) {
+  return {
+    ...INITIAL_FORM,
+    projectName: project.project_name ?? '',
+    projectCode: project.project_code ?? '',
+    clientCustomer: project.client_organization ?? '',
+    electricalLead: project.project_lead_electrical_user_id
+      ? String(project.project_lead_electrical_user_id)
+      : '',
+    mechanicalLead: project.project_lead_mechanical_user_id
+      ? String(project.project_lead_mechanical_user_id)
+      : '',
+    bimLead: project.project_lead_bim_user_id ? String(project.project_lead_bim_user_id) : '',
+    targetStartDate: project.start_date ?? '',
+    contractCurrency: project.contract_currency || 'USD',
+    contractValue: project.contract_value != null ? String(project.contract_value) : '',
+    effortHours: project.target_effort_hours != null ? String(project.target_effort_hours) : '',
+    threshold: project.governance_threshold_pct ?? 80,
+    selectedDisciplines: [],
+  };
+}
+
+/** Field -> error message for every invalid field (empty object when valid).
+ *  SharePoint disciplines are chosen only when creating. */
+export function validateProjectForm(form, { requireDisciplines = true } = {}) {
   const errors = {};
   for (const [field, message] of REQUIRED_FIELDS) {
     if (!String(form[field] ?? '').trim()) errors[field] = message;
@@ -51,7 +75,7 @@ export function validateProjectForm(form) {
   if (!Number.isFinite(effortHours) || effortHours <= 0) {
     errors.effortHours = 'Enter effort hours greater than 0.';
   }
-  if (form.selectedDisciplines.length === 0) {
+  if (requireDisciplines && form.selectedDisciplines.length === 0) {
     errors.selectedDisciplines = 'Select at least one discipline.';
   }
   if (form.threshold < 0 || form.threshold > 100) {
@@ -65,8 +89,7 @@ function leadRef(leadId, allLeads) {
   return { id: leadId ? Number(leadId) : null, name: match ? match.name : '' };
 }
 
-/** Body for POST /api/projects. `leads` is { electrical: [...], mechanical: [...], bim: [...] }. */
-export function toCreateProjectPayload(form, leads) {
+function projectFields(form, leads) {
   const allLeads = [...leads.electrical, ...leads.mechanical, ...leads.bim];
   const electrical = leadRef(form.electricalLead, allLeads);
   const mechanical = leadRef(form.mechanicalLead, allLeads);
@@ -82,12 +105,29 @@ export function toCreateProjectPayload(form, leads) {
     project_lead_mechanical_user_id: mechanical.id,
     project_lead_bim_user_id: bim.id,
     target_start_date: form.targetStartDate,
-    sharepoint_disciplines: form.selectedDisciplines,
     total_contract_value: parseAmount(form.contractValue),
     contract_currency: form.contractCurrency,
     target_effort_hours: parseHours(form.effortHours),
     alert_override_threshold_pct: Number(form.threshold),
   };
+}
+
+/** Body for POST /api/projects. `leads` is { electrical: [...], mechanical: [...], bim: [...] }. */
+export function toCreateProjectPayload(form, leads) {
+  return { ...projectFields(form, leads), sharepoint_disciplines: form.selectedDisciplines };
+}
+
+/** Body for PUT /api/projects/{id}. A currency change must be confirmed explicitly. */
+export function toUpdateProjectPayload(form, leads, { confirmCurrencyChange = false } = {}) {
+  return { ...projectFields(form, leads), confirm_currency_change: confirmCurrencyChange };
+}
+
+/** Notice shown on the project list after an edit. */
+export function updateNotice(project) {
+  const moved = project.reassigned_nodes
+    ? ` ${project.reassigned_nodes} WBS node(s) moved to the new lead.`
+    : '';
+  return { type: 'success', message: `Project "${project.project_name}" updated.${moved}` };
 }
 
 /** Notice describing the create outcome, including the SharePoint provisioning result. */

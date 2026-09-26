@@ -6,9 +6,10 @@ rejecting rows or weeks, edits to rows) or the baseline. Each level is acted on 
 is first reached:
 - WARNING   -> notify the BU Head and the project's Leads;
 - HARD_STOP -> lock timesheets automatically and notify them.
-Dropping back (e.g. after an approved extension raises the baseline) re-arms
-the alerts. Because only a *rise* into HARD_STOP locks, a BU Head who resumes
-a project manually is not overridden by the next logged hour.
+Dropping back (the baseline raised by an extension or a project edit) re-arms
+the alerts and lifts an *automatic* lock; a manual stop is never lifted here.
+Because only a *rise* into HARD_STOP locks, a BU Head who resumes a project
+manually is not overridden by the next logged hour.
 """
 
 from sqlalchemy.orm import Session
@@ -59,6 +60,10 @@ class GovernanceMonitor:
                 self._notify(
                     project, notify.THRESHOLD_WARNING, "Alert threshold reached", _usage_text(project, reading)
                 )
+        elif previous == HARD_STOP and project.timesheets_soft_locked and project.lock_reason == LOCK_AUTO:
+            # Usage fell back under 100% (baseline raised by an extension or an edit): the reason
+            # for the automatic lock is gone. A manual stop is the BU Head's call and stays.
+            self._auto_resume(project, reading)
         return reading
 
     def _auto_lock(self, project: models.Project, reading: GovernanceReading) -> None:
@@ -82,6 +87,27 @@ class GovernanceMonitor:
             "Timesheets locked: baseline reached",
             f"{_usage_text(project, reading)} Timesheets are locked until the BU Head approves an extension "
             "or resumes execution.",
+        )
+
+    def _auto_resume(self, project: models.Project, reading: GovernanceReading) -> None:
+        project.timesheets_soft_locked = False
+        project.lock_reason = None
+        self.db.add(
+            models.GovernanceAction(
+                project_id=project.id,
+                action="resume_execution",
+                consumption_pct=reading.consumption_pct,
+                threshold_pct=project.governance_threshold_pct,
+                consumption_hours=reading.approved_hours,
+                comments="Timesheets reopened automatically: usage is back under 100% of the baseline.",
+                created_by=SYSTEM_ACTOR,
+            )
+        )
+        self._notify(
+            project,
+            notify.EXECUTION_RESUMED,
+            "Timesheets reopened",
+            f"{_usage_text(project, reading)} Timesheets are open again.",
         )
 
     def _notify(self, project: models.Project, kind: str, title: str, message: str) -> None:

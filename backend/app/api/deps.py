@@ -39,7 +39,9 @@ def get_auth_service(
 def get_project_service(
     db: Session = Depends(get_db), storage: DocumentStorage = Depends(get_document_storage)
 ) -> ProjectService:
-    return ProjectService(db, ProjectRepository(db), UserRepository(db), storage)
+    return ProjectService(
+        db, ProjectRepository(db), UserRepository(db), storage, GovernanceMonitor(db, WorkRepository(db))
+    )
 
 
 def get_document_service(

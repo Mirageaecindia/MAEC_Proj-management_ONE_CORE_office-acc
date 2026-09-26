@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { INITIAL_FORM, validateProjectForm } from './createProjectForm';
 
-/** Form state for Create Project: values, per-field errors and edit helpers. */
-export function useCreateProjectForm() {
-  const [form, setForm] = useState(INITIAL_FORM);
+/** Form state for Create / Edit Project: values, per-field errors and edit helpers. */
+export function useCreateProjectForm(initialForm = INITIAL_FORM, { requireDisciplines = true } = {}) {
+  const [form, setForm] = useState(initialForm);
   const [errors, setErrors] = useState({});
 
   function updateField(field, value) {
@@ -26,13 +26,13 @@ export function useCreateProjectForm() {
 
   /** Validates all fields, shows their errors, and returns whether the form is valid. */
   function validate() {
-    const nextErrors = validateProjectForm(form);
+    const nextErrors = validateProjectForm(form, { requireDisciplines });
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   }
 
   function reset() {
-    setForm(INITIAL_FORM);
+    setForm(initialForm);
     setErrors({});
   }
 

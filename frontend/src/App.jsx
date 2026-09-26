@@ -8,6 +8,7 @@ import { QueryProvider } from './providers/QueryProvider';
 // Pages are code-split: each role only downloads the screens it opens.
 const lazyPage = (load, name) => lazy(() => load().then((module) => ({ default: module[name] })));
 const CreateProjectPage = lazyPage(() => import('./features/bu-head/CreateProjectPage'), 'CreateProjectPage');
+const EditProjectPage = lazyPage(() => import('./features/bu-head/CreateProjectPage'), 'EditProjectPage');
 const CreatedProjectsPage = lazyPage(
   () => import('./features/bu-head/CreatedProjectsPage'),
   'CreatedProjectsPage',
@@ -38,7 +39,10 @@ const ResourceBookingPage = lazyPage(
 );
 const TimelineLogsPage = lazyPage(() => import('./pages/shared/TimelineLogsPage'), 'TimelineLogsPage');
 const WbsStructurePage = lazyPage(() => import('./pages/shared/WbsStructurePage'), 'WbsStructurePage');
-const EngineerWeeklyLogsPage = lazyPage(() => import('./pages/shared/EngineerWeeklyLogsPage'), 'EngineerWeeklyLogsPage');
+const EngineerWeeklyLogsPage = lazyPage(
+  () => import('./pages/shared/EngineerWeeklyLogsPage'),
+  'EngineerWeeklyLogsPage',
+);
 const TaskDetailsPage = lazyPage(() => import('./pages/shared/TaskDetailsPage'), 'TaskDetailsPage');
 
 function ExecutiveDashboardRouter() {
@@ -110,6 +114,14 @@ function AppRoutes() {
           element={
             <WorkspaceRoute roles={['bu_head']}>
               <CreateProjectPage />
+            </WorkspaceRoute>
+          }
+        />
+        <Route
+          path="/edit-project"
+          element={
+            <WorkspaceRoute roles={['bu_head']}>
+              <EditProjectPage />
             </WorkspaceRoute>
           }
         />

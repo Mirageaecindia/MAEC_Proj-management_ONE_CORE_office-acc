@@ -1,13 +1,21 @@
 import { ArrowLeft, Check, ChevronDown, LoaderCircle, Save, X } from 'lucide-react';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Notice } from '../../components/Feedback';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { EmptyState, ErrorBanner, Notice } from '../../components/Feedback';
 import { PageHeader } from '../../components/PageHeader';
 import { CURRENCIES, currencySymbol } from '../../constants/currencies';
 import { SHAREPOINT_DISCIPLINES } from '../../constants/sharepoint';
-import { useCreateProject, useProjectLeads } from '../../hooks/useProjects';
+import { useCreateProject, useProject, useProjectLeads, useUpdateProject } from '../../hooks/useProjects';
 import { formatAmount } from '../../utils/format';
-import { creationNotice, toCreateProjectPayload } from './createProjectForm';
+import {
+  INITIAL_FORM,
+  creationNotice,
+  formFromProject,
+  toCreateProjectPayload,
+  toUpdateProjectPayload,
+  updateNotice,
+} from './createProjectForm';
 import { useCreateProjectForm } from './useCreateProjectForm';
 
 function SectionTitle({ number, children }) {
@@ -76,36 +84,93 @@ function AmountInput({ value, onChange }) {
 }
 
 export function CreateProjectPage() {
+  return <ProjectFormPage />;
+}
+
+/** Edit an existing project (?projectId=): the Create form, filled in. */
+export function EditProjectPage() {
+  const [searchParams] = useSearchParams();
+  const { data: project, error, isLoading } = useProject(searchParams.get('projectId'));
+  if (error || isLoading || !project || project.archived_at) {
+    return (
+      <main className="page-shell">
+        <ErrorBanner error={error} />
+        {isLoading && <EmptyState>Loading project…</EmptyState>}
+        {project?.archived_at && (
+          <EmptyState>This project is archived and read-only. Reopen it first.</EmptyState>
+        )}
+      </main>
+    );
+  }
+  return <ProjectFormPage key={project.id} project={project} />;
+}
+
+const HEADER = {
+  create: {
+    breadcrumb: ['Projects', 'Commercial Setup', 'New Entry'],
+    title: 'Create Project & Commercial Baseline',
+    description:
+      'Define project parameters, commercial limits, and trigger automated SharePoint folder provisioning.',
+  },
+  edit: {
+    breadcrumb: ['Projects', 'Commercial Setup', 'Edit'],
+    title: 'Edit Project & Commercial Baseline',
+    description:
+      'Every change is recorded in the governance audit log. SharePoint folders are not renamed. Replacing a lead moves their WBS tasks to the new lead.',
+  },
+};
+
+function ProjectFormPage({ project = null }) {
+  const isEdit = Boolean(project);
   const navigate = useNavigate();
   const { leads, error: leadsError } = useProjectLeads();
   const createProject = useCreateProject();
+  const updateProject = useUpdateProject();
+  const mutation = isEdit ? updateProject : createProject;
+  const [confirmingCurrency, setConfirmingCurrency] = useState(false);
   const { form, errors, updateField, toggleDiscipline, changeCurrency, validate, reset } =
-    useCreateProjectForm();
+    useCreateProjectForm(isEdit ? formFromProject(project) : INITIAL_FORM, { requireDisciplines: !isEdit });
+
+  function save({ confirmCurrencyChange = false } = {}) {
+    if (!isEdit) {
+      createProject.mutate(toCreateProjectPayload(form, leads), {
+        // The outcome (including SharePoint) is shown on the project list.
+        onSuccess: (created) => navigate('/created-projects', { state: { notice: creationNotice(created) } }),
+      });
+      return;
+    }
+    updateProject.mutate(
+      { projectId: project.id, payload: toUpdateProjectPayload(form, leads, { confirmCurrencyChange }) },
+      { onSuccess: (updated) => navigate('/created-projects', { state: { notice: updateNotice(updated) } }) },
+    );
+  }
 
   function handleSubmit(event) {
     event.preventDefault();
-    createProject.reset();
+    mutation.reset();
     if (!validate()) return;
-    createProject.mutate(toCreateProjectPayload(form, leads), {
-      // The outcome (including SharePoint) is shown on the project list.
-      onSuccess: (project) => navigate('/created-projects', { state: { notice: creationNotice(project) } }),
-    });
+    if (isEdit && form.contractCurrency !== project.contract_currency) {
+      setConfirmingCurrency(true); // amounts are relabelled, not converted
+      return;
+    }
+    save();
   }
 
   function handleCancel() {
+    if (isEdit) {
+      navigate('/created-projects');
+      return;
+    }
     reset();
     createProject.reset();
   }
 
-  const submitting = createProject.isPending;
+  const submitting = mutation.isPending;
+  const header = HEADER[isEdit ? 'edit' : 'create'];
 
   return (
     <main className="page-shell">
-      <PageHeader
-        breadcrumb={['Projects', 'Commercial Setup', 'New Entry']}
-        title="Create Project & Commercial Baseline"
-        description="Define project parameters, commercial limits, and trigger automated SharePoint folder provisioning."
-      >
+      <PageHeader breadcrumb={header.breadcrumb} title={header.title} description={header.description}>
         <button
           type="button"
           className="button button-secondary"
@@ -115,8 +180,8 @@ export function CreateProjectPage() {
         </button>
       </PageHeader>
 
-      {createProject.error && (
-        <Notice type="error" message={createProject.error.message} onDismiss={() => createProject.reset()} />
+      {mutation.error && (
+        <Notice type="error" message={mutation.error.message} onDismiss={() => mutation.reset()} />
       )}
 
       <form className="project-card" onSubmit={handleSubmit} noValidate>
@@ -186,31 +251,35 @@ export function CreateProjectPage() {
             </div>
           </section>
 
-          <section className="discipline-section">
-            <SectionTitle number="2">Automated SharePoint Directory Setup</SectionTitle>
-            <p className="section-copy">
-              Select MEP engineering disciplines to auto-create inside SharePoint site:
-            </p>
-            <div className="discipline-grid">
-              {SHAREPOINT_DISCIPLINES.map((discipline) => {
-                const checked = form.selectedDisciplines.includes(discipline.value);
-                return (
-                  <label className={`discipline-option ${checked ? 'checked' : ''}`} key={discipline.value}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleDiscipline(discipline.value)}
-                    />
-                    <span className="checkmark">
-                      <Check size={13} />
-                    </span>
-                    <span>{discipline.label}</span>
-                  </label>
-                );
-              })}
-            </div>
-            {errors.selectedDisciplines && <span className="field-error">{errors.selectedDisciplines}</span>}
-          </section>
+          {!isEdit && (
+            <section className="discipline-section">
+              <SectionTitle number="2">Automated SharePoint Directory Setup</SectionTitle>
+              <p className="section-copy">
+                Select MEP engineering disciplines to auto-create inside SharePoint site:
+              </p>
+              <div className="discipline-grid">
+                {SHAREPOINT_DISCIPLINES.map((discipline) => {
+                  const checked = form.selectedDisciplines.includes(discipline.value);
+                  return (
+                    <label className={`discipline-option ${checked ? 'checked' : ''}`} key={discipline.value}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleDiscipline(discipline.value)}
+                      />
+                      <span className="checkmark">
+                        <Check size={13} />
+                      </span>
+                      <span>{discipline.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              {errors.selectedDisciplines && (
+                <span className="field-error">{errors.selectedDisciplines}</span>
+              )}
+            </section>
+          )}
         </div>
 
         <div className="form-column right-column">
@@ -292,11 +361,40 @@ export function CreateProjectPage() {
             </button>
             <button type="submit" className="button button-primary" disabled={submitting}>
               {submitting ? <LoaderCircle className="spin" size={17} /> : <Save size={17} />}
-              {submitting ? 'Creating Project...' : 'Create Project & Build SharePoint Directory'}
+              {isEdit
+                ? submitting
+                  ? 'Saving...'
+                  : 'Save Changes'
+                : submitting
+                  ? 'Creating Project...'
+                  : 'Create Project & Build SharePoint Directory'}
             </button>
           </div>
         </div>
       </form>
+
+      {confirmingCurrency && (
+        <ConfirmDialog
+          title="Change Contract Currency"
+          confirmLabel="Change Currency"
+          busyLabel="Saving…"
+          busy={updateProject.isPending}
+          error={updateProject.error}
+          onConfirm={() => save({ confirmCurrencyChange: true })}
+          onCancel={() => {
+            updateProject.reset();
+            setConfirmingCurrency(false);
+          }}
+        >
+          <p className="confirm-modal-text">
+            Change the currency from {project.contract_currency} to {form.contractCurrency}?
+          </p>
+          <p className="confirm-modal-subtext">
+            The contract value and budget burn are relabelled, not converted: enter the amount in the new
+            currency too. The change is recorded in the audit log.
+          </p>
+        </ConfirmDialog>
+      )}
     </main>
   );
 }

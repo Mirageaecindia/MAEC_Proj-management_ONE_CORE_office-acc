@@ -94,7 +94,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | ID | Task | Why | Where | Size |
 |---|---|---|---|---|
 | C1 | ✅ **Done.** `projects.archived_at` (migration `0003`); `POST /projects/{id}/archive` and `/unarchive` (BU Head, audited, Leads notified). Archived = **read-only for everyone** (a flush-level guard refuses any write of its data, whatever the endpoint), hidden from Leads and Engineers (all their lists, dashboards, Gantt and endpoints), out of the allocation cap and governance alerts. Archiving ends active tracking (time banked) and cancels a pending extension request; unarchive restores the lock as it was. The BU Head sees archived projects behind a filter and can open their dashboard (read-only). Hard delete only for a project with no history; otherwise archive | Delete wiped the governance audit log | `app/services/archive_guard.py`, `app/services/projects.py`, `app/services/access.py`, `main.py` allocation cap, `CreatedProjectsPage.jsx`, `useProjectSelection.js`, `tests/test_project_archive.py` | M |
-| C2 | **Edit project** with PUT and a UI (P1 #7). Changes to target hours or threshold go in the audit log and re-run the lock check **in both directions**: raising the target can move usage under 100% (unlock, same rule as N14(d)); **lowering it can push usage to 100% or more, which must lock**. Test both directions, so editing is never a way round the lock | A typo in the contract value can only be fixed by deleting the project | `routers/bu_head/projects.py`, `services/projects.py`, `GovernanceMonitor`, Create Project form reused as an edit form | M |
+| C2 | ✅ **Done.** `PUT /api/projects/{id}` (BU Head) and an Edit page (the Create form, filled in; no SharePoint section). Every changed field is audited before → after; project code stays unique; a currency change needs an explicit confirmation (dialog) because amounts are relabelled, not converted; replacing a lead moves their WBS nodes to the new lead (old lead loses access, both are notified); archived projects can't be edited. **Lock re-check both ways:** lowering the target past 100% locks; raising it reopens an **automatic** lock (the monitor now does this for any drop back under 100%); a manual stop stays | A typo in the contract value could only be fixed by deleting the project | `app/services/projects.py`, `app/services/governance_monitor.py`, `CreateProjectPage.jsx`, `tests/test_project_edit.py` | M |
 | C3 | **Create Project: add end date, scope, project type and SOW upload** (P1 #9); the SOW goes through the authenticated file endpoint (S5). Show the SharePoint failure message, which is lost on redirect today | Missing baseline data; contracts must not be public | `createProjectForm.js`, `services/projects.py` | M |
 | C4 | **Reject button and rejection reason on the Resource Booking page** (P1 #10). The API exists | The BU Head can approve but not send back | `ResourceBookingPage.jsx`, `booking_approval.py` | S |
 | C5 | **Approve or reject bookings per engineer**, not all-or-nothing | You can't approve three engineers and reject one | `booking_approval.py`, `main.py` submit, UI | M |
@@ -171,7 +171,7 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
    - **S2:** the only other clone is Subhika's; she has moved to another project and won't pull or push. Purge, then ask her to delete her clone.
    - **S7 (go-live item):** the database holds only test data today. Before real use, point `backup_db.py --dir` at an off-machine folder (external drive or restricted OneDrive) and schedule it nightly.
    - S3–S8, N14(d) and E4 are done.
-2. **Sprint A:** E4 Alembic ✅, N2 7-day hours ✅, N8 statuses ✅, E3 lint ✅, C1 archive ✅, then C2 edit, C4 reject button, C8, N5, N8, N11, N12, N13.
+2. **Sprint A:** E4 Alembic ✅, N2 7-day hours ✅, N8 statuses ✅, E3 lint ✅, C1 archive ✅, C2 edit ✅, then C4 reject button, C8, N5, N11, N12, N13.
 3. **Sprint B (timesheets and lock):** N1 timesheet model (tell the previous Engineer developer first), N9 single approval route, N14 lock rules, C6, C7, C10, C12. Lead/Engineer features move into `app/` as they are touched.
 4. **Sprint C (calendar and cost):** N3 office field, N4 EV/SPI/CPI, N6 rate card, N7 disciplines, N10, C3 (after S5), C5.
 5. **Sprint D:** W1–W3.
@@ -215,4 +215,5 @@ Nothing here is urgent while the app is in development. All of it must be done b
 | E4: Alembic migrations (adoption of pre-Alembic dev databases, since removed) | `7bd72ba`, `ceb8f4a` |
 | N2: hours on all seven days count | `23eec47` |
 | N8 WBS statuses normalized; E3 lint errors fixed | `f682295`, `43f5b8e` |
-| C1 project archive (read-only guard, access, cap, governance) | this sprint |
+| C1 project archive (read-only guard, access, cap, governance) | `3168bac`, `2b84106`, `787f9cb` |
+| C2 edit project (audit, currency confirmation, lead handover, lock re-check both ways) | this sprint |

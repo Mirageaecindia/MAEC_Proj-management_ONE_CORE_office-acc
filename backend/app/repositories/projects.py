@@ -52,6 +52,17 @@ class ProjectRepository:
             self.db.query(model.id).filter_by(project_id=project_id).first() is not None for model in _HISTORY_MODELS
         )
 
+    def reassign_lead_nodes(self, project_id: int, old_lead_id: int, new_lead_id: int, new_lead_name: str) -> int:
+        """Move a replaced Lead's WBS nodes to their successor; returns how many moved."""
+        return (
+            self.db.query(models.WbsNode)
+            .filter_by(project_id=project_id, assigned_lead_user_id=old_lead_id)
+            .update(
+                {models.WbsNode.assigned_lead_user_id: new_lead_id, models.WbsNode.assigned_lead: new_lead_name},
+                synchronize_session=False,
+            )
+        )
+
     def active_sessions(self, project_id: int) -> list[models.TimeSession]:
         return self.db.query(models.TimeSession).filter_by(project_id=project_id, status="active").all()
 

@@ -59,6 +59,17 @@ def get_project(
     return service.get_for(user, project_id)
 
 
+@router.put("/projects/{project_id}", response_model=schemas.ProjectUpdateOut)
+def update_project(
+    project_id: int,
+    payload: schemas.ProjectUpdatePayload,
+    user: models.User = Depends(require_bu_head),
+    service: ProjectService = Depends(get_project_service),
+):
+    """Edit a project: audited field by field, lead changes move WBS nodes, the lock is re-checked."""
+    return service.update(user, project_id, payload)
+
+
 @router.delete("/projects/{project_id}")
 def delete_project(
     project_id: int,
