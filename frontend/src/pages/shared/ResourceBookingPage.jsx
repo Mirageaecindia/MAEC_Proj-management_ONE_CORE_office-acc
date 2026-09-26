@@ -2,6 +2,8 @@ import { ChevronDown, Pencil, Search, Trash2, UserPlus, X } from 'lucide-react';
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { useRejectResourceBookings } from '../../hooks/useResourceBookings';
 import { countWorkingDays, plannedHoursForRange } from '../../lib/hours';
 
 const API_BASE_URL = 'http://localhost:8000';
@@ -67,6 +69,8 @@ export function ResourceBookingPage() {
   const [form, setForm] = useState({ employee_id: '', start_date: '', end_date: '', utilization_rate: '' });
   const [error, setError] = useState('');
   const [capError, setCapError] = useState('');
+  const [rejectReason, setRejectReason] = useState(null); // null = dialog closed
+  const rejectBookings = useRejectResourceBookings();
   const [notifications, setNotifications] = useState([]);
   const [ganttData, setGanttData] = useState({ engineers: [], date_range: { start: null, end: null }, count: 0 });
   const [serverDate, setServerDate] = useState(null);
@@ -377,6 +381,24 @@ export function ResourceBookingPage() {
     }
   }
 
+  function closeRejectDialog() {
+    rejectBookings.reset();
+    setRejectReason(null);
+  }
+
+  function rejectAllocation() {
+    rejectBookings.mutate(
+      { projectId, reason: rejectReason.trim() },
+      {
+        onSuccess: async () => {
+          closeRejectDialog();
+          await Promise.all([loadProjectData(projectId), loadNotifications()]);
+          loadGantt();
+        },
+      },
+    );
+  }
+
   function jumpToProject(id) {
     const match = projects.find((p) => p.id === id);
     if (match) setSelectedId(String(match.id));
@@ -541,15 +563,22 @@ export function ResourceBookingPage() {
               {approvalStatus === 'pending_approval' ? 'Submitted — Pending Approval' : approvalStatus === 'approved' ? 'Approved' : 'Submit for Approval'}
             </button>
           ) : isBuHead ? (
-            <button
-              className="button button-primary"
-              type="button"
-              style={{ background: approvalStatus === 'approved' ? '#277551' : '#b8860b', borderColor: approvalStatus === 'approved' ? '#277551' : '#b8860b' }}
-              disabled={approvalStatus !== 'pending_approval'}
-              onClick={approveAllocation}
-            >
-              {approvalStatus === 'approved' ? 'Approved' : 'Approve'}
-            </button>
+            <div className="booking-decision">
+              {approvalStatus === 'pending_approval' && (
+                <button className="button button-secondary" type="button" onClick={() => setRejectReason('')}>
+                  Reject
+                </button>
+              )}
+              <button
+                className="button button-primary"
+                type="button"
+                style={{ background: approvalStatus === 'approved' ? '#277551' : '#b8860b', borderColor: approvalStatus === 'approved' ? '#277551' : '#b8860b' }}
+                disabled={approvalStatus !== 'pending_approval'}
+                onClick={approveAllocation}
+              >
+                {approvalStatus === 'approved' ? 'Approved' : 'Approve'}
+              </button>
+            </div>
           ) : null}
         </div>
       </section>
@@ -692,6 +721,32 @@ export function ResourceBookingPage() {
             <div className="modal-actions"><button className="button button-primary" type="button" onClick={() => setCapError('')}>OK</button></div>
           </div>
         </div>
+      )}
+      {rejectReason !== null && (
+        <ConfirmDialog
+          title="Reject Resource Booking"
+          confirmLabel="Reject"
+          busyLabel="Rejecting…"
+          busy={rejectBookings.isPending}
+          confirmDisabled={!rejectReason.trim()}
+          error={rejectBookings.error}
+          onConfirm={rejectAllocation}
+          onCancel={closeRejectDialog}
+        >
+          <p className="confirm-modal-text">Send this submission back to the Lead?</p>
+          <p className="confirm-modal-subtext">
+            Every booking returns to draft so the Lead can adjust it and submit again. The Lead sees your reason.
+          </p>
+          <label className="booking-reject-reason">
+            <span>Reason for the Lead</span>
+            <textarea
+              value={rejectReason}
+              onChange={(event) => setRejectReason(event.target.value)}
+              placeholder="e.g. Arjun is needed on Hotel Tower in September"
+              rows={3}
+            />
+          </label>
+        </ConfirmDialog>
       )}
     </main>
   );

@@ -121,17 +121,27 @@ def test_editing_an_approved_booking_keeps_it_approved(client, world, booked_pro
     assert response.json()["approval_status"] == "approved"
 
 
-def test_bu_head_can_reject_pending_submission_back_to_draft(client, world, booked_project):
+def test_bu_head_can_reject_pending_submission_back_to_draft(client, db, world, booked_project):
     project_id, _ = booked_project
     reject_url = f"/api/projects/{project_id}/resource-bookings/reject"
+    reason = {"reason": "Arjun is needed on Hotel Tower in September"}
 
     # a draft is not pending, so it cannot be rejected
-    assert client.post(reject_url, headers=world.bu_h).status_code == 409
+    assert client.post(reject_url, json=reason, headers=world.bu_h).status_code == 409
 
     _submit(client, world, project_id)
-    rejected = client.post(reject_url, headers=world.bu_h)
+    # the Lead must be told why (TODO C4)
+    assert client.post(reject_url, json={"reason": "  "}, headers=world.bu_h).status_code == 422
+    assert client.post(reject_url, headers=world.bu_h).status_code == 422
+    rejected = client.post(reject_url, json=reason, headers=world.bu_h)
     assert rejected.status_code == 200
-    assert rejected.json() == {"status": "draft", "status_label": "Draft"}
+    assert rejected.json() == {"status": "draft", "status_label": "Draft", "reason": reason["reason"]}
+    notice = (
+        db.query(models.Notification)
+        .filter_by(notification_type="resource_booking_rejected", recipient_user_id=world.lead_e.id)
+        .one()
+    )
+    assert "Reason: Arjun is needed on Hotel Tower in September" in notice.message
 
     bookings = client.get(f"/api/projects/{project_id}/resource-bookings", headers=world.bu_h).json()
     assert bookings[0]["approval_status"] == "draft"
@@ -139,8 +149,8 @@ def test_bu_head_can_reject_pending_submission_back_to_draft(client, world, book
     # the Lead can adjust and re-submit after a rejection
     assert client.post(f"/api/projects/{project_id}/resource-bookings/submit", headers=world.lead_h).status_code == 200
     # only a BU Head can reject, and only while pending
-    assert client.post(reject_url, headers=world.lead_h).status_code == 403
-    assert client.post(reject_url, headers=world.bu_h).status_code == 200
+    assert client.post(reject_url, json=reason, headers=world.lead_h).status_code == 403
+    assert client.post(reject_url, json=reason, headers=world.bu_h).status_code == 200
 
 
 def test_notifications_can_only_be_marked_read_by_their_recipient(client, db, world, booked_project):
@@ -256,7 +266,12 @@ def test_engineer_gains_project_access_only_after_approval(client, world, assign
 def test_rejected_assignment_grants_no_project_access(client, world, assigned_project):
     project_id, node = assigned_project
     _submit(client, world, project_id)
-    assert client.post(f"/api/projects/{project_id}/resource-bookings/reject", headers=world.bu_h).status_code == 200
+    assert (
+        client.post(
+            f"/api/projects/{project_id}/resource-bookings/reject", json={"reason": "Not needed"}, headers=world.bu_h
+        ).status_code
+        == 200
+    )
 
     assert _eng_list(client, world) == set()
     assert _eng_open(client, world, project_id).status_code == 403

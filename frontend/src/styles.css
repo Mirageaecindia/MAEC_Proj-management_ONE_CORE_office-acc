@@ -1456,3 +1456,8 @@ tr.clickable-row:hover td { background: #f0f7fd !important; }
 .created-project-archived { flex: 0 0 auto; padding: 3px 10px; color: #6b5b2e; background: #f7f0dc; border: 1px solid #e8dab0; border-radius: 12px; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .created-project-card-archived { background: #fbfbf9; }
 .created-project-card-archived .created-project-fields { opacity: .75; }
+
+/* Resource Booking: BU Head reject */
+.booking-decision { display: flex; gap: 10px; align-items: center; }
+.booking-reject-reason { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; color: #4f6378; font-size: 12px; font-weight: 700; }
+.booking-reject-reason textarea { width: 100%; padding: 8px 10px; border: 1px solid #cfd9e2; border-radius: 6px; font: 400 13px/1.4 'Segoe UI', Arial, sans-serif; resize: vertical; }

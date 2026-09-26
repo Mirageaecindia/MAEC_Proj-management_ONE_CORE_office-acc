@@ -92,13 +92,13 @@ class BookingApprovalService:
             booking.approved_at = now
         return self._close_submission(project, APPROVED)
 
-    def reject(self, project_id: int) -> dict:
-        """Send the Lead's submission back to draft so it can be adjusted and re-submitted."""
+    def reject(self, project_id: int, reason: str) -> dict:
+        """Send the Lead's submission back to draft, with the reason, so it can be adjusted and re-submitted."""
         project, bookings = self._pending_submission(project_id)
         for booking in bookings:
             booking.approval_status = DRAFT
             booking.submitted_at = None
-        return self._close_submission(project, DRAFT)
+        return {**self._close_submission(project, DRAFT, reason), "reason": reason}
 
     def _pending_submission(self, project_id: int) -> tuple[models.Project, list[models.ResourceBooking]]:
         project = self._project(project_id)
@@ -112,7 +112,7 @@ class BookingApprovalService:
             raise ConflictError("This resource booking is not pending approval.")
         return project, bookings
 
-    def _close_submission(self, project: models.Project, status: str) -> dict:
+    def _close_submission(self, project: models.Project, status: str, reason: str | None = None) -> dict:
         """The BU Head has decided: clear the pending notification and tell the project's Leads."""
         for notification in self.notifications.unread(Role.BU_HEAD, RESOURCE_BOOKING_APPROVAL, project.id):
             notification.is_read = True
@@ -123,7 +123,7 @@ class BookingApprovalService:
             notify.RESOURCE_BOOKING_APPROVED if approved else notify.RESOURCE_BOOKING_REJECTED,
             "Resource booking approved" if approved else "Resource booking returned to draft",
             f"The BU Head {'approved' if approved else 'rejected'} the resource booking for '{project.project_name}'."
-            + ("" if approved else " Adjust it and submit again."),
+            + ("" if approved else f" Reason: {reason} Adjust it and submit again."),
             "BU Head",
         )
         self.db.commit()

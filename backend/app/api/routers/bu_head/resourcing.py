@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, field_validator
 
 import models
 from app.api.deps import get_booking_approval_service, get_notification_service
@@ -7,6 +8,17 @@ from app.services.booking_approval import BookingApprovalService
 from app.services.notifications import NotificationService
 
 router = APIRouter(tags=["resourcing"])
+
+
+class BookingRejectRequest(BaseModel):
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def reason_given(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Give the Lead a reason for the rejection.")
+        return value.strip()
 
 
 @router.get("/projects/{project_id}/resource-summary")
@@ -31,11 +43,12 @@ def approve_resource_bookings(
 @router.post("/projects/{project_id}/resource-bookings/reject")
 def reject_resource_bookings(
     project_id: int,
+    payload: BookingRejectRequest,
     _user: models.User = Depends(require_bu_head),
     service: BookingApprovalService = Depends(get_booking_approval_service),
 ):
-    """Send a pending submission back to the Lead as draft."""
-    return service.reject(project_id)
+    """Send a pending submission back to the Lead as draft, with the reason (required)."""
+    return service.reject(project_id, payload.reason)
 
 
 @router.get("/notifications")

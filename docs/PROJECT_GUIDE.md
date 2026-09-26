@@ -366,7 +366,7 @@ stateDiagram-v2
 - While a project is soft-locked, engineers can't log hours and leads can't approve.
 
 ### 7.6 Resource booking approval
-- Draft → Lead **Submit** (every booking on the project becomes `pending_approval`, plus a notification to the BU Head) → BU Head **Approve** (every booking becomes `approved`) or **Reject** (every booking goes back to `draft` so the Lead can adjust and re-submit). Either decision marks the notification read.
+- Draft → Lead **Submit** (every booking on the project becomes `pending_approval`, plus a notification to the BU Head) → BU Head **Approve** (every booking becomes `approved`) or **Reject** with a required reason (every booking goes back to `draft` so the Lead can adjust and re-submit; the reason is in the Leads' notification). Either decision marks the notification read.
 - **Approval grants the booked engineers access to the project** (its WBS, timesheets and dashboard). Editing an approved booking doesn't reset its approval yet (see §13).
 
 ### 7.7 Governance calculations (`app/services/metrics.py`, rules in `app/domain/governance.py`)
@@ -426,7 +426,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | POST / PUT / DELETE | `/api/projects/{id}/resource-bookings[/{booking_id}]` | Lead | Create, edit or delete a booking (100% cap) |
 | POST | `/api/projects/{id}/resource-bookings/submit` | Lead | Submit for BU Head approval |
 | POST | `/api/projects/{id}/resource-bookings/approve` | BU Head | Approve all bookings of the project (grants engineer access) |
-| POST | `/api/projects/{id}/resource-bookings/reject` | BU Head | Send a pending submission back to draft |
+| POST | `/api/projects/{id}/resource-bookings/reject` | BU Head | Send a pending submission back to draft. `{reason}` is required and goes into the Leads' notification |
 | GET | `/api/notifications` | all | Latest 50: the user's personal notifications plus role-wide ones (shown in the header bell for BU Head and Lead) |
 | POST | `/api/notifications/{id}/read` | recipient | Mark as read |
 
