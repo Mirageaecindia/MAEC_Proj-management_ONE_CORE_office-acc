@@ -279,3 +279,34 @@ def test_delete_project_guards(client, world):
 
     assert client.delete(f"/api/projects/{project_id}", headers=world.lead_h).status_code == 403
     assert client.delete("/api/projects/999999", headers=world.bu_h).status_code == 404
+
+
+def test_a_project_needs_at_least_one_lead_but_not_all_three(client, db, make, world):
+    only_mechanical = world.project_payload(
+        project_lead_electrical="",
+        project_lead_electrical_user_id=None,
+        project_lead_bim=None,
+        project_lead_bim_user_id=None,
+    )
+
+    created = client.post("/api/projects", json=only_mechanical, headers=world.bu_h)
+
+    assert created.status_code == 201, created.text
+    project = db.get(models.Project, created.json()["id"])
+    assert (project.project_lead_electrical, project.project_lead_bim) == (None, None)
+    assert project.project_lead == world.lead_m.full_name  # legacy single-lead column: first lead given
+    assert created.json()["id"] in {
+        p["id"] for p in client.get("/api/projects", headers=make.headers(world.lead_m)).json()
+    }
+
+    no_leads = world.project_payload(
+        project_lead_electrical=None,
+        project_lead_electrical_user_id=None,
+        project_lead_mechanical=None,
+        project_lead_mechanical_user_id=None,
+        project_lead_bim=None,
+        project_lead_bim_user_id=None,
+    )
+    refused = client.post("/api/projects", json=no_leads, headers=world.bu_h)
+    assert refused.status_code == 422
+    assert "at least one project lead" in refused.text

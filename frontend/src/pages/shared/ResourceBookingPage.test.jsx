@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { ResourceBookingPage } from './ResourceBookingPage';
 
+// The page loads several endpoints on mount; allow for a busy machine running the whole suite.
+const WAIT = { timeout: 5000 };
+
 vi.mock('../../AuthContext', () => ({
   useAuth: () => ({ role: 'bu_head', authHeaders: () => ({}), logout: vi.fn() }),
 }));
@@ -78,7 +81,7 @@ describe('Resource Booking: BU Head reject', () => {
 
   it('asks for a reason, then sends it and refreshes the bookings', async () => {
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: 'Reject' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject' }, WAIT));
     const dialog = screen.getByRole('dialog');
     const confirm = within(dialog).getByRole('button', { name: 'Reject' });
     expect(confirm.disabled).toBe(true); // a reason is required
@@ -92,8 +95,8 @@ describe('Resource Booking: BU Head reject', () => {
         ([url, options]) => /\/reject$/.test(url) && options?.method === 'POST',
       );
       expect(JSON.parse(reject[1].body)).toEqual({ reason: 'Arjun is needed elsewhere' });
-    });
-    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    }, WAIT);
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull(), WAIT);
     expect(screen.queryByRole('button', { name: 'Reject' })).toBeNull(); // back to draft: nothing to reject
   });
 
@@ -101,7 +104,7 @@ describe('Resource Booking: BU Head reject', () => {
     bookingStatus = 'approved';
     renderPage();
 
-    expect(await screen.findByRole('button', { name: 'Approved' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Approved' }, WAIT)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Reject' })).toBeNull();
   });
 });

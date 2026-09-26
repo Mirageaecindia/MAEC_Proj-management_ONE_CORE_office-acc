@@ -43,7 +43,7 @@ function Field({ label, required = false, error, children }) {
 
 function LeadSelect({ label, placeholder, leads, value, error, extraError, onChange }) {
   return (
-    <Field label={label} required error={error}>
+    <Field label={label} error={error}>
       <div className="select-wrap">
         <select value={value} onChange={(event) => onChange(event.target.value)}>
           <option value="">{placeholder}</option>
@@ -216,10 +216,10 @@ function ProjectFormPage({ project = null }) {
             <div className="field-grid two-column">
               <LeadSelect
                 label="Assigned Project Lead | Electrical"
-                placeholder="Select electrical lead"
+                placeholder="No electrical lead"
                 leads={leads.electrical}
                 value={form.electricalLead}
-                error={errors.electricalLead}
+                error={errors.leads}
                 extraError={leadsError?.message}
                 onChange={(value) => updateField('electricalLead', value)}
               />
@@ -234,18 +234,16 @@ function ProjectFormPage({ project = null }) {
             <div className="field-grid two-column">
               <LeadSelect
                 label="Assigned Project Lead | Mechanical"
-                placeholder="Select mechanical lead"
+                placeholder="No mechanical lead"
                 leads={leads.mechanical}
                 value={form.mechanicalLead}
-                error={errors.mechanicalLead}
                 onChange={(value) => updateField('mechanicalLead', value)}
               />
               <LeadSelect
                 label="Assigned Project Lead | BIM"
-                placeholder="Select BIM lead"
+                placeholder="No BIM lead"
                 leads={leads.bim}
                 value={form.bimLead}
-                error={errors.bimLead}
                 onChange={(value) => updateField('bimLead', value)}
               />
             </div>

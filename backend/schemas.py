@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 PROJECT_TYPES = {
     "MEP Design",
@@ -162,9 +162,10 @@ class ProjectFields(BaseModel):
     project_name: str
     project_code: str
     client_customer: str
-    project_lead_electrical: str
-    project_lead_mechanical: str
-    project_lead_bim: str
+    # Each discipline's lead is optional (a project may not need all three); at least one is required.
+    project_lead_electrical: Optional[str] = None
+    project_lead_mechanical: Optional[str] = None
+    project_lead_bim: Optional[str] = None
     project_lead_electrical_user_id: Optional[int] = None
     project_lead_mechanical_user_id: Optional[int] = None
     project_lead_bim_user_id: Optional[int] = None
@@ -174,12 +175,28 @@ class ProjectFields(BaseModel):
     target_effort_hours: float = 0
     alert_override_threshold_pct: float = 80
 
-    @field_validator("project_name", "project_code", "client_customer", "project_lead_electrical", "project_lead_mechanical", "project_lead_bim")
+    @field_validator("project_name", "project_code", "client_customer")
     @classmethod
     def not_blank(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError("This field cannot be blank")
         return v.strip()
+
+    @field_validator("project_lead_electrical", "project_lead_mechanical", "project_lead_bim")
+    @classmethod
+    def blank_lead_is_none(cls, v: Optional[str]) -> Optional[str]:
+        return (v or "").strip() or None
+
+    @model_validator(mode="after")
+    def at_least_one_lead(self):
+        leads = (
+            self.project_lead_electrical, self.project_lead_electrical_user_id,
+            self.project_lead_mechanical, self.project_lead_mechanical_user_id,
+            self.project_lead_bim, self.project_lead_bim_user_id,
+        )  # fmt: skip
+        if not any(leads):
+            raise ValueError("Choose at least one project lead")
+        return self
 
     @field_validator("alert_override_threshold_pct")
     @classmethod

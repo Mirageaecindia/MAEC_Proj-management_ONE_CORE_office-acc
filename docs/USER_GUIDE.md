@@ -79,8 +79,10 @@ username for 15 minutes.
 ## 3. BU Head features
 
 ### 3.1 Create a project (Create Project tab)
-Fill in: project name, **unique** project code, client, target start date, one
-Lead per discipline (only active Lead accounts of that discipline are offered),
+Fill in: project name, **unique** project code, client, target start date, a
+Lead for each discipline the project needs (Electrical, Mechanical, BIM: each is
+optional, but at least one is required; only active Lead accounts of that
+discipline are offered),
 contract currency and value, **target effort hours** (the governance baseline)
 and the **alert threshold** (slider, default 80%). Tick the SharePoint discipline
 folders to create.

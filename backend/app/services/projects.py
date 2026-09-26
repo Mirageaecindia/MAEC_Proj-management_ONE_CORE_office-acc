@@ -94,7 +94,7 @@ class ProjectService:
             project_code=payload.project_code,
             client_organization=payload.client_customer,
             # The single legacy project_lead column keeps the primary (electrical) lead.
-            project_lead=electrical[0],
+            project_lead=_primary_lead_name(electrical, mechanical, bim),
             start_date=payload.target_start_date,
             project_lead_electrical=electrical[0],
             project_lead_mechanical=mechanical[0],
@@ -167,7 +167,7 @@ class ProjectService:
         for (name_col, id_col), (name, lead_id) in zip(_LEAD_SLOTS, leads, strict=True):
             setattr(project, name_col, name)
             setattr(project, id_col, lead_id)
-        project.project_lead = leads[0][0]  # the legacy single-lead column keeps the electrical lead
+        project.project_lead = _primary_lead_name(*leads)
 
         new_lead_ids = {lead_id for _, lead_id in leads if lead_id}
         moved = sum(
@@ -282,8 +282,9 @@ class ProjectService:
             raise NotFoundError(PROJECT_NOT_FOUND)
         return project
 
-    def _resolve_lead(self, user_id: int | None, display_name: str) -> tuple[str, int | None]:
-        """(display name, lead user id). With an id, the name comes from the real account."""
+    def _resolve_lead(self, user_id: int | None, display_name: str | None) -> tuple[str | None, int | None]:
+        """(display name, lead user id); (None, None) when the discipline has no lead.
+        With an id, the name comes from the real account."""
         if user_id is None:
             return display_name, None
         lead = self.users.get_lead(user_id)
@@ -304,6 +305,11 @@ class ProjectService:
         project.sharepoint_site_url = url
         self.db.commit()
         return _sharepoint_result("provisioned", url=url)
+
+
+def _primary_lead_name(*leads: tuple[str | None, int | None]) -> str:
+    """The legacy single `project_lead` column: the first discipline that has a lead."""
+    return next(name for name, _ in leads if name)
 
 
 def _audit_text(value) -> str:

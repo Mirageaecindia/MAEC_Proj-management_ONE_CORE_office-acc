@@ -38,17 +38,26 @@ describe('validateProjectForm', () => {
     const errors = validateProjectForm(INITIAL_FORM);
     expect(Object.keys(errors).sort()).toEqual(
       [
-        'bimLead',
         'clientCustomer',
         'contractValue',
         'effortHours',
-        'electricalLead',
-        'mechanicalLead',
+        'leads',
         'projectCode',
         'projectName',
         'targetStartDate',
       ].sort(),
     );
+  });
+
+  it('needs at least one lead, not all three', () => {
+    expect(validateProjectForm({ ...VALID_FORM, electricalLead: '', bimLead: '' })).toEqual({});
+    const payload = toCreateProjectPayload({ ...VALID_FORM, electricalLead: '', bimLead: '' }, LEADS);
+    expect(payload).toMatchObject({
+      project_lead_electrical: null,
+      project_lead_electrical_user_id: null,
+      project_lead_mechanical: 'Priya Nair',
+      project_lead_mechanical_user_id: 2,
+    });
   });
 
   it('rejects no disciplines, unknown currency and out-of-range threshold', () => {

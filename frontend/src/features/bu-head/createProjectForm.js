@@ -23,11 +23,11 @@ const REQUIRED_FIELDS = [
   ['projectName', 'Project name is required.'],
   ['projectCode', 'Project code is required.'],
   ['clientCustomer', 'Client / Customer is required.'],
-  ['electricalLead', 'Electrical project lead is required.'],
   ['targetStartDate', 'Target start date is required.'],
-  ['mechanicalLead', 'Mechanical project lead is required.'],
-  ['bimLead', 'BIM project lead is required.'],
 ];
+
+/** A project needs at least one lead; each discipline's lead is optional. */
+const LEAD_FIELDS = ['electricalLead', 'mechanicalLead', 'bimLead'];
 
 /** "3,840" -> 3840 */
 export function parseHours(raw) {
@@ -64,6 +64,9 @@ export function validateProjectForm(form, { requireDisciplines = true } = {}) {
   for (const [field, message] of REQUIRED_FIELDS) {
     if (!String(form[field] ?? '').trim()) errors[field] = message;
   }
+  if (!LEAD_FIELDS.some((field) => String(form[field] ?? '').trim())) {
+    errors.leads = 'Choose at least one project lead.';
+  }
   const contractValue = parseAmount(form.contractValue);
   if (!Number.isFinite(contractValue) || contractValue <= 0) {
     errors.contractValue = 'Enter a contract value greater than 0.';
@@ -86,7 +89,7 @@ export function validateProjectForm(form, { requireDisciplines = true } = {}) {
 
 function leadRef(leadId, allLeads) {
   const match = allLeads.find((lead) => String(lead.id) === String(leadId));
-  return { id: leadId ? Number(leadId) : null, name: match ? match.name : '' };
+  return { id: leadId ? Number(leadId) : null, name: match ? match.name : null };
 }
 
 function projectFields(form, leads) {
