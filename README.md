@@ -11,7 +11,8 @@ booking, WBS planning, weekly timesheets and an executive governance dashboard.
 
 **New to the project?** Read the [Project Guide](docs/PROJECT_GUIDE.md) for the
 product, roles, end-to-end lifecycle, architecture, data model, business rules,
-full API reference and known issues.
+full API reference and known issues. To use or test the app by hand, role by role,
+see the [User Guide](docs/USER_GUIDE.md).
 
 ## Prerequisites
 - Python 3.12+ (developed on 3.14)

@@ -602,7 +602,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 
 ## 14. Roadmap
 
-The detailed, prioritised task list (including the September 2026 review findings) is in [TODO.md](TODO.md).
+The detailed, prioritised task list (including the September 2026 review findings) is in [TODO.md](TODO.md). How each feature is used, role by role, is in [USER_GUIDE.md](USER_GUIDE.md).
 
 | Phase | Goal | Status |
 |---|---|---|
