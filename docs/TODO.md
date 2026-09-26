@@ -114,7 +114,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | ID | Task | Why | Where | Size |
 |---|---|---|---|---|
 | W1 | **BU Head Timeline view** (P1 #15): Timeline & Logs is empty for the BU Head, the Gantt is hard-coded to Sep–Dec 2026, and the Submission phase is missing | The BU Head has no schedule view | `TimelineLogsPage.jsx`, timeline endpoints | M |
-| W2 | **BU Head Weekly Logs view** (P1 #16), read-only across all projects | The BU Head can't see timesheets | new page + endpoint | M |
+| W2 | **BU Head Weekly Logs view** (P1 #16), read-only across all projects. **Also decide:** archiving hides a project from its Engineers, including their own past timesheets and hours. If hours ever feed appraisals, Engineers need read-only access to their own history in archived projects | The BU Head can't see timesheets | new page + endpoint | M |
 | W3 | **One notification system:** move the Resource Booking page's own 5 s-polling banner to the header bell | Duplicate code and polling load | `ResourceBookingPage.jsx`, `NotificationBell.jsx` | S |
 | W4 | **Portfolio dashboard:** all projects with level, burn, locks and approval lag | The BU Head's home screen | new page + aggregate endpoint | L |
 | W5 | **Exports** (CSV/PDF) of the dashboard, Work Summary and timesheets | Reporting upward | export endpoints | M |
@@ -190,7 +190,7 @@ Nothing here is urgent while the app is in development. All of it must be done b
 - [ ] **E8:** tokens in httpOnly cookies. **E9:** single-port production build, structured logging, error monitoring.
 - [ ] **S7:** `backup_db.py --dir <off-machine folder>` scheduled nightly (or the managed database's own backups), plus a restore drill on the production setup.
 - [ ] **CORS and settings:** production origin in the CORS list, `DATABASE_URL`, `.env` values on the server only.
-- [ ] **Clean start:** a fresh production database (no test projects or accounts), real accounts via `create_user.py`, and the legacy `project_leads` seed removed (E7).
+- [ ] **Clean start:** a fresh production database (no test projects or accounts), real accounts via `create_user.py`, and the legacy `project_leads` seed removed (E7). The only databases that may ever be started are a **fresh one** or **the laptop dev database after its migration**; never a pre-Alembic copy (Subhika's clone, an old backup), which `migrate()` refuses.
 - [ ] **SP6:** SharePoint end-to-end test against the real tenant.
 - [x] Delete `app/core/legacy_schema.py` (done with C1: the only pre-Alembic dev database was adopted; `migrate()` now refuses pre-Alembic databases).
 - [ ] Full test suites, lint and build green on the release commit.

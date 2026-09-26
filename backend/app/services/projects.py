@@ -17,7 +17,7 @@ from app.repositories.projects import ProjectRepository
 from app.repositories.users import UserRepository
 from app.services import notifications as notify
 from app.services.access import user_can_access_project, visible_project_ids
-from app.services.archive_guard import ARCHIVED_READ_ONLY
+from app.services.archive_guard import ARCHIVED_READ_ONLY, lifecycle_writes
 from app.services.tracking import end_session
 
 logger = logging.getLogger(__name__)
@@ -126,26 +126,26 @@ class ProjectService:
             raise ConflictError("This project is already archived.")
         now = datetime.now(UTC)
         actor = user.full_name or user.username
-        for session in self.projects.active_sessions(project_id):
-            end_session(self.db, session, now)
-        for request in self.projects.pending_extension_requests(project_id):
-            request.status = project.extension_status = EXTENSION_CANCELLED
-            request.decided_by, request.decided_at = actor, now
-            request.decision_comments = "Closed automatically: project archived."
-        self.db.add(
-            models.GovernanceAction(project_id=project.id, action="archive", comments=comments, created_by=actor)
-        )
-        notify.notify_project_leads(
-            self.db,
-            project,
-            notify.PROJECT_ARCHIVED,
-            "Project archived",
-            f"'{project.project_name}' was archived by the BU Head. It is read-only and no longer listed for you.",
-            actor,
-        )
-        # Last: the read-only guard allows the writes above only while the project is still active.
-        project.archived_at = now
-        self.db.commit()
+        with lifecycle_writes(self.db, project.id):
+            project.archived_at = now
+            for session in self.projects.active_sessions(project_id):
+                end_session(self.db, session, now)
+            for request in self.projects.pending_extension_requests(project_id):
+                request.status = project.extension_status = EXTENSION_CANCELLED
+                request.decided_by, request.decided_at = actor, now
+                request.decision_comments = "Closed automatically: project archived."
+            self.db.add(
+                models.GovernanceAction(project_id=project.id, action="archive", comments=comments, created_by=actor)
+            )
+            notify.notify_project_leads(
+                self.db,
+                project,
+                notify.PROJECT_ARCHIVED,
+                "Project archived",
+                f"'{project.project_name}' was archived by the BU Head. It is read-only and no longer listed for you.",
+                actor,
+            )
+            self.db.commit()
         return project
 
     def unarchive(self, user: models.User, project_id: int, comments: str | None) -> models.Project:
@@ -154,19 +154,20 @@ class ProjectService:
         if project.archived_at is None:
             raise ConflictError("This project is not archived.")
         actor = user.full_name or user.username
-        project.archived_at = None  # first, so the guard allows the audit entry
-        self.db.add(
-            models.GovernanceAction(project_id=project.id, action="unarchive", comments=comments, created_by=actor)
-        )
-        notify.notify_project_leads(
-            self.db,
-            project,
-            notify.PROJECT_UNARCHIVED,
-            "Project reopened",
-            f"'{project.project_name}' was reopened by the BU Head.",
-            actor,
-        )
-        self.db.commit()
+        with lifecycle_writes(self.db, project.id):
+            project.archived_at = None
+            self.db.add(
+                models.GovernanceAction(project_id=project.id, action="unarchive", comments=comments, created_by=actor)
+            )
+            notify.notify_project_leads(
+                self.db,
+                project,
+                notify.PROJECT_UNARCHIVED,
+                "Project reopened",
+                f"'{project.project_name}' was reopened by the BU Head.",
+                actor,
+            )
+            self.db.commit()
         return project
 
     def _project(self, project_id: int) -> models.Project:

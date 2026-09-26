@@ -7,9 +7,12 @@ Unarchiving restores the project exactly as it was, lock included.
 
 from datetime import UTC, date, datetime, timedelta
 
+import pytest
+
 import models
+from app.core.errors import ConflictError
 from app.repositories.work import WorkRepository
-from app.services.archive_guard import ARCHIVED_READ_ONLY
+from app.services.archive_guard import ARCHIVED_READ_ONLY, lifecycle_writes
 from app.services.governance_monitor import GovernanceMonitor
 
 
@@ -178,3 +181,36 @@ def test_archived_project_leaves_engineer_dashboards_and_lead_gantt(client, worl
     _archive(client, world.bu_h, project_id)
     assert project_id not in dashboard_projects()
     assert project_id not in gantt_projects()
+
+
+def test_archive_notifications_can_still_be_marked_read(client, db, world, governed):
+    project_id, *_ = governed
+    _archive(client, world.bu_h, project_id)
+    notice = (
+        db.query(models.Notification)
+        .filter_by(recipient_user_id=world.lead_e.id, notification_type="project_archived")
+        .one()
+    )
+
+    marked = client.post(f"/api/notifications/{notice.id}/read", headers=world.lead_h)
+
+    assert marked.status_code == 200, marked.text
+    db.expire_all()
+    assert db.get(models.Notification, notice.id).is_read is True
+
+
+def test_only_the_named_lifecycle_exemption_writes_to_an_archived_project(db, world, governed):
+    project_id, *_ = governed
+    project = db.get(models.Project, project_id)
+    project.archived_at = datetime.now(UTC)
+    db.commit()
+
+    db.add(models.GovernanceAction(project_id=project_id, action="note", created_by="x"))
+    with pytest.raises(ConflictError, match="archived and read-only"):
+        db.commit()
+    db.rollback()
+
+    with lifecycle_writes(db, project_id):
+        db.add(models.GovernanceAction(project_id=project_id, action="note", created_by="x"))
+        db.commit()
+    assert db.query(models.GovernanceAction).filter_by(project_id=project_id, action="note").count() == 1
