@@ -78,5 +78,8 @@ npm run build
 - Schema changes are **Alembic revisions only**: change `models.py`, run `alembic revision --autogenerate -m "..."`
   in `backend/`, review the file in `migrations/versions/`, commit both. Never add `ALTER TABLE` code.
   `tests/test_migrations.py` fails if the models and the migrations disagree.
+- **Never touch a real or development database without asking first.** Importing `main` runs migrations and
+  seeding against `DATABASE_URL`, so ad-hoc scripts and checks must point `DATABASE_URL` at a temporary file
+  (tests already do). Dry runs use a copy made with `backup_db.py`.
 - Changing Lead/Engineer code in `main.py`: small (S) fixes are patched in place with a test; bigger changes
   first get characterization tests, then the feature moves into `app/`, then it changes.

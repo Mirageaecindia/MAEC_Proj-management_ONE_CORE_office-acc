@@ -104,6 +104,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | C9 | *(merged into N14 rule b)* | | | |
 | C10 | ✅ **Done** (with S3). Deleting a WBS node also deletes its `time_sessions` | Left orphan rows | `main.py` WBS delete | S |
 | C11 | **Engineers can log hours in a week that has no entry yet.** This becomes part of N1's main-task weekly timesheet | The timesheet UI only shows rows that already exist | N1 | – |
+| C13 | **WBS edit dialog must respect the status flow.** Today a Lead can set any status directly (Approved, Done), skipping the engineer's steps and the dedicated approve action. Limit the edit dialog to non-status fields, or to transitions the flow allows | Workflow bypass | `WbsStructurePage.jsx`, `main.py` `update_wbs_node` | S |
 | C12 | **Audit log for booking approvals, rejections and edits** (who, when, before/after) | The governance log doesn't cover resourcing decisions | `booking_approval.py`, `main.py` booking edit, new audit table or `governance_actions` | S–M |
 
 ---
@@ -158,6 +159,7 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
 |---|---|---|
 | D1a | Tracker after N1: keep it as an optional pre-fill of the weekly timesheet, or remove it? | Ask the engineers. If nobody would use it, remove it (less code, S4 no longer needed) |
 | D3 | Where do rates come from (N6)? Which currency conversion source and how often? | One rate per designation, with history, maintained by the BU Head; monthly FX rates entered by the BU Head |
+| D9 | Should "Blocked" come back as a **flag** (like severity, with a reason), not a status? The status flow has no blocked state; N8 mapped legacy "Blocked" to To Do (no such rows existed) | A flag with a reason, shown on the WBS and the dashboards, if Leads need to report stuck work |
 | D4 | The exact moment for the history rewrite (S2) | The first evening after S1 when everyone can push, then re-clone |
 
 ---
