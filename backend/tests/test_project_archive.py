@@ -214,3 +214,26 @@ def test_only_the_named_lifecycle_exemption_writes_to_an_archived_project(db, wo
         db.add(models.GovernanceAction(project_id=project_id, action="note", created_by="x"))
         db.commit()
     assert db.query(models.GovernanceAction).filter_by(project_id=project_id, action="note").count() == 1
+
+
+@pytest.mark.parametrize("operation", ["archive", "unarchive"])
+def test_archive_and_unarchive_write_inside_the_lifecycle_exemption(client, monkeypatch, world, governed, operation):
+    # Guards a refactor that drops the exemption: the writes would then depend on flush order.
+    project_id, *_ = governed
+    if operation == "unarchive":
+        _archive(client, world.bu_h, project_id)
+    import app.services.projects as projects_service
+
+    entered = []
+    real = projects_service.lifecycle_writes
+
+    def recording(session, exempt_project_id):
+        entered.append(exempt_project_id)
+        return real(session, exempt_project_id)
+
+    monkeypatch.setattr(projects_service, "lifecycle_writes", recording)
+
+    response = client.post(f"/api/projects/{project_id}/{operation}", json={}, headers=world.bu_h)
+
+    assert response.status_code == 200, response.text
+    assert entered == [project_id]
