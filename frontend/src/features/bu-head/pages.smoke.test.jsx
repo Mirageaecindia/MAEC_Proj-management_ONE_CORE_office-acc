@@ -162,6 +162,7 @@ const ROUTES = [
   [/\/api\/notifications$/, NOTIFICATIONS],
   [/\/api\/notifications\/3\/read$/, null],
   [/\/api\/projects\/1\/governance\/resume-execution$/, { id: 11, action: 'resume_execution' }],
+  [/\/api\/projects\/1\/governance\/stop-execution$/, { id: 12, action: 'stop_execution' }],
   [/\/api\/projects\/1\/executive-dashboard$/, () => dashboard],
   [/\/api\/projects\/1\/work-summary$/, WORK_SUMMARY],
   [/\/api\/projects\/1\/sharepoint-mirror$/, MIRROR],
@@ -307,12 +308,40 @@ describe('BU Head pages render with API data', () => {
     expect(screen.queryByRole('button', { name: 'Stop the Execution' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Resume Execution' }));
 
+    // TODO C8: a confirmation first, warning that it won't lock again at this usage.
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/will not lock again automatically/)).toBeTruthy();
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringMatching(/resume-execution$/), expect.anything());
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Resume' }));
+
     await vi.waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(
         expect.stringMatching(/governance\/resume-execution$/),
         expect.objectContaining({ method: 'POST' }),
       ),
     );
+  });
+
+  it('Stop the Execution asks for confirmation before locking', async () => {
+    renderAt(<ExecutiveDashboardPage />, '/executive-dashboard?projectId=1');
+    await screen.findByText('ALERT (90.0%)');
+    fireEvent.change(screen.getByLabelText(/BU Head Decision Comments/), {
+      target: { value: 'Budget review' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop the Execution' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringMatching(/stop-execution$/), expect.anything());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop the Execution' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop Execution' }));
+
+    await vi.waitFor(() => {
+      const call = fetch.mock.calls.find(([url]) => /stop-execution$/.test(url));
+      expect(JSON.parse(call[1].body)).toMatchObject({ comments: 'Budget review' });
+    });
   });
 
   it('Notification bell shows the unread count and marks a notification read', async () => {

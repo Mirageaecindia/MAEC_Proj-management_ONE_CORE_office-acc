@@ -100,7 +100,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | C5 | **Approve or reject bookings per engineer**, not all-or-nothing | You can't approve three engineers and reject one | `booking_approval.py`, `main.py` submit, UI | M |
 | C6 | **Editing an approved booking creates a pending change; the last approved version stays active** (dates, %, access) until the BU Head approves the change | Otherwise the engineer loses project access mid-project, and today edits bypass approval entirely | `models.py` (pending-change fields), `main.py` booking update, `booking_approval.py` | M |
 | C7 | **Assignment vs access (decided):** Leads assign after booking; the engineer sees tasks once the booking is approved. Safeguards: (a) a **badge on WBS tasks** saying "assigned engineer not approved"; (b) when the BU Head rejects or reduces a booking, the Lead is told **which tasks are affected**; (c) removing a booking can't leave tasks assigned silently | Today tasks can end up with someone who will never see them | `main.py` WBS + booking delete, `booking_approval.py` notification, `WbsStructurePage.jsx` | S–M |
-| C8 | **Confirmation dialog on Stop and Resume** | Prevents clicking by accident | `GovernanceControls.jsx` + `ConfirmDialog` | S |
+| C8 | ✅ **Done.** Stop and Resume each open a confirmation dialog that says what happens (Stop locks logging, tracking and approvals and notifies the Leads; Resume reopens them). Resume warns when usage is at or above 100% that the project won't lock again automatically | Prevents clicking by accident | `GovernanceControls.jsx`, `pages.smoke.test.jsx` | S |
 | C9 | *(merged into N14 rule b)* | | | |
 | C10 | ✅ **Done** (with S3). Deleting a WBS node also deletes its `time_sessions` | Left orphan rows | `main.py` WBS delete | S |
 | C11 | **Engineers can log hours in a week that has no entry yet.** This becomes part of N1's main-task weekly timesheet | The timesheet UI only shows rows that already exist | N1 | – |
@@ -171,7 +171,7 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
    - **S2:** the only other clone is Subhika's; she has moved to another project and won't pull or push. Purge, then ask her to delete her clone.
    - **S7 (go-live item):** the database holds only test data today. Before real use, point `backup_db.py --dir` at an off-machine folder (external drive or restricted OneDrive) and schedule it nightly.
    - S3–S8, N14(d) and E4 are done.
-2. **Sprint A:** E4 Alembic ✅, N2 7-day hours ✅, N8 statuses ✅, E3 lint ✅, C1 archive ✅, C2 edit ✅, C4 reject ✅, then C8, N5, N11, N12, N13.
+2. **Sprint A:** E4 Alembic ✅, N2 7-day hours ✅, N8 statuses ✅, E3 lint ✅, C1 archive ✅, C2 edit ✅, C4 reject ✅, C8 confirmations ✅, then N5, N11, N12, N13.
 3. **Sprint B (timesheets and lock):** N1 timesheet model (tell the previous Engineer developer first), N9 single approval route, N14 lock rules, C6, C7, C10, C12. Lead/Engineer features move into `app/` as they are touched.
 4. **Sprint C (calendar and cost):** N3 office field, N4 EV/SPI/CPI, N6 rate card, N7 disciplines, N10, C3 (after S5), C5.
 5. **Sprint D:** W1–W3.
@@ -217,4 +217,5 @@ Nothing here is urgent while the app is in development. All of it must be done b
 | N8 WBS statuses normalized; E3 lint errors fixed | `f682295`, `43f5b8e` |
 | C1 project archive (read-only guard, access, cap, governance) | `3168bac`, `2b84106`, `787f9cb` |
 | C2 edit project (audit, currency confirmation, lead handover, lock re-check both ways); reopen only on BU Head baseline changes | `4e35c5a`, `09e800f` |
-| C4 booking reject with reason | this sprint |
+| C4 booking reject with reason | `6ae6f90` |
+| C8 Stop/Resume confirmations | this sprint |

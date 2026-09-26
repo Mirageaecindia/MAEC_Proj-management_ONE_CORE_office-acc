@@ -1,5 +1,6 @@
 import { AlertTriangle, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
+import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { ErrorBanner } from '../../../components/Feedback';
 import { useDecideExtension, useResumeExecution, useStopExecution } from '../../../hooks/useGovernance';
 import { formatDateTime, formatHours, formatPercent } from '../../../utils/format';
@@ -95,6 +96,7 @@ function PendingRequest({ request, projectName }) {
 /** BU Head actions: review the pending extension request, approve/reject it, stop or resume execution. */
 export function GovernanceControls({ projectId, projectName, data }) {
   const [comments, setComments] = useState('');
+  const [confirming, setConfirming] = useState(null); // 'stop' | 'resume' | null
   const decide = useDecideExtension(projectId);
   const stop = useStopExecution(projectId);
   const resume = useResumeExecution(projectId);
@@ -107,6 +109,12 @@ export function GovernanceControls({ projectId, projectName, data }) {
   const actionError = decide.error || stop.error || resume.error;
 
   const clearComments = { onSuccess: () => setComments('') };
+  const closeAfterSuccess = {
+    onSuccess: () => {
+      setComments('');
+      setConfirming(null);
+    },
+  };
 
   /** Clear the other actions' errors so only the latest action's outcome is shown. */
   function resetOthers(active) {
@@ -121,18 +129,28 @@ export function GovernanceControls({ projectId, projectName, data }) {
     );
   }
 
-  function handleStop() {
-    resetOthers(stop);
-    stop.mutate(
-      { comments: comments.trim(), discipline: data?.exceptions?.[0]?.discipline ?? null },
-      clearComments,
-    );
+  function openConfirmation(action) {
+    resetOthers(action === 'stop' ? stop : resume);
+    setConfirming(action);
   }
 
-  function handleResume() {
-    resetOthers(resume);
-    resume.mutate({ comments: comments.trim() || null }, clearComments);
+  function closeConfirmation() {
+    (confirming === 'stop' ? stop : resume).reset();
+    setConfirming(null);
   }
+
+  function confirmAction() {
+    if (confirming === 'stop') {
+      stop.mutate(
+        { comments: comments.trim(), discipline: data?.exceptions?.[0]?.discipline ?? null },
+        closeAfterSuccess,
+      );
+    } else {
+      resume.mutate({ comments: comments.trim() || null }, closeAfterSuccess);
+    }
+  }
+
+  const overBaseline = data?.governance_status?.level === 'hard_stop';
 
   return (
     <section className="allocation-card ed-controls-panel">
@@ -171,7 +189,12 @@ export function GovernanceControls({ projectId, projectName, data }) {
 
       <div className="ed-buttons">
         {locked ? (
-          <button type="button" className="ed-btn ed-btn-resume" disabled={frozen} onClick={handleResume}>
+          <button
+            type="button"
+            className="ed-btn ed-btn-resume"
+            disabled={frozen}
+            onClick={() => openConfirmation('resume')}
+          >
             {resume.isPending ? 'Resuming…' : 'Resume Execution'}
           </button>
         ) : (
@@ -179,7 +202,7 @@ export function GovernanceControls({ projectId, projectName, data }) {
             type="button"
             className="ed-btn ed-btn-stop"
             disabled={!projectId || !comments.trim() || frozen}
-            onClick={handleStop}
+            onClick={() => openConfirmation('stop')}
           >
             {stop.isPending ? 'Stopping…' : 'Stop the Execution'}
           </button>
@@ -201,7 +224,38 @@ export function GovernanceControls({ projectId, projectName, data }) {
           {decide.isPending && decide.variables?.decision === 'reject' ? 'Rejecting…' : 'Reject Extension'}
         </button>
       </div>
-      <ErrorBanner error={actionError} />
+      <ErrorBanner error={confirming ? null : actionError} />
+
+      {confirming && (
+        <ConfirmDialog
+          title={confirming === 'stop' ? 'Stop the Execution' : 'Resume Execution'}
+          confirmLabel={confirming === 'stop' ? 'Stop Execution' : 'Resume'}
+          busyLabel={confirming === 'stop' ? 'Stopping…' : 'Resuming…'}
+          busy={stop.isPending || resume.isPending}
+          error={confirming === 'stop' ? stop.error : resume.error}
+          onConfirm={confirmAction}
+          onCancel={closeConfirmation}
+        >
+          {confirming === 'stop' ? (
+            <>
+              <p className="confirm-modal-text">Stop execution on {projectName || 'this project'}?</p>
+              <p className="confirm-modal-subtext">
+                Timesheets lock: engineers can&apos;t log or track hours and Leads can&apos;t approve them
+                until you resume. The Leads are notified.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="confirm-modal-text">Resume execution on {projectName || 'this project'}?</p>
+              <p className="confirm-modal-subtext">
+                Timesheets reopen for logging and approval. The Leads are notified.
+                {overBaseline &&
+                  ' Usage is at or above 100% of the baseline: after resuming, the project will not lock again automatically.'}
+              </p>
+            </>
+          )}
+        </ConfirmDialog>
+      )}
     </section>
   );
 }
