@@ -249,10 +249,14 @@ describe('Timeline Logs page groups the weekly log by engineer and navigates to 
     submissions = [];
     timesheetData = ENTRIES;
     vi.stubGlobal('fetch', vi.fn(fakeApi));
+    // The page opens on the browser's current week; pin it to the fixtures' week.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(SERVER_DATE.datetime));
   });
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it('shows each engineer once as a link, no inline details, no approve/reject, only Submit', async () => {
