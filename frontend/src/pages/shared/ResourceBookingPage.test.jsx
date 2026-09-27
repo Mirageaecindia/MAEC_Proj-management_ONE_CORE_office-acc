@@ -43,7 +43,10 @@ const ROUTES = [
     /\/api\/projects\/1\/resource-summary$/,
     () => ({ project_name: 'Hotel Tower', approval_status: bookingStatus }),
   ],
-  [/\/api\/resource-bookings\/gantt$/, { engineers: [], date_range: { start: null, end: null }, count: 0 }],
+  [
+    /\/api\/resource-bookings\/gantt\?project_id=1$/,
+    { engineers: [], date_range: { start: null, end: null }, count: 0 },
+  ],
   [/\/api\/projects\/1\/resource-bookings\/reject$/, () => ({ status: 'draft', status_label: 'Draft' })],
 ];
 
@@ -106,6 +109,8 @@ describe('Resource Booking: BU Head reject', () => {
     const name = await screen.findByText('Arjun Mehta', {}, WAIT);
     expect(name.closest('td').textContent).toBe('Arjun Mehta (E0001)');
     expect(screen.queryByText('AM')).toBeNull(); // no initials badge
+    // The assignment timeline is loaded for the selected project only.
+    expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/gantt\?project_id=1$/), expect.anything());
     expect(screen.getAllByText('Mechanical Engineer').filter((el) => el.tagName === 'TD')).toHaveLength(1); // discipline = role: shown once
   });
 

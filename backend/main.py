@@ -381,18 +381,26 @@ def list_resource_bookings(project_id: int, user: models.User = Depends(get_curr
 
 
 @app.get("/api/resource-bookings/gantt")
-def resource_booking_gantt(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def resource_booking_gantt(
+    project_id: Optional[int] = None,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Engineer assignment timeline for the Resource Booking page.
 
-    One entry per engineer who has at least one real booking. A lead sees the
-    engineers booked on any project they lead, each shown with their FULL
-    commitment across all projects (so overlapping assignments across
-    projects are visible). Date ranges come from the booking record, falling
-    back to the engineer's WBS node dates on that project where determinable.
+    With `project_id` (what the page sends): one entry per engineer booked on
+    that project. Without it: every engineer booked on a project the lead leads
+    (all projects for the BU Head). Either way each engineer is shown with their
+    FULL commitment across all projects, so overlapping assignments are visible.
+    Date ranges come from the booking record, falling back to the engineer's
+    WBS node dates on that project where determinable.
     """
     require_role(user.role, {"lead", "bu_head"})
 
-    if user.role == "lead":
+    if project_id is not None:
+        require_project_access(db, project_id, user)
+        scoped_bookings = db.query(models.ResourceBooking).filter_by(project_id=project_id).all()
+    elif user.role == "lead":
         lead_ids = lead_project_ids(db, user)
         if not lead_ids:
             return {"engineers": [], "date_range": {"start": None, "end": None}, "count": 0}

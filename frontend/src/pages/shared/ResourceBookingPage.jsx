@@ -42,6 +42,9 @@ function disciplineAndRole(booking) {
   return [...new Set(parts)].join(' · ');
 }
 
+/** Timeline with no engineers (no project selected yet). One shared value, never rebuilt. */
+const EMPTY_GANTT = { engineers: [], date_range: { start: null, end: null }, count: 0 };
+
 function statusClass(status) {
   if (status === 'Fully Booked') return 'status-full';
   if (status === 'Near Capacity') return 'status-near';
@@ -74,7 +77,7 @@ export function ResourceBookingPage() {
   const [rejectReason, setRejectReason] = useState(null); // null = dialog closed
   const rejectBookings = useRejectResourceBookings();
   const [notifications, setNotifications] = useState([]);
-  const [ganttData, setGanttData] = useState({ engineers: [], date_range: { start: null, end: null }, count: 0 });
+  const [ganttData, setGanttData] = useState(EMPTY_GANTT);
   const [serverDate, setServerDate] = useState(null);
   const [tick, setTick] = useState(0);
   const [hoveredBarId, setHoveredBarId] = useState(null);
@@ -152,15 +155,20 @@ export function ResourceBookingPage() {
     }
   }, []);
 
+  // The timeline shows the selected project's engineers (with their other commitments).
   const loadGantt = useCallback(async () => {
+    if (!projectId) {
+      setGanttData(EMPTY_GANTT); // the same object each time, so React skips the re-render
+      return;
+    }
     try {
-      const response = await fetch(`${API_BASE_URL}/api/resource-bookings/gantt`, { headers: authHeaders() });
+      const response = await fetch(`${API_BASE_URL}/api/resource-bookings/gantt?project_id=${projectId}`, { headers: authHeaders() });
       if (response.ok) {
         const data = await response.json();
         setGanttData(data);
       }
     } catch { /* ignore */ }
-  }, [authHeaders]);
+  }, [authHeaders, projectId]);
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/projects`, { headers: authHeaders() })
