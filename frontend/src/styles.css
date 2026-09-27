@@ -1462,3 +1462,7 @@ tr.clickable-row:hover td { background: #f0f7fd !important; }
 .booking-decision { display: flex; gap: 10px; align-items: center; }
 .booking-reject-reason { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; color: #4f6378; font-size: 12px; font-weight: 700; }
 .booking-reject-reason textarea { width: 100%; padding: 8px 10px; border: 1px solid #cfd9e2; border-radius: 6px; font: 400 13px/1.4 'Segoe UI', Arial, sans-serif; resize: vertical; }
+
+/* Resource Booking table: one line per cell, icon-only row actions */
+.resource-table td.resource-name-cell { white-space: nowrap; }
+.booking-actions .icon-action { padding: 5px 7px; }

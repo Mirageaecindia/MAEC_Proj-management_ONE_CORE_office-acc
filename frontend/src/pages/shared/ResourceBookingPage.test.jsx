@@ -100,6 +100,15 @@ describe('Resource Booking: BU Head reject', () => {
     expect(screen.queryByRole('button', { name: 'Reject' })).toBeNull(); // back to draft: nothing to reject
   });
 
+  it('shows each resource on one line: name (employee code), and discipline once', async () => {
+    renderPage();
+
+    const name = await screen.findByText('Arjun Mehta', {}, WAIT);
+    expect(name.closest('td').textContent).toBe('Arjun Mehta (E0001)');
+    expect(screen.queryByText('AM')).toBeNull(); // no initials badge
+    expect(screen.getAllByText('Mechanical Engineer').filter((el) => el.tagName === 'TD')).toHaveLength(1); // discipline = role: shown once
+  });
+
   it('offers Reject only while a submission is pending', async () => {
     bookingStatus = 'approved';
     renderPage();
