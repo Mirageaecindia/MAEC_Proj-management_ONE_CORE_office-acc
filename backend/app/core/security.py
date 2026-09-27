@@ -109,4 +109,5 @@ def require_roles(*roles: Role):
 # Named guards for routers: `user = Depends(require_bu_head)`.
 require_bu_head = require_roles(Role.BU_HEAD)
 require_lead_or_bu_head = require_roles(Role.LEAD, Role.BU_HEAD)
+require_engineer = require_roles(Role.ENGINEER)
 require_any_role = require_roles(*ALL_ROLES)

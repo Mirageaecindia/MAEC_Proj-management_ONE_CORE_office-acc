@@ -147,6 +147,12 @@ def test_dashboard_access(client, world, governed):
 # --- Stop execution (soft lock) ---------------------------------------------------------
 
 
+def _login_to_subtask(client, make, world, task):
+    """Hours come only from Login/Logout on a subtask."""
+    subtask = make.wbs_node(task.project_id, world.lead_e, engineer=world.emp1, parent_id=task.id, estimated_hours=4)
+    return client.post("/api/subtask-tracking/start", json={"subtask_id": subtask.id}, headers=world.eng_h)
+
+
 def test_stop_execution_requires_comment_and_bu_head(client, world, governed):
     project_id, *_ = governed
     url = f"/api/projects/{project_id}/governance/stop-execution"
@@ -155,7 +161,7 @@ def test_stop_execution_requires_comment_and_bu_head(client, world, governed):
     assert client.post(url, json={"comments": "Halt"}, headers=world.lead_h).status_code == 403
 
 
-def test_stop_execution_soft_locks_timesheets(client, db, world, governed):
+def test_stop_execution_soft_locks_timesheets(client, db, make, world, governed):
     project_id, node_a, _, pending = governed
 
     response = client.post(
@@ -173,17 +179,13 @@ def test_stop_execution_soft_locks_timesheets(client, db, world, governed):
     assert action["created_by"] == "Test BU Head"
     assert _dashboard(client, world.bu_h, project_id)["governance_status"]["soft_locked"] is True
 
-    log_hours = client.post(
-        f"/api/projects/{project_id}/timesheet-entries",
-        json={"task_id": node_a.id, "week_start_date": "2026-09-21", "mon_hours": 2},
-        headers=world.eng_h,
-    )
+    log_hours = _login_to_subtask(client, make, world, node_a)
     approve_hours = client.post(f"/api/time-log-entries/{pending.id}/approve", headers=world.lead_h)
     assert log_hours.status_code == 409
     assert approve_hours.status_code == 409
 
 
-def test_stop_is_refused_when_already_stopped_and_resume_reopens(client, db, world, governed):
+def test_stop_is_refused_when_already_stopped_and_resume_reopens(client, db, make, world, governed):
     # Roadmap 6.1 (fixed): stop is idempotent-safe and execution can be resumed.
     project_id, node_a, _, _ = governed
     stop_url = f"/api/projects/{project_id}/governance/stop-execution"
@@ -204,12 +206,7 @@ def test_stop_is_refused_when_already_stopped_and_resume_reopens(client, db, wor
     project = db.get(models.Project, project_id)
     assert project.timesheets_soft_locked is False
     assert project.lock_reason is None
-    log_hours = client.post(
-        f"/api/projects/{project_id}/timesheet-entries",
-        json={"task_id": node_a.id, "week_start_date": "2026-09-21", "mon_hours": 2},
-        headers=world.eng_h,
-    )
-    assert log_hours.status_code == 200
+    assert _login_to_subtask(client, make, world, node_a).status_code == 201
 
 
 # --- Extension requests -----------------------------------------------------------------

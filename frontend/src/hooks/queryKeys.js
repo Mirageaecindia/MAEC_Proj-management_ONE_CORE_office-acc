@@ -7,5 +7,6 @@ export const queryKeys = {
   executiveDashboard: (projectId) => ['executive-dashboard', projectId],
   workSummary: (projectId) => ['work-summary', projectId],
   notifications: ['notifications'],
+  tracking: ['tracking'],
   sharepointMirror: (projectId) => ['sharepoint-mirror', projectId],
 };

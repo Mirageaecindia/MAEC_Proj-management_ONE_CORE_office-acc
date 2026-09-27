@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import { MaecHeader } from './components/MaecHeader';
+import { useTrackingState } from './hooks/useTracking';
 import { LoginPage } from './pages/LoginPage';
 import { QueryProvider } from './providers/QueryProvider';
 
@@ -74,7 +75,9 @@ function WorkspaceRoute({ children, roles, subtitle }) {
 }
 
 function AppRoutes() {
-  const { user, loading } = useAuth();
+  const { user, role, loading } = useAuth();
+  // An engineer's Login/Logout heartbeat runs on every page, not just Task Details.
+  useTrackingState({ enabled: role === 'engineer' });
 
   if (loading) {
     return (

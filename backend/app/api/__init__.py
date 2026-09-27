@@ -2,8 +2,9 @@
 
 from fastapi import APIRouter
 
-from app.api.routers import auth, bu_head
+from app.api.routers import auth, bu_head, engineer
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth.router)
 api_router.include_router(bu_head.router)
+api_router.include_router(engineer.router)

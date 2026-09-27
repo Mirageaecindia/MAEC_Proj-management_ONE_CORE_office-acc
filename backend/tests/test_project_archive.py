@@ -47,11 +47,10 @@ def test_archive_ends_tracking_cancels_the_pending_extension_and_is_audited(clie
     subtask = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, parent_id=node_a.id, estimated_hours=4)
     session_id = client.post(
         "/api/subtask-tracking/start", json={"subtask_id": subtask.id}, headers=world.eng_h
-    ).json()["id"]
+    ).json()["active_session"]["id"]
     session = db.get(models.TimeSession, session_id)
     session.login_at = datetime.now(UTC) - timedelta(minutes=30)
     db.commit()
-    client.post(f"/api/subtask-tracking/{session_id}/sync", json={"active_seconds": 1800}, headers=world.eng_h)
     request_id = client.post(
         f"/api/projects/{project_id}/extension-requests", json={"requested_hours": 20}, headers=world.lead_h
     ).json()["id"]
@@ -77,23 +76,17 @@ def test_archived_project_is_read_only_for_everyone(client, db, make, world, gov
     _archive(client, world.bu_h, project_id)
 
     # Leads and Engineers lose access to the project altogether.
-    log = client.post(
-        f"/api/projects/{project_id}/timesheet-entries",
-        json={"task_id": node_a.id, "week_start_date": "2026-09-21", "mon_hours": 2},
-        headers=world.eng_h,
-    )
-    assert log.status_code == 403
+    tracking = client.post("/api/subtask-tracking/start", json={"subtask_id": subtask.id}, headers=world.eng_h)
+    assert tracking.status_code == 403
     wbs = client.post(
         f"/api/projects/{project_id}/wbs-nodes",
         json={"task_name": "New", "phase": "Space Planning"},
         headers=world.lead_h,
     )
     assert wbs.status_code == 403
-    # Paths scoped by node or session instead of project access hit the read-only guard.
+    # Paths scoped by an entry instead of project access hit the read-only guard.
     approve = client.post(f"/api/time-log-entries/{pending_entry.id}/approve", headers=world.lead_h)
     assert (approve.status_code, approve.json()["detail"]) == (409, ARCHIVED_READ_ONLY)
-    tracking = client.post("/api/subtask-tracking/start", json={"subtask_id": subtask.id}, headers=world.eng_h)
-    assert tracking.status_code == 409
     # The BU Head can't act on it either (unarchive first).
     stop = client.post(
         f"/api/projects/{project_id}/governance/stop-execution", json={"comments": "x"}, headers=world.bu_h

@@ -2,7 +2,14 @@ import { ArrowLeft } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../AuthContext';
-import { DAY_FIELDS, getMonday, formatDateStr, getWeekInfo, WEEKLY_SUBMISSION_LABELS, WEEKLY_SUBMISSION_PILL } from './TimelineLogsPage';
+import {
+  DAY_FIELDS,
+  getMonday,
+  formatDateStr,
+  getWeekInfo,
+  WEEKLY_SUBMISSION_LABELS,
+  WEEKLY_SUBMISSION_PILL,
+} from './TimelineLogsPage';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -40,8 +47,8 @@ export function EngineerWeeklyLogsPage() {
   const weekInfo = useMemo(() => getWeekInfo(monday), [monday]);
   const dayDates = useMemo(
     () =>
-      DAY_FIELDS.map((_, index) =>
-        new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index),
+      DAY_FIELDS.map(
+        (_, index) => new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index),
       ),
     [monday],
   );
@@ -55,9 +62,7 @@ export function EngineerWeeklyLogsPage() {
       .then((data) => {
         setProjects(data);
         if (!Array.isArray(data)) return;
-        const selected = targetProjectId
-          ? data.find((p) => p.id === targetProjectId)
-          : data[0];
+        const selected = targetProjectId ? data.find((p) => p.id === targetProjectId) : data[0];
         setSelectedId(selected ? String(selected.id) : '');
       })
       .catch((err) => setError(err.message));
@@ -109,11 +114,18 @@ export function EngineerWeeklyLogsPage() {
       setLoaded(false);
       const requests = [
         fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/wbs-structure`, { headers: authHeaders() }),
-        fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timesheet?week_start=${weekStr}&source=tracking`, { headers: authHeaders() }),
-        fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/weekly-hours-submissions?week_start=${weekStr}`, { headers: authHeaders() }),
+        fetch(
+          `${API_BASE_URL}/api/projects/${projectIdNum}/timesheet?week_start=${weekStr}&source=tracking`,
+          { headers: authHeaders() },
+        ),
+        fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/weekly-hours-submissions?week_start=${weekStr}`, {
+          headers: authHeaders(),
+        }),
       ];
       if (isEngineer || isLead) {
-        requests.push(fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timeline-logs`, { headers: authHeaders() }));
+        requests.push(
+          fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timeline-logs`, { headers: authHeaders() }),
+        );
       }
       const [nodesRes, timesheetRes, submissionsRes, timelineRes] = await Promise.all(requests);
       if (!nodesRes.ok || !timesheetRes.ok || !submissionsRes.ok) {
@@ -153,7 +165,11 @@ export function EngineerWeeklyLogsPage() {
       const hours = fmtHours(entry[`${day}_hours`] || 0);
       if (hours <= 0) return null;
       return {
-        date: dayDates[index].toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+        date: dayDates[index].toLocaleDateString('en-US', {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+        }),
         hours,
       };
     }).filter(Boolean);
@@ -171,7 +187,8 @@ export function EngineerWeeklyLogsPage() {
           </div>
           <h1>Engineer Weekly Logs</h1>
           <p>
-            Detailed weekly work log for <strong>{engineerName || 'the selected engineer'}</strong> · Week {weekInfo.weekNum}: {weekInfo.rangeStr}.
+            Detailed weekly work log for <strong>{engineerName || 'the selected engineer'}</strong> · Week{' '}
+            {weekInfo.weekNum}: {weekInfo.rangeStr}.
           </p>
         </div>
       </div>
@@ -186,7 +203,7 @@ export function EngineerWeeklyLogsPage() {
             </h2>
             <p>
               {isEngineer
-                ? 'Your automatic subtask working-time for this week, recorded from Login/Logout tracking. Only active time counts — idle and hidden tabs are excluded.'
+                ? 'Your automatic subtask working-time for this week, recorded from Login/Logout: the time between them counts, except while the laptop was off.'
                 : `Logged hours for ${engineerName || 'the selected engineer'} this week, recorded automatically per subtask. The week is approved by the assigned lead after you submit it for review.`}
             </p>
           </div>
@@ -274,7 +291,9 @@ export function EngineerWeeklyLogsPage() {
                         )}
                       </td>
                       <td>
-                        <span className={`approval-pill ${WEEKLY_SUBMISSION_PILL[weeklyStatus] || 'status-none'}`}>
+                        <span
+                          className={`approval-pill ${WEEKLY_SUBMISSION_PILL[weeklyStatus] || 'status-none'}`}
+                        >
                           {WEEKLY_SUBMISSION_LABELS[weeklyStatus] || weeklyStatus}
                         </span>
                       </td>

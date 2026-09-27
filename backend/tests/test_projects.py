@@ -247,6 +247,7 @@ def test_project_with_history_is_not_deleted(client, db, make, world):
                 subtask_id=node.id,
                 employee_id=world.emp1.id,
                 login_at=datetime(2026, 9, 7, 9, 0),
+                last_seen_at=datetime(2026, 9, 7, 9, 0),
             ),
         ]
     )

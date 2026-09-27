@@ -76,7 +76,7 @@ sequenceDiagram
     BU->>API: Approve bookings
     L->>API: Build WBS (phases → tasks → subtasks), assign engineers
     E->>API: Move task To Do → In-Progress
-    E->>API: Start / heartbeat / end subtask tracking session
+    E->>API: Login / heartbeat / Logout on a subtask
     API->>API: Bank tracked hours into the weekly timesheet (any day)
     L->>API: Approve / reject timesheet entries
     E->>API: Subtasks Done → submit task for approval
@@ -100,8 +100,8 @@ Step by step:
    - A task's estimated hours are weekdays between its start and end dates × 8.
    - Subtasks are single-day units of 1–4 hours. Leads can create them, and engineers can create them under their own tasks.
 4. **Execution (Engineer).**
-   - The engineer opens a subtask in Task Details and presses Login to start **automatic time tracking**. Only active time counts (idle for more than 2 minutes or a hidden tab stops the count), with a cap of 8 hours per day.
-   - On Logout, the tracked hours are added to that day's column in the weekly timesheet row for the subtask.
+   - The engineer opens a subtask in Task Details and presses **Login**; **Logout** ends the work. Worked time is Logout − Login (idle time included), paused while the laptop is off, capped at 8 hours per day. This is the only source of hours: there is no manual timesheet.
+   - On Logout, the hours are added to the login day's column in the weekly timesheet row for the subtask.
    - The engineer moves statuses forward. A task can be submitted only once all its subtasks are Done.
 5. **Review (Lead).** The Lead approves or rejects timesheet entries (Timeline & Logs), and approves submitted tasks (Task Details).
 6. **Governance (BU Head).**
@@ -350,15 +350,16 @@ stateDiagram-v2
 - Every change writes a `wbs_node_history` row. Engineers can also add comments.
 - Only the current statuses are stored (`app/domain/wbs.py`). Legacy names ("Not Started", "In Progress", "Blocked", "Completed", "Submitted for Review") are mapped on every write by a guard on `WbsNode.deliverable_status`, and migration `0002` converted existing rows. A node is **finished** when a task is Approved or a subtask is Done (`is_finished`); Work Summary, Timeline and both Engineer dashboards use that one rule.
 
-### 7.4 Automatic subtask time tracking
-- Only for **subtasks**, and only for the **assigned engineer**. One active session per engineer at a time.
-- **Frontend** (Task Details, engineer, subtask page): the engineer presses Login/Logout and sees only that state, never a timer.
-  - Activity is counted only while the tab is visible, and stops after **2 minutes** idle.
-  - The cumulative active seconds are sent to the server every **15 seconds**.
-- **Backend:** active seconds can never go down, and the total is capped at **8 hours per engineer per day**.
-  - On Logout (`/end`), the seconds are converted to hours and added to that day's column (any day, weekends included) in the weekly timesheet row for the subtask.
-  - The active seconds are also capped at the wall-clock time since the session started.
-- **Manual entry of subtask hours is refused.** Manual `timesheet-entries` are accepted only for main tasks.
+### 7.4 Subtask Login/Logout (the only source of hours)
+Decided 2026-09-27: there is no manual timesheet. Code: `app/services/tracking.py`,
+router `app/api/routers/engineer/tracking.py`, tests `tests/test_tracking.py`.
+- Only for **subtasks**, only for the **assigned engineer** on a project they can access (booking approved, not archived), not while timesheets are locked. One active session per engineer.
+- **Worked time = Logout − Login.** Nothing is measured in the browser: idle time and other programs count, and nothing logs the engineer out.
+- **Heartbeat:** while the engineer is signed in to MAEC, every open tab posts `/heartbeat` once a minute (`hooks/useTracking.js`, mounted in `App.jsx`), including background tabs. The server stores `last_seen_at`.
+- **Laptop off:** when the next heartbeat comes more than **5 minutes** after the last one, the session is closed at `last_seen_at` (the gap is not counted), and a new session opens on the same subtask if Login is still allowed. A Logout after such a gap also ends at `last_seen_at`.
+- **Logout** banks the time into the login day's column (weekends included) of the weekly row for the subtask, at most **8 hours per engineer per day**. The Lead's approval decides what counts toward usage.
+- **Two tabs at once:** `time_sessions.version_id` (optimistic locking) makes sure only one of two simultaneous heartbeats closes and resumes a session, so time is banked once.
+- The engineer sees only the Login/Logout state, never a timer or hours.
 - The Weekly Hours Logging sheet on Timeline & Logs shows only tracked subtask rows (`?source=tracking`).
 
 ### 7.5 Timesheet approval
@@ -448,13 +449,11 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | Method | Path | Roles | Purpose |
 |---|---|---|---|
 | GET | `/api/projects/{id}/timesheet?week_start=&source=tracking` | all (scoped) | Weekly timesheet rows |
-| POST | `/api/projects/{id}/timesheet-entries` | Engineer | Manual weekly hours (main tasks only; blocked when soft-locked) |
 | POST | `/api/time-log-entries/{id}/approve` · `/reject` | Lead (assigned) | Review an entry (blocked when soft-locked) |
 | GET | `/api/projects/{id}/timeline-logs` | all (scoped) | Tasks with actual vs estimated hours, per-phase completion, entries, summary |
-| GET | `/api/subtask-tracking/status` | Engineer, Lead | Today's sessions, active session, remaining hours |
-| POST | `/api/subtask-tracking/start` | Engineer | Start a session on an assigned subtask |
-| POST | `/api/subtask-tracking/{session_id}/sync` | Engineer | Heartbeat with cumulative active seconds |
-| POST | `/api/subtask-tracking/{session_id}/end` | Engineer | End the session and add the hours to the weekly timesheet |
+| POST | `/api/subtask-tracking/heartbeat` | Engineer | Keep the session alive (resume after the laptop was off); returns the active session |
+| POST | `/api/subtask-tracking/start` | Engineer | Login on an assigned subtask |
+| POST | `/api/subtask-tracking/logout` | Engineer | Logout: bank Logout − Login into the weekly row |
 
 **Dashboards and governance**
 | Method | Path | Roles | Purpose |

@@ -208,15 +208,13 @@ def _eng_open(client, world, project_id):
     return client.get(f"/api/projects/{project_id}", headers=world.eng_h)
 
 
-def _time_entry(client, world, project_id, node_id):
-    return client.post(
-        f"/api/projects/{project_id}/timesheet-entries",
-        json={"task_id": node_id, "week_start_date": "2026-09-07", "mon_hours": 2},
-        headers=world.eng_h,
-    )
+def _login_to_subtask(client, make, world, node):
+    """Hours come only from Login/Logout on a subtask of an assigned task."""
+    subtask = make.wbs_node(node.project_id, world.lead_e, engineer=world.emp1, parent_id=node.id, estimated_hours=4)
+    return client.post("/api/subtask-tracking/start", json={"subtask_id": subtask.id}, headers=world.eng_h)
 
 
-def test_engineer_has_no_project_access_while_draft(client, world, assigned_project):
+def test_engineer_has_no_project_access_while_draft(client, make, world, assigned_project):
     project_id, node = assigned_project
 
     assert _eng_list(client, world) == set()
@@ -224,25 +222,25 @@ def test_engineer_has_no_project_access_while_draft(client, world, assigned_proj
     assert client.get(f"/api/projects/{project_id}/wbs-structure", headers=world.eng_h).status_code == 403
     assert client.get(f"/api/projects/{project_id}/timeline-logs", headers=world.eng_h).status_code == 403
     assert client.get(f"/api/wbs-nodes/{node.id}", headers=world.eng_h).status_code == 403
-    assert _time_entry(client, world, project_id, node.id).status_code == 403
+    assert _login_to_subtask(client, make, world, node).status_code == 403
     body = client.get("/api/engineer-performance", headers=world.eng_h).json()
     assert body["projects"] == []
 
 
-def test_engineer_still_has_no_access_while_pending_approval(client, world, assigned_project):
+def test_engineer_still_has_no_access_while_pending_approval(client, make, world, assigned_project):
     project_id, node = assigned_project
     _submit(client, world, project_id)
 
     assert _eng_list(client, world) == set()
     assert _eng_open(client, world, project_id).status_code == 403
-    assert _time_entry(client, world, project_id, node.id).status_code == 403
+    assert _login_to_subtask(client, make, world, node).status_code == 403
     assert client.get("/api/engineer-performance", headers=world.eng_h).json()["projects"] == []
     # the engineer's dashboard must not leak the project either
     dashboard = client.get("/api/engineer-performance-dashboard", headers=world.eng_h).json()
     assert dashboard["projects"] == [] and dashboard["summary"]["total_tasks"] == 0
 
 
-def test_engineer_gains_project_access_only_after_approval(client, world, assigned_project):
+def test_engineer_gains_project_access_only_after_approval(client, make, world, assigned_project):
     project_id, node = assigned_project
     _submit(client, world, project_id)
     assert client.post(f"/api/projects/{project_id}/resource-bookings/approve", headers=world.bu_h).status_code == 200
@@ -252,7 +250,7 @@ def test_engineer_gains_project_access_only_after_approval(client, world, assign
     rows = client.get(f"/api/projects/{project_id}/wbs-structure", headers=world.eng_h).json()
     assert {row["id"] for row in rows} == {node.id}
     assert client.get(f"/api/wbs-nodes/{node.id}", headers=world.eng_h).status_code == 200
-    assert _time_entry(client, world, project_id, node.id).status_code == 200
+    assert _login_to_subtask(client, make, world, node).status_code == 201
     assert (
         client.get("/api/engineer-performance", headers=world.eng_h).json()["projects"][0]["project_id"] == project_id
     )
@@ -263,7 +261,7 @@ def test_engineer_gains_project_access_only_after_approval(client, world, assign
     )
 
 
-def test_rejected_assignment_grants_no_project_access(client, world, assigned_project):
+def test_rejected_assignment_grants_no_project_access(client, make, world, assigned_project):
     project_id, node = assigned_project
     _submit(client, world, project_id)
     assert (
@@ -275,4 +273,4 @@ def test_rejected_assignment_grants_no_project_access(client, world, assigned_pr
 
     assert _eng_list(client, world) == set()
     assert _eng_open(client, world, project_id).status_code == 403
-    assert _time_entry(client, world, project_id, node.id).status_code == 403
+    assert _login_to_subtask(client, make, world, node).status_code == 403

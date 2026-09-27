@@ -114,7 +114,7 @@ The Create form, filled in (the SharePoint section is hidden; folders are not re
 - read-only for everyone (any change is refused with "archived and read-only");
 - hidden from Leads and Engineers;
 - no longer counts toward engineers' allocation or governance alerts;
-- active time tracking is ended (the time is kept) and a pending extension request is cancelled;
+- any open Login on its subtasks is logged out (the time is kept) and a pending extension request is cancelled;
 - Leads are notified; the action is in the audit log.
 
 **Reopen** restores it exactly as it was, including any timesheet lock.
@@ -199,7 +199,13 @@ to open Task Details.
 ### 5.2 Task Details (work and track time)
 - **Status**: move a task To Do → In-Progress → Submitted for Approval (only once **all its subtasks are Done**); a subtask To Do → In-Progress → Done. The Lead approves the task.
 - **Comments** on your tasks.
-- **Login / Logout** (subtasks only) tracks working time. Only **active** time counts: the tab must be visible, and 2 minutes without activity stops counting. **Logout** saves the time into your weekly timesheet row for that subtask. One active session at a time, 8 hours per day at most.
+- **Login / Logout** (subtasks only) records your working time: the time from **Login** to **Logout** counts, including idle time and time spent in Revit, AutoCAD or other programs. Nothing logs you out automatically. There is no screen to type hours.
+  - **Log in** when you start a subtask and **log out** when you stop. If a subtask takes longer than planned, keep working; when it's done, create the next subtask and log in there.
+  - **Keep MAEC open in a browser tab** while you work (minimised or behind other windows is fine). The tab tells the server once a minute that your laptop is on.
+  - **Laptop switched off, asleep or offline** for more than 5 minutes: the time stops at the last signal and that gap is not counted. When you open MAEC again, it carries on by itself on the same subtask; you don't need to log in again. Closing every MAEC tab has the same effect as switching off.
+  - **Forgot to log out** with the laptop on: the time keeps counting, up to **8 hours per day**. Your Lead sees the hours and can reject them.
+  - One subtask at a time. **Logout** adds the time to your weekly row for that subtask, on the day you logged in.
+  - Edge "sleeping tabs" and Chrome "Memory Saver" can freeze a background tab. Add the MAEC address under *Always keep these sites active* in the browser settings.
 
 ### 5.3 Timeline & Logs
 Your tracked hours for the week. **Submit for Approval** sends the week to your
@@ -249,26 +255,18 @@ Use three windows: **BU** (BU Head), **LEAD** (the Electrical lead), **ENG** (an
 6. **ENG:** WBS shows the task and subtask. Open the subtask: **Login**, keep the tab active a few minutes, **Logout**.
 7. **ENG:** Timeline & Logs: the hours appear. **Submit for Approval**.
 8. **LEAD:** Timeline & Logs: **Approve** ENG's week. **BU:** Executive Dashboard: approved hours and budget burn go up.
-9. **Threshold and lock.** A few tracked minutes never reach the threshold, so create hours through the API page instead (see *Creating hours quickly* below): log **90 h** on ENG's main task for a week and submit that week. **LEAD:** Timeline & Logs → go to that week → **Approve**. With 100 h target and 80% threshold, 90 approved hours give **ALERT** (bell for BU and LEAD). Repeat with **15 h** more in another week: at 100% the project **locks** (BASELINE REACHED, bell). **ENG:** Login on the subtask is refused.
+9. **Threshold and lock.** Hours come only from Login/Logout, so use a small target: **BU:** Edit the project → target effort **1 h**, threshold **50%**. **ENG:** Login on a subtask, wait about **35 minutes**, Logout; submit the week. **LEAD:** approve the week → **ALERT** (bell for BU and LEAD). **ENG:** another **30 minutes**, Logout, submit; **LEAD:** approve → at 100% the project **locks** (BASELINE REACHED, bell). **ENG:** Login on the subtask is refused.
 10. **LEAD:** Executive Dashboard: request an extension of, say, 10 h with a justification. **BU:** bell; dashboard: **Approve Extension**. If usage is now under 100%, the lock lifts automatically ("System" in the audit log); LEAD is notified.
 11. **BU:** **Stop the Execution** (comment, confirm) → locked; **Resume Execution** → reopened. Both in the audit log.
 12. **BU:** Edit: change the currency → confirmation dialog. Replace the Electrical Lead → the old Lead's window no longer lists the project.
 13. **BU:** Projects → **Archive** → the project disappears for LEAD and ENG; **Show archived** → open its Dashboard (read-only banner). **Reopen** → everything is back as before.
 14. **BU:** try **Delete** on this project → refused (it has history). Create an empty test project and delete it → allowed.
 
-**Creating hours quickly (until the timesheet screen, TODO N1, exists).** Open
-**http://localhost:8000/docs**:
-1. `POST /api/auth/login` → *Try it out* → ENG's username and password → copy the `token`.
-2. `POST /api/projects/{project_id}/timesheet-entries`: in the **authorization** field type `Bearer <token>`; project id from the page URL (`?projectId=`); body, for a **main task** (its id is the `nodeId=` in the Task Details URL; subtasks refuse manual hours):
-   `{"task_id": 12, "week_start_date": "2026-09-14", "mon_hours": 18, "tue_hours": 18, "wed_hours": 18, "thu_hours": 18, "fri_hours": 18}` (at most 24 per day; the week starts on a Monday).
-3. `POST /api/projects/{project_id}/weekly-hours/submit` with the same authorization and `{"week_start_date": "2026-09-14"}`.
-The Lead then approves that week in Timeline & Logs.
-
 ---
 
 ## 8. Known limitations while testing
 
-- **No screen to type hours.** Hours come only from Login/Logout tracking on subtasks, which only counts active time in the browser tab, so tests produce small numbers. The weekly timesheet entry screen is TODO **N1** (a go-live blocker).
+- **Hours come only from Login/Logout** (decided 2026-09-27: no manual timesheet). Testing the threshold and lock therefore needs a small target (step 9).
 - **Booking approval is all-or-nothing** per project (TODO C5); editing an approved booking keeps it approved (C6); planned hours ignore the booking % (N11).
 - **Resuming at or above 100%** leaves the project unlocked without re-locking (TODO N14e).
 - **The Lead's WBS edit dialog** can set any status, skipping the engineer's steps (TODO C13).

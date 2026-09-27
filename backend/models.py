@@ -322,13 +322,12 @@ class WeeklyHoursSubmission(Base):
 
 class TimeSession(Base):
     """
-    An automatic working-time tracking session for a single subtask.
+    One Login → Logout period of an engineer on a subtask (app/services/tracking.py).
 
-    Engineers start/stop a session while actively working on an assigned
-    subtask. Only ACTIVE interaction is counted — idle/background time is
-    excluded by the client, which reports the cumulative active seconds on a
-    heartbeat; the backend persists them and caps the per-engineer daily
-    total at 8 hours. One row per tracking session.
+    Worked time is logout_at − login_at, set on Logout (capped at the daily
+    limit). `last_seen_at` is the browser's last heartbeat: a long silence
+    (laptop off or asleep) closes the session there and a new one resumes.
+    `version_id` makes concurrent heartbeats from two tabs safe.
     """
     __tablename__ = "time_sessions"
 
@@ -338,8 +337,12 @@ class TimeSession(Base):
     subtask_id = Column(Integer, nullable=False, index=True)
     employee_id = Column(Integer, nullable=False, index=True)
     login_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False)
     logout_at = Column(DateTime(timezone=True), nullable=True)
     active_seconds = Column(Integer, nullable=False, default=0)
     status = Column(String(20), nullable=False, default="active", index=True)
+    version_id = Column(Integer, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __mapper_args__ = {"version_id_col": version_id}

@@ -606,7 +606,7 @@ export function TimelineLogsPage() {
             <h2>Weekly Hours Logging (Week {weekInfo.weekNum}: {weekInfo.rangeStr})</h2>
             <p>
               {isEngineer
-                ? 'Your automatic subtask working-time for this week, recorded from Login/Logout tracking. Only active time counts — idle and hidden tabs are excluded.'
+                ? 'Your automatic subtask working-time for this week, recorded from Login/Logout: the time between them counts, except while the laptop was off.'
                 : isLead
                   ? 'Review engineer hours for this week, recorded automatically per subtask. Approve or reject entries in your scope.'
                   : 'Review logged engineering hours for this week.'}
@@ -731,7 +731,7 @@ export function TimelineLogsPage() {
           <div className="footer-info">
             <span>
               {isEngineer
-                ? 'Hours are recorded automatically per subtask via Login/Logout tracking. Active time only — idle and hidden tabs are excluded.'
+                ? 'Hours are recorded per subtask from Login/Logout: the time between them counts, except while the laptop was off.'
                 : 'Hours are tracked automatically per subtask and approved by the assigned lead.'}
             </span>
           </div>

@@ -24,7 +24,7 @@ from database import SessionLocal, engine, get_db
 from app.api import api_router
 from app.core.errors import register_exception_handlers
 from app.core.migrations import migrate
-from app.core.security import as_utc, require_role
+from app.core.security import require_role
 from app.domain.calendar import distribute_hours_over_months as _distribute_hours_over_months
 from app.domain.calendar import month_key as _get_month_key
 from app.domain.timesheets import entry_total as time_entry_total
@@ -40,7 +40,6 @@ from app.services.governance import extension_request_output, find_pending_exten
 from app.services.metrics import executive_dashboard_data
 from app.services.governance_monitor import enforce_governance
 from app.services.notifications import EXTENSION_REQUESTED, create_bu_head_notification
-from app.services.tracking import upsert_subtask_time_log
 
 logger = logging.getLogger(__name__)
 
@@ -1687,68 +1686,6 @@ def request_extension(
     return action
 
 
-@app.post("/api/projects/{project_id}/timesheet-entries")
-def submit_time_log(
-    project_id: int,
-    payload: schemas.TimeLogEntryCreate,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"engineer"})
-    if not user.employee_id:
-        raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    if not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
-    if project.timesheets_soft_locked:
-        raise HTTPException(
-            status_code=409,
-            detail="Timesheets are soft-locked by the BU Head — no new entries can be logged.",
-        )
-    task = db.query(models.WbsNode).filter_by(id=payload.task_id, project_id=project_id).first()
-    if not task:
-        raise HTTPException(status_code=400, detail="Task not found in this project.")
-    if not node_assigned_to_engineer(task, user):
-        raise HTTPException(
-            status_code=403,
-            detail="You may only log hours against tasks assigned to you.",
-        )
-    if task.parent_id is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="Subtask hours come from the automatic Login/Logout working-time tracking — manual hour entry is not allowed for subtasks.",
-        )
-    entry = (
-        db.query(models.TimeLogEntry)
-        .filter_by(
-            project_id=project_id,
-            task_id=task.id,
-            employee_id=user.employee_id,
-            week_start_date=payload.week_start_date,
-        )
-        .first()
-    )
-    if entry:
-        for field in models.DAY_FIELDS:
-            setattr(entry, field, getattr(payload, field))
-        entry.approval_status = "pending_review"
-    else:
-        entry = models.TimeLogEntry(
-            project_id=project_id,
-            task_id=task.id,
-            employee_id=user.employee_id,
-            week_start_date=payload.week_start_date,
-            **{field: getattr(payload, field) for field in models.DAY_FIELDS},
-        )
-        db.add(entry)
-    db.commit()
-    db.refresh(entry)
-    enforce_governance(db, project_id)  # editing an approved row changes approved hours
-    return time_entry_output(db, entry)
-
-
 def lead_review_time_log(db: Session, entry_id: int, user: models.User, status: str):
     require_role(user.role, {"lead"})
     if not user.full_name:
@@ -1796,7 +1733,6 @@ def reject_time_log(
 
 SUBTASK_MIN_HOURS = 1
 SUBTASK_MAX_HOURS = 4
-DAILY_WORK_HOURS = 8
 
 
 def validate_subtask_rules(estimated_hours, start_date, end_date):
@@ -1817,194 +1753,6 @@ def validate_subtask_rules(estimated_hours, start_date, end_date):
             status_code=400,
             detail="A subtask must be completed within a single working day — Start Date and End Date must be identical.",
         )
-
-
-def engineer_active_seconds_on(db: Session, employee_id: int, day: date) -> int:
-    """Committed (ended) active seconds an engineer banked on the given day."""
-    total = 0
-    for sess in db.query(models.TimeSession).filter_by(employee_id=employee_id, status="ended").all():
-        if sess.login_at is not None and sess.login_at.date() == day:
-            total += sess.active_seconds
-    return total
-
-
-def cap_to_elapsed(session: models.TimeSession, active_seconds: int) -> int:
-    """Active time reported by the client can never exceed the wall-clock time since the session started."""
-    elapsed = (datetime.now(timezone.utc) - as_utc(session.login_at)).total_seconds()
-    return min(active_seconds, max(0, int(elapsed)))
-
-
-def _session_output(session: models.TimeSession) -> dict:
-    return {
-        "id": session.id,
-        "project_id": session.project_id,
-        "task_id": session.task_id,
-        "subtask_id": session.subtask_id,
-        "employee_id": session.employee_id,
-        "login_at": session.login_at,
-        "logout_at": session.logout_at,
-        "active_seconds": session.active_seconds,
-        "status": session.status,
-    }
-
-
-def day_capacity_seconds(db: Session, employee_id: int, today: date) -> int:
-    return DAILY_WORK_HOURS * 3600 - engineer_active_seconds_on(db, employee_id, today)
-
-
-@app.get("/api/subtask-tracking/status")
-def subtask_tracking_status(
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"engineer", "lead"})
-    if user.employee_id is None:
-        raise HTTPException(status_code=400, detail="Your account is not linked to an employee record.")
-    today = date.today()
-    active = db.query(models.TimeSession).filter_by(employee_id=user.employee_id, status="active").first()
-    day_start = datetime.combine(today, datetime.min.time())
-    day_end = datetime.combine(today + timedelta(days=1), datetime.min.time())
-    day_entries = (
-        db.query(models.TimeSession)
-        .filter(
-            models.TimeSession.employee_id == user.employee_id,
-            models.TimeSession.login_at >= day_start,
-            models.TimeSession.login_at < day_end,
-        )
-        .order_by(models.TimeSession.login_at)
-        .all()
-    )
-    committed = engineer_active_seconds_on(db, user.employee_id, today)
-    total = committed + (active.active_seconds if active else 0)
-    return {
-        "date": today.isoformat(),
-        "active_session": _session_output(active) if active else None,
-        "entries": [_session_output(s) for s in day_entries],
-        "today_seconds": total,
-        "today_hours": round(total / 3600, 2),
-        "remaining_hours": max(0, round((DAILY_WORK_HOURS * 3600 - total) / 3600, 2)),
-    }
-
-
-@app.post("/api/subtask-tracking/start", status_code=201)
-def start_subtask_tracking(
-    payload: schemas.SubtaskTrackingStart,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"engineer"})
-    if user.employee_id is None:
-        raise HTTPException(status_code=400, detail="Your account is not linked to an employee record.")
-    node = db.query(models.WbsNode).filter_by(id=payload.subtask_id).first()
-    if not node:
-        raise HTTPException(status_code=404, detail="Subtask not found.")
-    if node.parent_id is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Working-time tracking applies to subtasks only. Main tasks do not get automatic time tracking.",
-        )
-    if not node_assigned_to_engineer(node, user):
-        raise HTTPException(status_code=403, detail="You may only track working time on subtasks assigned to you.")
-    project = db.query(models.Project).filter_by(id=node.project_id).first()
-    if project and project.timesheets_soft_locked:
-        raise HTTPException(
-            status_code=409,
-            detail="Timesheets are soft-locked by the BU Head — working time cannot be tracked.",
-        )
-    existing = db.query(models.TimeSession).filter_by(employee_id=user.employee_id, status="active").first()
-    if existing:
-        raise HTTPException(
-            status_code=409,
-            detail="You already have an active tracking session. End it before starting another subtask.",
-        )
-    if engineer_active_seconds_on(db, user.employee_id, date.today()) >= DAILY_WORK_HOURS * 3600:
-        raise HTTPException(status_code=409, detail=f"You have reached your {DAILY_WORK_HOURS}-hour daily working limit.")
-    session = models.TimeSession(
-        project_id=node.project_id,
-        task_id=node.parent_id,
-        subtask_id=node.id,
-        employee_id=user.employee_id,
-        login_at=datetime.now(timezone.utc),
-        active_seconds=0,
-        status="active",
-    )
-    db.add(session)
-    db.commit()
-    db.refresh(session)
-    return _session_output(session)
-
-
-@app.post("/api/subtask-tracking/{session_id}/sync")
-def sync_subtask_tracking(
-    session_id: int,
-    payload: schemas.SubtaskSessionSync,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"engineer"})
-    session = db.query(models.TimeSession).filter_by(id=session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Tracking session not found.")
-    if session.employee_id != user.employee_id:
-        raise HTTPException(status_code=403, detail="You may only update your own tracking sessions.")
-    if session.status != "active":
-        raise HTTPException(status_code=409, detail="This tracking session has already ended.")
-    if payload.active_seconds < session.active_seconds:
-        raise HTTPException(status_code=409, detail="active_seconds cannot decrease.")
-    active_seconds = cap_to_elapsed(session, payload.active_seconds)
-    if active_seconds > day_capacity_seconds(db, user.employee_id, date.today()):
-        raise HTTPException(
-            status_code=409,
-            detail=f"You have reached your {DAILY_WORK_HOURS}-hour daily working limit. The session will not count more time.",
-        )
-    session.active_seconds = active_seconds
-    db.commit()
-    db.refresh(session)
-    return _session_output(session)
-
-
-@app.post("/api/subtask-tracking/{session_id}/end")
-def end_subtask_tracking(
-    session_id: int,
-    payload: schemas.SubtaskSessionSync,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, {"engineer"})
-    session = db.query(models.TimeSession).filter_by(id=session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Tracking session not found.")
-    if session.employee_id != user.employee_id:
-        raise HTTPException(status_code=403, detail="You may only update your own tracking sessions.")
-    if session.status != "active":
-        return _session_output(session)
-    if payload.active_seconds < session.active_seconds:
-        raise HTTPException(status_code=409, detail="active_seconds cannot decrease.")
-    today = date.today()
-    capacity = day_capacity_seconds(db, user.employee_id, today)
-    final_seconds = cap_to_elapsed(session, payload.active_seconds)
-    exceeded = final_seconds > capacity
-    if exceeded:
-        final_seconds = max(0, capacity)
-    session.active_seconds = final_seconds
-    session.logout_at = datetime.now(timezone.utc)
-    session.status = "ended"
-    db.commit()
-    # Hours are banked to the day the session was logged in: a late-night
-    # session that crosses midnight still lands in the starting day's column.
-    work_date = session.login_at.date() if session.login_at else today
-    upsert_subtask_time_log(db, session.project_id, session.subtask_id, session.employee_id, work_date, final_seconds)
-    db.commit()
-    enforce_governance(db, session.project_id)  # hours added to an approved row or week count at once
-    db.refresh(session)
-    total = engineer_active_seconds_on(db, user.employee_id, today)
-    return {
-        "session": _session_output(session),
-        "exceeded": exceeded,
-        "today_hours": round(total / 3600, 2),
-        "remaining_hours": max(0, round((DAILY_WORK_HOURS * 3600 - total) / 3600, 2)),
-        "limit_reached": total >= DAILY_WORK_HOURS * 3600,
-    }
 
 
 def cascade_phase(db: Session, parent_id: int, phase: str):

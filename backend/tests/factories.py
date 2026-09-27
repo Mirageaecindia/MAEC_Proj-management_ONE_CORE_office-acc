@@ -73,7 +73,7 @@ class Factory:
         values.update(fields)
         return self._save(models.WbsNode(**values))
 
-    def time_entry(self, project_id, node, employee, hours, status="pending_review", week=WEEK):
+    def time_entry(self, project_id, node, employee, hours=0, status="pending_review", week=WEEK, **day_hours):
         return self._save(
             models.TimeLogEntry(
                 project_id=project_id,
@@ -82,5 +82,6 @@ class Factory:
                 week_start_date=week,
                 mon_hours=hours,
                 approval_status=status,
+                **day_hours,
             )
         )

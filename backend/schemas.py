@@ -298,26 +298,6 @@ class WbsNodeUpdate(WbsNodeBase):
     pass
 
 
-class TimeLogEntryCreate(BaseModel):
-    task_id: int
-    week_start_date: date
-    mon_hours: float = 0
-    tue_hours: float = 0
-    wed_hours: float = 0
-    thu_hours: float = 0
-    fri_hours: float = 0
-    sat_hours: float = 0
-    sun_hours: float = 0
-
-    @field_validator("mon_hours", "tue_hours", "wed_hours", "thu_hours", "fri_hours", "sat_hours", "sun_hours")
-    @classmethod
-    def hours_in_range(cls, value: float) -> float:
-        value = float(value or 0)
-        if value < 0 or value > 24:
-            raise ValueError("Daily hours must be between 0 and 24.")
-        return value
-
-
 class TimeLogEntryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -345,35 +325,6 @@ class TimeLogEntryOut(BaseModel):
 class WeeklyHoursActionIn(BaseModel):
     week_start_date: date
     employee_id: Optional[int] = None
-
-
-class SubtaskTrackingStart(BaseModel):
-    subtask_id: int
-
-
-class SubtaskSessionSync(BaseModel):
-    active_seconds: int
-
-    @field_validator("active_seconds")
-    @classmethod
-    def non_negative(cls, value: int) -> int:
-        if value < 0:
-            raise ValueError("active_seconds cannot be negative.")
-        return value
-
-
-class SubtaskSessionOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    project_id: int
-    task_id: int
-    subtask_id: int
-    employee_id: int
-    login_at: datetime
-    logout_at: Optional[datetime] = None
-    active_seconds: int
-    status: str
 
 
 class GovernanceActionBase(BaseModel):

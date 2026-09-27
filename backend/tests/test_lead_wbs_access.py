@@ -63,6 +63,7 @@ def test_deleting_a_node_removes_its_tracking_sessions(client, db, make, world, 
             subtask_id=subtask.id,
             employee_id=world.emp1.id,
             login_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
         )
     )
 

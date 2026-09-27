@@ -17,6 +17,7 @@ from datetime import date
 import pytest
 
 import models
+from app.core.database import SessionLocal
 from app.domain.governance import (
     HARD_STOP,
     NORMAL,
@@ -91,13 +92,19 @@ def test_effective_status_combines_row_and_week_approval(entry_status, week_stat
 
 
 def _log(client, world, node, week, **days):
-    response = client.post(
-        f"/api/projects/{node.project_id}/timesheet-entries",
-        json={"task_id": node.id, "week_start_date": week, **days},
-        headers=world.eng_h,
-    )
-    assert response.status_code == 200, response.text
-    return response.json()["id"]
+    """Hours as Logout banks them: a pending weekly row for the Lead to review."""
+    with SessionLocal() as db:
+        entry = models.TimeLogEntry(
+            project_id=node.project_id,
+            task_id=node.id,
+            employee_id=world.emp1.id,
+            week_start_date=date.fromisoformat(week),
+            approval_status=PENDING_REVIEW,
+            **days,
+        )
+        db.add(entry)
+        db.commit()
+        return entry.id
 
 
 def _approve(client, world, entry_id):
@@ -208,7 +215,7 @@ def test_reaching_the_threshold_alerts_bu_head_and_project_leads_once(client, db
     assert len(_notifications(client, world.bu_h, project_id, "threshold_warning")) == 1
 
 
-def test_reaching_the_baseline_locks_timesheets_automatically(client, db, world, governed):
+def test_reaching_the_baseline_locks_timesheets_automatically(client, db, make, world, governed):
     project_id, node_a, *_ = governed
 
     _reach_baseline(client, world, node_a)  # the approval that crosses 100% is kept
@@ -224,11 +231,8 @@ def test_reaching_the_baseline_locks_timesheets_automatically(client, db, world,
     assert audit.consumption_pct == 100.0
     assert audit.consumption_hours == 100.0
 
-    blocked = client.post(
-        f"/api/projects/{project_id}/timesheet-entries",
-        json={"task_id": node_a.id, "week_start_date": "2026-09-21", "mon_hours": 1},
-        headers=world.eng_h,
-    )
+    subtask = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, parent_id=node_a.id, estimated_hours=4)
+    blocked = client.post("/api/subtask-tracking/start", json={"subtask_id": subtask.id}, headers=world.eng_h)
     assert blocked.status_code == 409
     governance = _dashboard(client, world, project_id)["governance_status"]
     assert governance["level"] == HARD_STOP

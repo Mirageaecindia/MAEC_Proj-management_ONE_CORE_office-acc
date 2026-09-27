@@ -14,6 +14,7 @@ from app.repositories.bookings import BookingRepository
 from app.repositories.governance import GovernanceRepository
 from app.repositories.notifications import NotificationRepository
 from app.repositories.projects import ProjectRepository
+from app.repositories.tracking import TrackingRepository
 from app.repositories.users import UserRepository
 from app.repositories.work import WorkRepository
 from app.services import archive_guard
@@ -25,6 +26,7 @@ from app.services.governance_monitor import GovernanceMonitor
 from app.services.metrics import ProjectMetricsService
 from app.services.notifications import NotificationService
 from app.services.projects import ProjectService
+from app.services.tracking import TrackingService
 from app.services.work_summary import WorkSummaryService
 
 archive_guard.install()  # archived projects are read-only for every database session
@@ -69,3 +71,7 @@ def get_notification_service(db: Session = Depends(get_db)) -> NotificationServi
 
 def get_work_summary_service(db: Session = Depends(get_db)) -> WorkSummaryService:
     return WorkSummaryService(ProjectRepository(db), WorkRepository(db))
+
+
+def get_tracking_service(db: Session = Depends(get_db)) -> TrackingService:
+    return TrackingService(db, TrackingRepository(db))

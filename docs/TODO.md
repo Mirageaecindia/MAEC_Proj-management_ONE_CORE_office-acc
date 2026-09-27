@@ -1,6 +1,6 @@
 # MAEC ProManage: prioritised to-do list
 
-Last updated: 2026-09-26. Sajjad is the only person pushing to `main`. **The app is not deployed:** it will be deployed once, when the whole app is developed (see the go-live checklist). All databases today hold test data. Owner:
+Last updated: 2026-09-28 (hours from Login/Logout only, D1). Sajjad is the only person pushing to `main`. **The app is not deployed:** it will be deployed once, when the whole app is developed (see the go-live checklist). All databases today hold test data. Owner:
 Sajjad, who now owns all three roles (BU Head, Lead, Engineer) plus the
 SharePoint integration.
 
@@ -45,7 +45,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | Lock scope | **Whole project.** The per-discipline breakdown is informational only and never triggers anything | guide §7.7 |
 | Threshold behaviour | Alert at the threshold; automatic lock at 100% of the baseline; an approved extension or a Resume unlocks | guide §7.7 |
 | Usage | **Approved hours only**: a row the Lead approved, or a row in a week the Lead approved. Pending hours don't count; rejected hours never count | guide §7.7 |
-| D1: how hours are recorded | **Manual timesheet per main task, entered daily, submitted and approved weekly.** Engineers fill a weekly grid (seven days, today highlighted) as they go; each entry saves as pending; they submit the week; the Lead approves or rejects the week in one action (single rows can still be rejected). Subtasks track progress only. The tracker is downgraded (see N1). Tell the previous Engineer developer **before** the tracker changes | this file |
+| D1: how hours are recorded | **Subtask Login/Logout only; no manual timesheet** (manager, 2026-09-27). Engineers create a subtask each day (estimate up to 4 h, work may run over) and log in and out on it. Worked time = Logout − Login, idle included; nothing logs out automatically; time with the laptop off is not counted and the session resumes by itself. Logout banks into the weekly row; the Lead approves as before | guide §7.4 |
 | D2: calendar and time zone | Per **person**, through their office: working-week pattern + time zone. The project calendar only matters for planned hours | this file |
 | C7: task assignment | Leads may assign WBS tasks after booking; the engineer sees them once the booking is approved. Safeguards in C7 | this file |
 | D8: while locked | **Logging is allowed** (flagged as over-baseline); **approval is blocked**; Leads may still **reject**. Rules in N14 | this file |
@@ -60,7 +60,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | S1 | **Rotate the Azure client secret.** Update `.env` on every machine. Check whether the GitHub repo is private, **and whether it was ever public** | The secret leaked in git history (commit `1b40874`) | Azure portal, `.env`, GitHub settings | S |
 | S2 | **Purge the HR CSV and the old secret from git history** with `git filter-repo`, **right after S1**. Force-push once (the only planned exception to "never force-push main"), then everyone re-clones. If the repo was ever public, assume both were copied and **inform whoever handles HR / data protection**: the CSV is employee personal data and India's DPDP Act applies | Every week it waits, the data sits in more clones | whole repo | M |
 | S3 | ✅ **Done.** Project-access checks added to Lead WBS node create, **update** and delete. The unused legacy `gantt_tasks` endpoints (`GET /api/projects/{id}/wbs-tasks`, `PUT /api/wbs-tasks/{id}`), which had no access check, were removed. Advance-status was already limited to nodes in the Lead's scope | A Lead could change WBS data on projects they weren't allocated to | `main.py`, `tests/test_lead_wbs_access.py` | S |
-| S4 | ✅ **Done.** Tracked time is capped at the wall-clock time since `login_at` on session sync and end | Anyone calling the API could claim 8 h a minute after starting | `main.py` `cap_to_elapsed`, `tests/test_tracking_cap.py` | S |
+| S4 | ✅ **Done, then superseded (D1).** The server now computes worked time from its own clock (Logout − Login), so the browser reports no seconds at all | Anyone calling the API could claim 8 h a minute after starting | `app/services/tracking.py`, `tests/test_tracking.py` | S |
 | S5 | ✅ **Done.** The public `/uploads` mount was removed: nothing was ever stored there. The authenticated, project-checked download endpoint is built with the first real files (C3, SOW upload). A test fails if any public mount comes back | Anyone with a file URL could have downloaded it | `main.py`, `tests/test_uploads.py`, `CLAUDE.md` | S |
 | S6 | ✅ **Done.** `users.is_active` (the last change via `schema_upgrades.py`). Login and existing sessions refuse inactive users (generic error); inactive leads are hidden from the Create Project dropdowns and can't be assigned; `create_user.py --deactivate / --activate` (deactivating ends their sessions at once) | A leaver could only be removed by editing the database | `models.py`, `app/core/security.py`, `app/services/auth.py`, `app/repositories/users.py`, `create_user.py`, `tests/test_user_deactivation.py` | S |
 | S7 | ✅ **Script done and restore-tested.** `backup_db.py` takes a consistent snapshot via the SQLite backup API (safe while running) and keeps the newest 14. Drill run on 2026-09-26: back up the live DB, restore it to a copy, start the real server on it, log in, load projects and a dashboard: passed. **Still to do by hand:** (1) choose an **off-machine** target (another drive or a restricted OneDrive folder; the backups contain personal data, so only you should have access) and pass it with `--dir`; (2) create the nightly scheduled task on the machine that holds the real database | Backups on the same disk die with it (disk failure, ransomware) | `backend/backup_db.py`, `tests/test_backup_db.py` | S |
@@ -74,7 +74,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 
 | ID | Task | Why | Where | Size |
 |---|---|---|---|---|
-| N1 | 🚧 **Go-live blocker. Timesheet entry screen (D1).** Until it ships, the only hour source is the tracker, which records close to zero, so every governance figure sits near 0. Build: a weekly grid with seven day columns (today highlighted, fill daily), add rows for the engineer's main tasks, entries save as pending, **Submit week**, and the week's approval state per row. Backend manual entry already exists (`POST /timesheet-entries`, main tasks only); **no page calls it today**. Then downgrade the tracker to an optional pre-fill or remove it (⚖️ D1a); tell the previous Engineer developer first | The browser tracker records about zero while engineers work in Revit/AutoCAD | new engineer page (`features/`), `main.py` `submit_time_log` (move to `app/` per rule 2), tracking endpoints, `TaskDetailsPage.jsx` | M–L |
+| N1 | ✅ **Done 2026-09-28 (D1 changed).** No timesheet screen: hours come from subtask Login/Logout. The idle and hidden-tab pause was removed; worked time = Logout − Login, paused while the laptop is off (heartbeat), resumed by itself; the manual `POST /timesheet-entries` endpoint was removed. Tracking moved to `app/` | The browser tracker recorded about zero while engineers worked in Revit/AutoCAD | `app/services/tracking.py`, `app/api/routers/engineer/tracking.py`, `hooks/useTracking.js`, `TaskDetailsPage.jsx`, migration `0004` | M |
 | N2 | ✅ **Done.** Hours on all seven days are accepted and counted: row totals, approved usage (SQL), monthly buckets, "has tracked hours" filters, the Timeline & Logs weekly total, and tracking no longer discards weekend sessions. Planned-hours maths stays Mon–Fri until N3 | KSA works Sun–Thu, Indian offices often Saturday; those hours were silently dropped | `app/domain/timesheets.py`, `app/repositories/work.py`, `main.py`, `TimelineLogsPage.jsx`, `tests/test_weekend_hours.py` | S |
 | N3 | **Office field (prerequisite for D2):** an `offices` table (week pattern, time zone) and `employees.office_id`. **Default everyone to one office now** so nothing breaks. Then use it for the daily cap and day boundaries, and later for planned-hours maths | The 8 h cap and "today" use the server date; IST and GST days split differently | new table + Alembic, `main.py` tracking, `app/domain/calendar.py` | M |
 | N4 | **Real earned value:** EV = estimated hours of **finished** WBS tasks; PV = planned-to-date from the WBS dates. Show SPI = EV / PV and CPI = EV / approved hours. Replaces the current "SPI" (approved ÷ WBS hours), which isn't SPI | The only honest progress figure. Needs N8 first | `app/services/metrics.py`, `GovernanceSummaryCards.jsx` | M |
@@ -103,7 +103,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | C8 | ✅ **Done.** Stop and Resume each open a confirmation dialog that says what happens (Stop locks logging, tracking and approvals and notifies the Leads; Resume reopens them). Resume warns when usage is at or above 100% that the project won't lock again automatically | Prevents clicking by accident | `GovernanceControls.jsx`, `pages.smoke.test.jsx` | S |
 | C9 | *(merged into N14 rule b)* | | | |
 | C10 | ✅ **Done** (with S3). Deleting a WBS node also deletes its `time_sessions` | Left orphan rows | `main.py` WBS delete | S |
-| C11 | **Engineers can log hours in a week that has no entry yet.** This becomes part of N1's main-task weekly timesheet | The timesheet UI only shows rows that already exist | N1 | – |
+| C11 | ✅ **Obsolete (D1).** There is no manual entry; Logout creates the week's row when needed | – | – | – |
 | C13 | **WBS edit dialog must respect the status flow.** Today a Lead can set any status directly (Approved, Done), skipping the engineer's steps and the dedicated approve action. Limit the edit dialog to non-status fields, or to transitions the flow allows | Workflow bypass | `WbsStructurePage.jsx`, `main.py` `update_wbs_node` | S |
 | C12 | **Audit log for booking approvals, rejections and edits** (who, when, before/after) | The governance log doesn't cover resourcing decisions | `booking_approval.py`, `main.py` booking edit, new audit table or `governance_actions` | S–M |
 
@@ -132,7 +132,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | E3 | ✅ **Done.** `npm run lint` has 0 errors (unused imports, state and functions removed in `WbsStructurePage.jsx`, `pages/lead/ExecutiveDashboardPage.jsx`, `EngineerPerformanceDashboardPage.jsx`). 19 older warnings remain (hook dependencies, fast refresh) | `npm run lint` failed | those files | S |
 | E5 | **Postgres decision, foreign keys, indexes** (after E4). Also align two harmless type differences in adopted dev databases: `projects.timesheets_soft_locked` INTEGER vs BOOLEAN, `wbs_nodes.deliverable_status` VARCHAR(60) vs (40) | Production-grade database | `models.py`, config | M |
 | E6 | **Performance:** SQL aggregates instead of per-row queries; less polling | Scales badly | `main.py`, pages | M |
-| E7 | **Delete dead code:** the `gantt_tasks` table (its endpoints were removed in S3), `project_leads`, the legacy `request-extension` endpoint, `leads_loader.py`, `temp_*.py`, `App.css`, the unused `recharts` dependency, and the tracker if D1a says remove | Noise | various | S |
+| E7 | **Delete dead code:** the `gantt_tasks` table (its endpoints were removed in S3), `project_leads`, the legacy `request-extension` endpoint, `leads_loader.py`, `temp_*.py`, `App.css`, and the unused `recharts` dependency | Noise | various | S |
 | E8 | **Tokens in httpOnly cookies** instead of `localStorage` | XSS could steal tokens | `security.py`, `api/client.js`, `AuthContext.jsx` | M |
 | E9 | **Production setup:** single-port build (FastAPI serves the built frontend), structured logging, error monitoring | Deployment | `main.py`, `vite build` | M |
 
@@ -157,7 +157,6 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
 
 | # | Question | Recommendation |
 |---|---|---|
-| D1a | Tracker after N1: keep it as an optional pre-fill of the weekly timesheet, or remove it? | Ask the engineers. If nobody would use it, remove it (less code, S4 no longer needed) |
 | D3 | Where do rates come from (N6)? Which currency conversion source and how often? | One rate per designation, with history, maintained by the BU Head; monthly FX rates entered by the BU Head |
 | D9 | Should "Blocked" come back as a **flag** (like severity, with a reason), not a status? The status flow has no blocked state; N8 mapped legacy "Blocked" to To Do (no such rows existed) | A flag with a reason, shown on the WBS and the dashboards, if Leads need to report stuck work |
 | D4 | The exact moment for the history rewrite (S2) | The first evening after S1 when everyone can push, then re-clone |
@@ -172,7 +171,7 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
    - **S7 (go-live item):** the database holds only test data today. Before real use, point `backup_db.py --dir` at an off-machine folder (external drive or restricted OneDrive) and schedule it nightly.
    - S3–S8, N14(d) and E4 are done.
 2. **Sprint A:** E4 Alembic ✅, N2 7-day hours ✅, N8 statuses ✅, E3 lint ✅, C1 archive ✅, C2 edit ✅, C4 reject ✅, C8 confirmations ✅, N5 over-budget ✅, then N11, N12, N13.
-3. **Sprint B (timesheets and lock):** N1 timesheet model (tell the previous Engineer developer first), N9 single approval route, N14 lock rules, C6, C7, C10, C12. Lead/Engineer features move into `app/` as they are touched.
+3. **Sprint B (timesheets and lock):** N9 single approval route, N14 lock rules, C6, C7, C10, C12. Lead/Engineer features move into `app/` as they are touched.
 4. **Sprint C (calendar and cost):** N3 office field, N4 EV/SPI/CPI, N6 rate card, N7 disciplines, N10, C3 (after S5), C5.
 5. **Sprint D:** W1–W3.
 6. **Then:** W4–W6, E5–E9, P4 SharePoint.
@@ -183,7 +182,7 @@ It has never provisioned successfully, so treat it as unbuilt, not buggy.
 
 Nothing here is urgent while the app is in development. All of it must be done before real users and real data arrive.
 
-- [ ] **N1:** the timesheet entry screen exists and engineers use it (otherwise every governance figure is near 0).
+- [ ] **Hours:** engineers keep MAEC open in a browser tab while working, with the site excluded from Edge sleeping tabs / Chrome Memory Saver (user guide §5.2).
 - [ ] **S1:** rotate the Azure client secret (needs Azure credentials).
 - [ ] **S2:** purge the HR CSV and the old secret from git history; ask Subhika to delete her clone.
 - [ ] **E5:** database decision (SQLite or Postgres), foreign keys, indexes. With Postgres or several workers, run `alembic upgrade head` as a deploy step instead of at startup.
