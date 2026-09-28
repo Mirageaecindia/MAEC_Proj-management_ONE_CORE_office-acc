@@ -997,8 +997,15 @@ input[type='date'] { color: #52687c; }
 .wbs-hours-calc.warn { color: #b4534f; }
 .wbs-table input, .wbs-table select { min-width: 110px; height: 32px; padding: 0 7px; font-size: 11px; }
 .wbs-table .wbs-readonly { min-width: 110px; min-height: 32px; display: flex; align-items: center; justify-content: center; padding: 0 7px; font-size: 11px; color: #24415d; }
-.wbs-table th:first-child { min-width: 290px; }
-.wbs-table td:first-child { white-space: nowrap; text-align: left; }
+/* Each cell keeps to its own column: long names wrap inside the first column instead of
+   running over the next one (no visible column lines). */
+table.wbs-table { table-layout: fixed; width: 100%; }
+.wbs-table th:first-child { width: 40%; }
+.wbs-table th:last-child { width: 180px; } /* the action buttons never wrap */
+.wbs-table td:first-child { white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.wbs-table td:first-child > span { display: flex; align-items: flex-start; gap: 6px; }
+.wbs-table td:first-child > span > strong { flex: 0 0 auto; }
+.wbs-table .wbs-readonly { white-space: normal; overflow-wrap: anywhere; }
 table.wbs-table th { padding: 9px 8px; white-space: normal; }
 table.wbs-table td { padding: 9px 8px; }
 /* Per-column alignment (header + body match) for the 6-column WBS tables only.
