@@ -28,8 +28,7 @@ def _make_new_accounts(db, make):
             username=username,
             password_hash=hash_password(password),
             full_name=full_name,
-            role="lead",
-            discipline=discipline,
+            role="engineer",
             employee_id=make.employee(full_name, discipline=f"{discipline} Lead").id,
         )
     for username, password, full_name in NEW_ENGINEERS:
@@ -104,9 +103,9 @@ def test_new_leads_and_engineers_can_log_in(client, db, make):
         response = _login(client, username, password)
         assert response.status_code == 200
         body = response.json()
-        assert body["role"] == "lead"
+        assert body["role"] == "engineer"  # a lead is an engineer the BU Head picks per project
         assert body["full_name"] == full_name
-        assert body["engineer_id"] is None
+        assert body["engineer_id"] == accounts[username].employee_id
 
     for username, password, full_name in NEW_ENGINEERS:
         response = _login(client, username, password)

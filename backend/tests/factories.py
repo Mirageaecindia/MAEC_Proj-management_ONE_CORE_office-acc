@@ -32,22 +32,21 @@ class Factory:
         self.db.refresh(row)
         return row
 
-    def user(self, username, role, full_name=None, discipline=None, employee_id=None):
+    def user(self, username, role, full_name=None, employee_id=None):
         return self._save(
             models.User(
                 username=username,
                 password_hash=_PASSWORD_HASH,
                 full_name=full_name,
                 role=role,
-                discipline=discipline,
                 employee_id=employee_id,
             )
         )
 
     def lead(self, username, full_name, discipline):
-        """A lead account with its employee record (everyone the BU Head can pick has one)."""
+        """An engineer account the BU Head picks as a project lead: the designation names the discipline."""
         employee = self.employee(full_name, discipline=f"{discipline} Lead")
-        return self.user(username, "lead", full_name, discipline=discipline, employee_id=employee.id)
+        return self.user(username, "engineer", full_name, employee_id=employee.id)
 
     def employee(self, name, discipline="Mechanical Engineer"):
         n = next(self._seq)

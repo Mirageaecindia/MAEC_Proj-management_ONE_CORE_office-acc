@@ -18,7 +18,7 @@ from app.repositories.bookings import ENGINEER, LEAD, BookingRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.users import UserRepository
 from app.services import notifications as notify
-from app.services.access import user_can_access_project, visible_project_ids
+from app.services.access import project_roles, user_can_access_project, visible_project_ids
 from app.services.allocation import over_capacity_message
 from app.services.archive_guard import ARCHIVED_READ_ONLY, lifecycle_writes
 from app.services.governance_monitor import GovernanceMonitor
@@ -121,7 +121,7 @@ class ProjectService:
             raise ConflictError(DUPLICATE_CODE) from exc
         self.db.refresh(project)
 
-        data = self._outs([project])[0]
+        data = self._outs([project], None)[0]
         data.update(
             await self._provision(project) if payload.sharepoint_disciplines else _sharepoint_result("not_requested")
         )
@@ -132,7 +132,7 @@ class ProjectService:
         projects = self.projects.list(
             visible_project_ids(self.db, user), include_archived=include_archived and user.role == Role.BU_HEAD
         )
-        return self._outs(projects)
+        return self._outs(projects, user)
 
     def get_for(self, user: models.User, project_id: int) -> dict:
         project = self.projects.get(project_id)
@@ -140,10 +140,12 @@ class ProjectService:
             raise NotFoundError(PROJECT_NOT_FOUND)
         if not user_can_access_project(self.db, user, project):
             raise ForbiddenError(NO_PROJECT_ACCESS)
-        return self._outs([project])[0]
+        return self._outs([project], user)[0]
 
-    def _outs(self, projects: list[models.Project]) -> list[dict]:
-        """ProjectOut data, with each lead slot's dates and % read from the lead bookings (two queries)."""
+    def _outs(self, projects: list[models.Project], user: models.User | None) -> list[dict]:
+        """ProjectOut data: each lead slot's dates and % from the lead bookings, and the caller's
+        role on each project (`my_role`: what the pages show). Four queries for any number of projects."""
+        roles = project_roles(self.db, user) if user is not None and user.role != Role.BU_HEAD else None
         assignments: dict[tuple[int, int], models.ResourceBooking] = {}
         for booking in self.bookings.lead_assignments([p.id for p in projects]):
             assignments[(booking.project_id, booking.employee_id)] = booking
@@ -152,6 +154,7 @@ class ProjectService:
         out = []
         for project in projects:
             data = schemas.ProjectOut.model_validate(project).model_dump()
+            data["my_role"] = Role.BU_HEAD if roles is None else roles.get(project.id)
             for slot, (_, id_col) in zip(schemas.LEAD_SLOTS, _LEAD_SLOTS, strict=True):
                 booking = assignments.get((project.id, employee_of.get(getattr(project, id_col))))
                 if booking is not None:
@@ -261,16 +264,16 @@ class ProjectService:
             self.db.rollback()
             raise ConflictError(DUPLICATE_CODE) from exc
         self.db.refresh(project)
-        return {**self._outs([project])[0], "reassigned_nodes": moved}
+        return {**self._outs([project], user)[0], "reassigned_nodes": moved}
 
     def _notify_lead_changes(self, project: models.Project, old_ids: set[int], new_ids: set[int], actor: str) -> None:
         name = project.project_name
         notify.notify_users(
-            self.db, old_ids - new_ids, Role.LEAD, notify.PROJECT_LEAD_REMOVED,
+            self.db, old_ids - new_ids, Role.ENGINEER, notify.PROJECT_LEAD_REMOVED,
             "No longer a project lead", f"You are no longer a lead on '{name}'.", project.id, actor,
         )  # fmt: skip
         notify.notify_users(
-            self.db, new_ids - old_ids, Role.LEAD, notify.PROJECT_LEAD_ASSIGNED,
+            self.db, new_ids - old_ids, Role.ENGINEER, notify.PROJECT_LEAD_ASSIGNED,
             "New project", f"You are now a lead on '{name}'.", project.id, actor,
         )  # fmt: skip
 

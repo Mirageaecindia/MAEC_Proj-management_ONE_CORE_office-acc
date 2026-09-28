@@ -15,6 +15,7 @@ import schemas
 from app.core.config import Settings, get_settings
 from app.core.errors import TooManyRequestsError, UnauthorizedError
 from app.core.roles import Role
+from app.services.access import leads_any_project
 from app.core.security import verify_password
 
 INVALID_CREDENTIALS = "Invalid username or password."
@@ -96,6 +97,7 @@ class AuthService:
             username=user.username,
             full_name=user.full_name,
             engineer_id=user.employee_id if user.role == Role.ENGINEER else None,
+            leads_projects=leads_any_project(self.db, user),
         )
 
     def logout(self, token: str | None) -> None:

@@ -48,7 +48,7 @@ from app.services.notifications import EXTENSION_REQUESTED, create_bu_head_notif
 
 logger = logging.getLogger(__name__)
 
-STAFF = {"engineer", "lead"}  # accounts that may hold an employee record (everyone but the BU Head)
+STAFF = {"engineer"}  # everyone but the BU Head; leading a project is a role on the project, not an account
 LEAD_ROW = "Lead assignments are set by the BU Head on the project, not here."
 LEAD_HOURS_BU_HEAD = "A project lead's hours are approved by the BU Head."
 ENGINEER_HOURS_LEAD = "An engineer's hours are approved by the project's leads."

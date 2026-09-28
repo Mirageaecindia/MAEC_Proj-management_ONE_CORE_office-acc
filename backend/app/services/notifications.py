@@ -102,7 +102,7 @@ def notify_project_leads(
     db: Session, project: models.Project, notification_type: str, title: str, message: str, actor_name: str | None
 ) -> None:
     notify_users(
-        db, project_lead_user_ids(project), Role.LEAD, notification_type, title, message, project.id, actor_name
+        db, project_lead_user_ids(project), Role.ENGINEER, notification_type, title, message, project.id, actor_name
     )
 
 

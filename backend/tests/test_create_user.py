@@ -1,32 +1,23 @@
-"""create_user.py: account creation rules, including the lead discipline (roadmap 4.1)."""
+"""create_user.py: account creation rules."""
 
 import pytest
 
-from create_user import create_user, set_lead_discipline
+from create_user import create_user
 
 PASSWORD = "Longenough1"
 
 
-def test_lead_is_created_with_normalized_discipline_and_appears_in_dropdown(client, db, make, world):
-    employee = make.employee("New Lead", discipline="Mechanical Lead")
-    lead = create_user(db, "lead.new", PASSWORD, "New Lead", "lead", employee.id, "mechanical")
+def test_new_engineer_appears_in_the_project_lead_dropdown(client, db, make, world):
+    employee = make.employee("New Person", discipline="Mechanical Engineer")
+    create_user(db, "eng.new", PASSWORD, "New Person", "engineer", employee.id)
 
-    assert lead.discipline == "Mechanical"
     names = {row["name"] for row in client.get("/api/project-leads", headers=world.bu_h).json()}
-    assert "New Lead" in names
+    assert "New Person" in names
 
 
-@pytest.mark.parametrize(
-    ("role", "discipline", "message"),
-    [
-        ("lead", None, "Lead accounts need a discipline"),
-        ("lead", "Plumbing", "Invalid discipline"),
-        ("bu_head", "Electrical", "Only lead accounts have a discipline"),
-    ],
-)
-def test_discipline_rules(db, role, discipline, message):
-    with pytest.raises(SystemExit, match=message):
-        create_user(db, "someone", PASSWORD, "Someone", role, None, discipline)
+def test_only_bu_head_and_engineer_accounts_exist(db):
+    with pytest.raises(SystemExit, match="Invalid role"):
+        create_user(db, "someone", PASSWORD, "Someone", "lead", None)
 
 
 def test_engineer_must_link_to_an_existing_employee(db, make):
@@ -45,14 +36,3 @@ def test_short_password_and_duplicate_username_are_rejected(db, make):
         create_user(db, "new", "short", "X", "bu_head", None)
     with pytest.raises(SystemExit, match="already exists"):
         create_user(db, "taken", PASSWORD, "X", "bu_head", None)
-
-
-def test_set_lead_discipline_updates_existing_lead_only(db, make):
-    make.user("old.lead", "lead", "Old Lead")
-    make.user("boss", "bu_head", "Boss")
-
-    assert set_lead_discipline(db, "old.lead", "bim").discipline == "BIM"
-    with pytest.raises(SystemExit, match="only lead accounts"):
-        set_lead_discipline(db, "boss", "BIM")
-    with pytest.raises(SystemExit, match="does not exist"):
-        set_lead_discipline(db, "ghost", "BIM")

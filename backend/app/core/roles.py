@@ -4,8 +4,9 @@ from enum import StrEnum
 
 
 class Role(StrEnum):
+    """Account roles. Leading a project is not one: see app/services/access.py."""
+
     BU_HEAD = "bu_head"
-    LEAD = "lead"
     ENGINEER = "engineer"
 
 

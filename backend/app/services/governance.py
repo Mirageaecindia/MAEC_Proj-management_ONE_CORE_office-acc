@@ -148,7 +148,7 @@ class GovernanceService:
         notify.notify_users(
             self.db,
             [request.requested_by_user_id],
-            Role.LEAD,
+            Role.ENGINEER,
             notify.EXTENSION_DECIDED,
             f"Extension {status}",
             f"Your request for {request.requested_hours:g} extra hours on '{project.project_name}' was {status}."

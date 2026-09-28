@@ -99,3 +99,27 @@ def test_lead_does_a_subtask_on_their_own_project(client, db, make, world):
     # Still the lead there: the whole WBS, not just their own nodes.
     make.wbs_node(project_id, world.lead_e, engineer=world.emp1)
     assert len(client.get(f"/api/projects/{project_id}/wbs-structure", headers=lead).json()) == 3
+
+
+def test_login_and_me_say_whether_the_person_leads_a_project(client, db, world):
+    engineer = client.post("/api/auth/login", json={"username": "eng.arjun", "password": "Passw0rd!"}).json()
+    assert engineer["leads_projects"] is False
+    assert client.get("/api/auth/me", headers=world.lead_h).json()["leads_projects"] is False  # no project yet
+
+    leads = world.create_project()["id"]
+    _make_lead(db, leads, world.engineer)
+
+    assert client.get("/api/auth/me", headers=world.eng_h).json()["leads_projects"] is True
+    assert client.post("/api/auth/login", json={"username": "lead.e", "password": "Passw0rd!"}).json()["leads_projects"]
+
+
+def test_each_project_tells_the_caller_their_role_on_it(client, db, world):
+    leads = world.create_project()["id"]
+    works_on = world.create_project()["id"]
+    _make_lead(db, leads, world.engineer)
+    _approve_booking(client, world, works_on, world.emp1, world.lead_h)
+
+    mine = {p["id"]: p["my_role"] for p in client.get("/api/projects", headers=world.eng_h).json()}
+    assert mine == {leads: "lead", works_on: "engineer"}
+    assert client.get(f"/api/projects/{works_on}", headers=world.eng_h).json()["my_role"] == "engineer"
+    assert client.get(f"/api/projects/{works_on}", headers=world.bu_h).json()["my_role"] == "bu_head"

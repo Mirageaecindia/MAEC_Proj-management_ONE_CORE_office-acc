@@ -3,7 +3,11 @@ from fastapi import APIRouter, Depends, Header
 import models
 import schemas
 from app.api.deps import get_auth_service
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
 from app.core.security import bearer_token, get_current_user
+from app.services.access import leads_any_project
 from app.services.auth import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -22,5 +26,5 @@ def logout(authorization: str | None = Header(None), service: AuthService = Depe
 
 
 @router.get("/me", response_model=schemas.UserOut)
-def me(user: models.User = Depends(get_current_user)):
-    return user
+def me(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return {**schemas.UserOut.model_validate(user).model_dump(), "leads_projects": leads_any_project(db, user)}

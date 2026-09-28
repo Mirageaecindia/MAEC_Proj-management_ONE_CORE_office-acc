@@ -35,6 +35,7 @@ class LoginResponse(BaseModel):
     username: str
     full_name: Optional[str] = None
     engineer_id: Optional[int] = None
+    leads_projects: bool = False  # leads at least one project: the lead pages are shown
 
 
 class UserOut(BaseModel):
@@ -45,7 +46,7 @@ class UserOut(BaseModel):
     full_name: Optional[str] = None
     role: str
     employee_id: Optional[int] = None
-    discipline: Optional[str] = None
+    leads_projects: bool = False
 
 
 class EngineerPerformanceOut(BaseModel):
@@ -165,6 +166,7 @@ class ProjectOut(ProjectBase):
     target_effort_hours: Optional[float] = None
     sharepoint_site_url: Optional[str] = None
     archived_at: Optional[datetime] = None
+    my_role: Optional[str] = None  # the caller's role on this project: bu_head | lead | engineer
 
 
 LEAD_SLOTS = ("electrical", "mechanical", "bim")

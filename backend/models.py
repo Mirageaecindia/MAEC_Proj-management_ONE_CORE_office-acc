@@ -85,12 +85,10 @@ class User(Base):
     username = Column(String(100), nullable=False, unique=True, index=True)
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(150), nullable=True)
-    role = Column(String(20), nullable=False, index=True)  # bu_head | lead | engineer
-    # Discipline attribute for Lead accounts (Electrical / Mechanical / BIM),
-    # used to filter the real Lead accounts for project-lead assignment.
-    discipline = Column(String(100), nullable=True)
-    # For leads/engineers this links the account to an employee row so
-    # data scoping (assigned_lead, assigned_engineer_id) resolves server-side.
+    # bu_head | engineer. "Lead" is a role on a project (app/services/access.py), not an account type.
+    role = Column(String(20), nullable=False, index=True)
+    # Engineers are linked to an employee row so data scoping (bookings,
+    # assigned_engineer_id, hours) resolves server-side.
     employee_id = Column(Integer, nullable=True, index=True)
     # Deactivated accounts (leavers) can't log in and their sessions stop working.
     is_active = Column(Boolean, nullable=False, default=True, server_default=true())
@@ -159,7 +157,7 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id = Column(Integer, primary_key=True, index=True)
-    recipient_role = Column(String(20), nullable=False, index=True)  # bu_head | lead | engineer
+    recipient_role = Column(String(20), nullable=False, index=True)  # bu_head | engineer
     recipient_user_id = Column(Integer, nullable=True, index=True)
     notification_type = Column(String(50), nullable=False)
     title = Column(String(200), nullable=False)
