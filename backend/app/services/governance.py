@@ -10,13 +10,13 @@ from sqlalchemy.orm import Session
 
 import models
 import schemas
-from app.core.errors import NO_PROJECT_ACCESS, ConflictError, ForbiddenError, NotFoundError
+from app.core.errors import ConflictError, NotFoundError
 from app.core.roles import Role
 from app.domain.governance import HARD_STOP, LOCK_MANUAL
 from app.repositories.governance import GovernanceRepository
 from app.repositories.projects import ProjectRepository
 from app.services import notifications as notify
-from app.services.access import user_can_access_project
+from app.services.access import require_project_lead
 from app.services.governance_monitor import GovernanceMonitor
 from app.services.metrics import ProjectMetricsService
 
@@ -91,12 +91,12 @@ class GovernanceService:
 
     def executive_dashboard(self, user: models.User, project_id: int) -> dict:
         project = self._project(project_id)
-        # Commercial data: a Lead may only see projects they are assigned to.
-        if user.role == Role.LEAD and not user_can_access_project(self.db, user, project):
-            raise ForbiddenError(NO_PROJECT_ACCESS)
+        # Commercial data: besides the BU Head, only the project's leads see it.
+        if user.role != Role.BU_HEAD:
+            require_project_lead(self.db, user, project_id)
         data = self.metrics.dashboard_data(project)
         # A Lead only sees the extension requests they raised themselves.
-        requested_by = user.id if user.role == Role.LEAD else None
+        requested_by = None if user.role == Role.BU_HEAD else user.id
         requests = self.governance.requests_for_project(project_id, requested_by_user_id=requested_by)
         data["extension_requests"] = [extension_request_output(self.db, r, project) for r in requests]
         data["current_extension_request"] = next(

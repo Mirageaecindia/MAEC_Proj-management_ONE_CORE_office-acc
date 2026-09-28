@@ -31,10 +31,13 @@ from app.domain.timesheets import entry_total as time_entry_total
 from app.domain.wbs import TO_DO, is_finished
 from app.services.allocation import allocated_pct, over_capacity_message
 from app.services.access import (
-    engineer_approved_project_ids,
+    NOT_PROJECT_LEAD,
     engineer_wbs_condition,
     lead_project_ids,
+    leads_any_project,
+    project_role,
     user_can_access_project,
+    visible_project_ids,
 )
 from app.services.booking_approval import BOOKING_APPROVAL_LABELS, booking_approval_status
 from app.services.governance import extension_request_output, find_pending_extension_request
@@ -43,6 +46,8 @@ from app.services.governance_monitor import enforce_governance
 from app.services.notifications import EXTENSION_REQUESTED, create_bu_head_notification
 
 logger = logging.getLogger(__name__)
+
+STAFF = {"engineer", "lead"}  # accounts that may hold an employee record (everyone but the BU Head)
 
 # Schema: Alembic migrations in migrations/, applied at startup (app/core/migrations.py).
 migrate(engine)
@@ -171,16 +176,6 @@ def create_extension_request(
     return request
 
 
-def identity(user: models.User) -> dict:
-    """Where do lead/engineer scoping values come from? The authenticated user."""
-    return {
-        "role": user.role,
-        "engineer_id": user.employee_id if user.role == "engineer" else None,
-        "lead_name": user.full_name if user.role == "lead" else None,
-        "full_name": user.full_name or user.username,
-    }
-
-
 def lead_node_condition(user: models.User):
     """SQL condition: WBS node assigned to a lead by their real user id."""
     conditions = [models.WbsNode.assigned_lead_user_id == user.id]
@@ -234,7 +229,8 @@ def list_engineers(user: models.User = Depends(get_current_user), db: Session = 
 
 @app.get("/api/employees", response_model=List[schemas.EngineerOut])
 def list_employees(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    require_role(user.role, {"lead", "bu_head"})
+    if user.role != "bu_head" and not leads_any_project(db, user):
+        raise HTTPException(status_code=403, detail=NOT_PROJECT_LEAD)
     return db.query(models.Employee).order_by(models.Employee.name).all()
 
 
@@ -251,12 +247,7 @@ def list_project_booked_engineers(
     Existing WBS assignments are never touched by booking changes — removing a
     booking does not auto-unassign tasks already handed out.
     """
-    require_role(user.role, {"lead", "bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    if user.role == "lead" and not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    project_and_role(db, project_id, user, allowed={"bu_head", "lead"})
     booked = (
         db.query(models.Employee)
         .join(models.ResourceBooking, models.ResourceBooking.employee_id == models.Employee.id)
@@ -341,14 +332,9 @@ def booking_output(db: Session, booking: models.ResourceBooking):
 
 @app.get("/api/projects/{project_id}/resource-bookings")
 def list_resource_bookings(project_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    require_role(user.role, {"lead", "bu_head", "engineer"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    if user.role in ("lead", "engineer") and not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    _, role = project_and_role(db, project_id, user)
     query = db.query(models.ResourceBooking).filter_by(project_id=project_id)
-    if user.role == "engineer":
+    if role == "engineer":
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
         query = query.filter_by(employee_id=user.employee_id)
@@ -371,12 +357,10 @@ def resource_booking_gantt(
     Date ranges come from the booking record, falling back to the engineer's
     WBS node dates on that project where determinable.
     """
-    require_role(user.role, {"lead", "bu_head"})
-
     if project_id is not None:
-        require_project_access(db, project_id, user)
+        project_and_role(db, project_id, user, allowed={"bu_head", "lead"})
         scoped_bookings = db.query(models.ResourceBooking).filter_by(project_id=project_id).all()
-    elif user.role == "lead":
+    elif user.role != "bu_head":
         lead_ids = lead_project_ids(db, user)
         if not lead_ids:
             return {"engineers": [], "date_range": {"start": None, "end": None}, "count": 0}
@@ -472,12 +456,7 @@ def create_resource_booking(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    if not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    project, _ = project_and_role(db, project_id, user, allowed={"lead"})
     employee = db.query(models.Employee).filter_by(id=payload.get("employee_id")).first()
     if not employee:
         raise HTTPException(status_code=400, detail="Engineer not found.")
@@ -511,15 +490,10 @@ def update_resource_booking(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead"})
+    project_and_role(db, project_id, user, allowed={"lead"})
     booking = db.query(models.ResourceBooking).filter_by(id=booking_id, project_id=project_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Resource booking not found.")
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    if not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
     employee_id = int(payload.get("employee_id", booking.employee_id))
     employee = db.query(models.Employee).filter_by(id=employee_id).first()
     if not employee:
@@ -549,15 +523,10 @@ def delete_resource_booking(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead"})
+    project_and_role(db, project_id, user, allowed={"lead"})
     booking = db.query(models.ResourceBooking).filter_by(id=booking_id, project_id=project_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Resource booking not found.")
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    if not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
     db.delete(booking)
     db.commit()
     return {"ok": True, "deleted_booking_id": booking_id}
@@ -569,13 +538,8 @@ def submit_resource_bookings(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    # Only a Lead allocated to this project may submit its bookings to the BU Head.
-    if not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    # Only a lead of this project may submit its bookings to the BU Head.
+    project, _ = project_and_role(db, project_id, user, allowed={"lead"})
     bookings = db.query(models.ResourceBooking).filter_by(project_id=project_id).all()
     if not bookings:
         raise HTTPException(status_code=400, detail="Assign at least one engineer before submitting for approval.")
@@ -678,7 +642,7 @@ def validate_node_payload(db: Session, project_id: int, payload: schemas.WbsNode
             )
     if payload.assigned_engineer_id is not None and not db.query(models.Employee).filter_by(id=payload.assigned_engineer_id).first():
         raise HTTPException(status_code=400, detail="Engineer not found.")
-    if payload.assigned_lead_user_id is not None and not db.query(models.User).filter_by(id=payload.assigned_lead_user_id, role="lead").first():
+    if payload.assigned_lead_user_id is not None and not db.query(models.User).filter(models.User.id == payload.assigned_lead_user_id, models.User.role != "bu_head").first():
         raise HTTPException(status_code=400, detail="Assigned lead user not found.")
 
 
@@ -689,14 +653,9 @@ def list_wbs_structure(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead", "bu_head", "engineer"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    if user.role in ("lead", "engineer") and not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    _, role = project_and_role(db, project_id, user)
     query = db.query(models.WbsNode).filter_by(project_id=project_id)
-    if user.role == "engineer":
+    if role == "engineer":
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
         assigned_nodes = query.filter(
@@ -779,15 +738,17 @@ def scoped_wbs_tasks(
     db: Session,
     project_id: int,
     user: models.User,
+    role: str,
 ):
+    """The WBS nodes in the user's scope on this project, for their role on it."""
     query = db.query(models.WbsNode).filter_by(project_id=project_id)
-    if user.role == "engineer":
+    if role == "engineer":
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
         query = query.filter(
             engineer_wbs_condition(user.employee_id)
         )
-    elif user.role == "lead":
+    elif role == "lead":
         query = query.filter(lead_node_condition(user))
     return query.order_by(models.WbsNode.wbs_code).all()
 
@@ -800,19 +761,14 @@ def list_timesheet_entries(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead", "engineer", "bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    if user.role in ("lead", "engineer") and not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    _, role = project_and_role(db, project_id, user)
     query = db.query(models.TimeLogEntry).filter_by(project_id=project_id)
-    if user.role == "engineer":
+    if role == "engineer":
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
         query = query.filter_by(employee_id=user.employee_id)
-    elif user.role == "lead":
-        lead_tasks = scoped_wbs_tasks(db, project_id, user)
+    elif role == "lead":
+        lead_tasks = scoped_wbs_tasks(db, project_id, user, role)
         task_ids = [task.id for task in lead_tasks]
         query = query.filter(models.TimeLogEntry.task_id.in_(task_ids)) if task_ids else query.filter(models.TimeLogEntry.id < 0)
     if week_start:
@@ -876,7 +832,7 @@ def weekly_submission_for(
 
 
 def weekly_hours_visible_employee_ids(
-    db: Session, project_id: int, week: date, user: models.User
+    db: Session, project_id: int, week: date, user: models.User, role: str
 ) -> Optional[set]:
     """Employee ids whose weekly-hours submissions this user may see or review.
 
@@ -885,13 +841,13 @@ def weekly_hours_visible_employee_ids(
     scoped tasks that week (mirrors the timesheet scoping). BU Head: None,
     meaning unrestricted.
     """
-    if user.role == "bu_head":
+    if role == "bu_head":
         return None
-    if user.role == "engineer":
+    if role == "engineer":
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
         return {user.employee_id}
-    tasks = scoped_wbs_tasks(db, project_id, user)
+    tasks = scoped_wbs_tasks(db, project_id, user, role)
     visible = {task.assigned_engineer_id for task in tasks if task.assigned_engineer_id}
     task_ids = [task.id for task in tasks]
     if task_ids:
@@ -909,13 +865,29 @@ def weekly_hours_visible_employee_ids(
     return visible
 
 
-def require_project_access(db: Session, project_id: int, user: models.User) -> models.Project:
+def project_and_role(
+    db: Session, project_id: int, user: models.User, allowed: Optional[set] = None
+) -> tuple[models.Project, str]:
+    """The project and the user's role on it (bu_head, lead or engineer).
+
+    404 when the project doesn't exist; 403 when the user has no role on it, or
+    a role outside `allowed`. Lead and engineer are roles on a project, not
+    account types: the same person can lead one project and work on another.
+    """
     project = db.query(models.Project).filter_by(id=project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found.")
-    if user.role in ("lead", "engineer") and not user_can_access_project(db, user, project):
+    role = project_role(db, user, project_id)
+    if role is None:
         raise HTTPException(status_code=403, detail="You do not have access to this project.")
-    return project
+    if allowed is not None and role not in allowed:
+        detail = NOT_PROJECT_LEAD if allowed == {"lead"} else "This action is not allowed for your role on this project."
+        raise HTTPException(status_code=403, detail=detail)
+    return project, role
+
+
+def require_project_access(db: Session, project_id: int, user: models.User) -> models.Project:
+    return project_and_role(db, project_id, user)[0]
 
 
 @app.get("/api/projects/{project_id}/weekly-hours-submissions")
@@ -925,10 +897,9 @@ def list_weekly_hours_submissions(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead", "engineer", "bu_head"})
-    require_project_access(db, project_id, user)
+    _, role = project_and_role(db, project_id, user)
     week = date.fromisoformat(week_start)
-    visible = weekly_hours_visible_employee_ids(db, project_id, week, user)
+    visible = weekly_hours_visible_employee_ids(db, project_id, week, user, role)
     query = db.query(models.WeeklyHoursSubmission).filter_by(project_id=project_id, week_start_date=week)
     if visible is not None:
         query = query.filter(
@@ -947,10 +918,10 @@ def submit_weekly_hours(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"engineer"})
+    require_role(user.role, STAFF)  # own work: the employee link below is the real gate
     project = require_project_access(db, project_id, user)
     if not user.employee_id:
-        raise HTTPException(status_code=400, detail="Engineer account is not linked to an employee.")
+        raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
     if project.timesheets_soft_locked:
         raise HTTPException(
             status_code=409,
@@ -1006,10 +977,9 @@ def submit_weekly_hours(
 def lead_review_weekly_hours(
     db: Session, project_id: int, action: str, payload: schemas.WeeklyHoursActionIn, user: models.User
 ):
-    require_role(user.role, {"lead"})
     if not user.full_name:
         raise HTTPException(status_code=400, detail="Lead identity is required.")
-    project = require_project_access(db, project_id, user)
+    project, role = project_and_role(db, project_id, user, allowed={"lead"})
     if project.timesheets_soft_locked:
         raise HTTPException(
             status_code=409,
@@ -1028,7 +998,7 @@ def lead_review_weekly_hours(
             status_code=409,
             detail="Only weekly hours that are 'Submitted for Approval' can be approved or rejected.",
         )
-    visible = weekly_hours_visible_employee_ids(db, project_id, payload.week_start_date, user)
+    visible = weekly_hours_visible_employee_ids(db, project_id, payload.week_start_date, user, role)
     if submission.employee_id not in (visible or set()):
         raise HTTPException(status_code=403, detail="These weekly hours are outside your lead scope.")
     submission.status = action
@@ -1066,18 +1036,13 @@ def project_timeline_logs(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead", "engineer", "bu_head"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    if user.role in ("lead", "engineer") and not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    project, role = project_and_role(db, project_id, user)
 
-    tasks = scoped_wbs_tasks(db, project_id, user)
+    tasks = scoped_wbs_tasks(db, project_id, user, role)
     task_ids = [task.id for task in tasks]
 
     entries_query = db.query(models.TimeLogEntry).filter_by(project_id=project_id)
-    if user.role == "engineer":
+    if role == "engineer":
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
         entries_query = entries_query.filter_by(employee_id=user.employee_id)
@@ -1131,7 +1096,7 @@ def project_timeline_logs(
 
     total_logged = round(sum(time_entry_total(entry) for entry in entries), 2)
     entries_out = [time_entry_output(db, entry) for entry in entries]
-    engineer = db.query(models.Employee).filter_by(id=user.employee_id).first() if user.role == "engineer" and user.employee_id else None
+    engineer = db.query(models.Employee).filter_by(id=user.employee_id).first() if role == "engineer" and user.employee_id else None
 
     # Per-phase rollup — the single, shared completion rule: a task counts as
     # complete when its real status reached a terminal state ('Done'/'Approved',
@@ -1155,10 +1120,10 @@ def project_timeline_logs(
         "project_id": project.id,
         "project_name": project.project_name,
         "scope": {
-            "role": user.role,
-            "engineer_id": user.employee_id if user.role == "engineer" else None,
+            "role": role,
+            "engineer_id": user.employee_id if role == "engineer" else None,
             "engineer_name": engineer.name if engineer else None,
-            "lead_name": user.full_name if user.role == "lead" else None,
+            "lead_name": user.full_name if role == "lead" else None,
         },
         "tasks": tasks_out,
         "phases": phases_out,
@@ -1184,7 +1149,7 @@ def engineer_performance(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"engineer"})
+    require_role(user.role, STAFF)  # own work: the employee link below is the real gate
     if not user.employee_id:
         raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
     employee = db.query(models.Employee).filter_by(id=user.employee_id).first()
@@ -1193,7 +1158,7 @@ def engineer_performance(
 
     nodes = []
     entries = []
-    approved_ids = engineer_approved_project_ids(db, user.employee_id)
+    approved_ids = visible_project_ids(db, user)
     if approved_ids:
         nodes = (
             db.query(models.WbsNode)
@@ -1291,16 +1256,15 @@ def engineer_performance(
     }
 
 
-def engineer_dashboard_data(db: Session, employee_id: int, project_id: int | None = None):
+def engineer_dashboard_data(db: Session, employee_id: int, approved_ids: set[int], project_id: int | None = None):
     """Compute engineer-scoped dashboard metrics from approved time entries."""
     from datetime import datetime, date
     from collections import defaultdict
     import calendar
 
-    # Get all WBS nodes assigned to this engineer (by employee id only) within
-    # projects the BU Head has APPROVED for them. Unapproved projects are never
-    # surfaced to the engineer through their dashboard.
-    approved_ids = engineer_approved_project_ids(db, employee_id)
+    # WBS nodes assigned to this person (by employee id only) within
+    # `approved_ids`: the projects they lead or are approved to work on.
+    # Unapproved projects are never surfaced through their dashboard.
     if not approved_ids:
         return {
             "summary": {
@@ -1598,19 +1562,18 @@ def engineer_performance_dashboard(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"engineer"})
+    require_role(user.role, STAFF)  # own work: the employee link below is the real gate
     if not user.employee_id:
         raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
     employee = db.query(models.Employee).filter_by(id=user.employee_id).first()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee record not found for this account.")
 
-    if project_id is not None:
-        approved = engineer_approved_project_ids(db, user.employee_id)
-        if project_id not in approved:
-            raise HTTPException(status_code=403, detail="This engineer is not assigned to the requested project.")
+    approved = visible_project_ids(db, user)
+    if project_id is not None and project_id not in approved:
+        raise HTTPException(status_code=403, detail="This engineer is not assigned to the requested project.")
 
-    return engineer_dashboard_data(db, user.employee_id, project_id=project_id)
+    return engineer_dashboard_data(db, user.employee_id, approved, project_id=project_id)
 
 
 @app.post("/api/projects/{project_id}/extension-requests", response_model=schemas.ExtensionRequestOut, status_code=201)
@@ -1620,10 +1583,7 @@ def create_extension_request_endpoint(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
+    project, _ = project_and_role(db, project_id, user, allowed={"lead"})
     request = create_extension_request(
         db,
         project,
@@ -1641,10 +1601,7 @@ def request_extension(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
+    project, _ = project_and_role(db, project_id, user, allowed={"lead"})
     requested_hours = parse_legacy_requested_hours(payload.comments)
     request = create_extension_request(db, project, user, requested_hours, payload.comments)
     action = (
@@ -1657,12 +1614,13 @@ def request_extension(
 
 
 def lead_review_time_log(db: Session, entry_id: int, user: models.User, status: str):
-    require_role(user.role, {"lead"})
     if not user.full_name:
         raise HTTPException(status_code=400, detail="Lead identity is required.")
     entry = db.query(models.TimeLogEntry).filter_by(id=entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Time log entry not found.")
+    if project_role(db, user, entry.project_id) != "lead":
+        raise HTTPException(status_code=403, detail=NOT_PROJECT_LEAD)
     task = db.query(models.WbsNode).filter_by(id=entry.task_id).first()
     if not task or task.assigned_lead != user.full_name:
         raise HTTPException(status_code=403, detail="This time log is outside your lead scope.")
@@ -1766,8 +1724,7 @@ def create_wbs_node(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead"})
-    require_project_access(db, project_id, user)
+    project_and_role(db, project_id, user, allowed={"lead"})
     validate_node_payload(db, project_id, payload)
     if payload.wbs_code and db.query(models.WbsNode).filter_by(project_id=project_id, wbs_code=payload.wbs_code).first():
         raise HTTPException(status_code=409, detail="WBS code already exists in this project.")
@@ -1834,20 +1791,18 @@ def create_wbs_subtask(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found.")
 
-    if user.role == "engineer":
+    role = project_role(db, user, project.id)
+    if role == "engineer":
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
-        if not user_can_access_project(db, user, project):
-            raise HTTPException(status_code=403, detail="You do not have access to this project.")
         if not node_assigned_to_engineer(parent, user):
             raise HTTPException(
                 status_code=403,
                 detail="You can only create subtasks under WBS nodes assigned to you.",
             )
-    elif user.role == "lead":
-        if not user_can_access_project(db, user, project):
-            raise HTTPException(status_code=403, detail="You do not have access to this project.")
-    else:
+    elif role is None:
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    elif role != "lead":
         raise HTTPException(status_code=403, detail="This action is not allowed for the current role.")
 
     if parent.parent_id is not None:
@@ -1861,7 +1816,7 @@ def create_wbs_subtask(
     ).first():
         raise HTTPException(status_code=400, detail="Engineer not found.")
 
-    if user.role == "engineer":
+    if role == "engineer":
         if payload.assigned_engineer_id is not None and payload.assigned_engineer_id != user.employee_id:
             raise HTTPException(
                 status_code=403,
@@ -1869,7 +1824,7 @@ def create_wbs_subtask(
             )
         validate_subtask_rules(payload.estimated_hours, payload.start_date, payload.end_date)
 
-    if user.role == "lead":
+    if role == "lead":
         validate_subtask_rules(payload.estimated_hours, payload.start_date, payload.end_date)
 
     phase = payload.phase or parent.phase or "Space Planning"
@@ -1887,8 +1842,8 @@ def create_wbs_subtask(
         parent_id=parent.id,
         wbs_code=child_code,
         task_name=payload.task_name.strip(),
-        assigned_lead=parent.assigned_lead or (user.full_name if user.role == "lead" else None),
-        assigned_lead_user_id=parent.assigned_lead_user_id or (user.id if user.role == "lead" else None),
+        assigned_lead=parent.assigned_lead or (user.full_name if role == "lead" else None),
+        assigned_lead_user_id=parent.assigned_lead_user_id or (user.id if role == "lead" else None),
         assigned_engineer_id=payload.assigned_engineer_id
         if payload.assigned_engineer_id is not None
         else parent.assigned_engineer_id,
@@ -1912,11 +1867,10 @@ def update_wbs_node(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead"})
     node = db.query(models.WbsNode).filter_by(id=node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="WBS node not found.")
-    require_project_access(db, node.project_id, user)
+    project_and_role(db, node.project_id, user, allowed={"lead"})
     validate_node_payload(db, node.project_id, payload)
     duplicate = None
     if payload.wbs_code:
@@ -1954,11 +1908,10 @@ def delete_wbs_node(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead"})
     node = db.query(models.WbsNode).filter_by(id=node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="WBS node not found.")
-    require_project_access(db, node.project_id, user)
+    project_and_role(db, node.project_id, user, allowed={"lead"})
     descendant_ids = []
     stack = [node_id]
     while stack:
@@ -2106,12 +2059,7 @@ async def upload_wbs(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    require_role(user.role, {"lead"})
-    project = db.query(models.Project).filter_by(id=project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found.")
-    if not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    project, _ = project_and_role(db, project_id, user, allowed={"lead"})
     requested_phase = phase.strip() if phase and phase.strip() else None
     if requested_phase and requested_phase not in schemas.WBS_PHASES:
         raise HTTPException(status_code=422, detail=f"Phase '{requested_phase}' is not one of the five fixed phases.")
@@ -2220,15 +2168,13 @@ def get_node_detail(db: Session, node_id: int, user: models.User):
     node = db.query(models.WbsNode).filter_by(id=node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="WBS node not found.")
-    if user.role == "engineer":
-        if not user.employee_id:
-            raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
-        project = db.query(models.Project).filter_by(id=node.project_id).first()
-        if not project or not user_can_access_project(db, user, project):
-            raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    role = project_role(db, user, node.project_id)
+    if role is None and user.role != "bu_head":
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    if role == "engineer" or (role == "lead" and node_assigned_to_engineer(node, user)):
         if not node_assigned_to_engineer(node, user):
             raise HTTPException(status_code=403, detail="You can only view tasks assigned to you.")
-    elif user.role == "lead":
+    elif role == "lead":
         if node.assigned_lead and node.assigned_lead != user.full_name:
             has_scope = False
             if node.assigned_engineer_id:
@@ -2237,9 +2183,7 @@ def get_node_detail(db: Session, node_id: int, user: models.User):
                     has_scope = True
             if not has_scope:
                 raise HTTPException(status_code=403, detail="You can only view tasks assigned under your scope.")
-    elif user.role == "bu_head":
-        pass
-    else:
+    elif role != "bu_head":
         raise HTTPException(status_code=403, detail="Insufficient permissions.")
 
     history = (
@@ -2327,12 +2271,12 @@ def advance_wbs_node_status(
     #  - Lead: subtasks only (the engineer drives task statuses; the Lead
     #    approves submitted tasks via the dedicated /approve action).
     #  - BU Head: never.
-    if user.role == "engineer":
-        if not user.employee_id:
-            raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
-        if not node_assigned_to_engineer(node, user):
-            raise HTTPException(status_code=403, detail="You can only update tasks assigned to you.")
-    elif user.role == "lead":
+    role = project_role(db, user, node.project_id)
+    if node_assigned_to_engineer(node, user):
+        pass  # the person doing the work (an engineer, or a lead on their own subtask)
+    elif role == "engineer":
+        raise HTTPException(status_code=403, detail="You can only update tasks assigned to you.")
+    elif role == "lead":
         if not node_assigned_to_lead(node, user):
             raise HTTPException(
                 status_code=403,
@@ -2418,19 +2362,15 @@ def approve_wbs_node(
     BU Head's role in this workflow is governance-level actions on the
     Executive Dashboard, not individual task approval.
     """
-    require_role(user.role, {"lead"})
     node = db.query(models.WbsNode).filter_by(id=node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="WBS node not found.")
+    project_and_role(db, node.project_id, user, allowed={"lead"})
     if node.parent_id:
         raise HTTPException(
             status_code=400,
             detail="Only parent tasks are approved. Subtasks move directly to 'Done'.",
         )
-
-    project = db.query(models.Project).filter_by(id=node.project_id).first()
-    if not user_can_access_project(db, user, project):
-        raise HTTPException(status_code=403, detail="You do not have access to this project.")
     if not node_assigned_to_lead(node, user):
         raise HTTPException(
             status_code=403,
@@ -2479,7 +2419,7 @@ def add_wbs_node_comment(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if user.role != "engineer":
+    if user.role == "bu_head":
         raise HTTPException(status_code=403, detail="Only engineers can add comments.")
     if not user.employee_id:
         raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")

@@ -242,12 +242,13 @@ MAEC_project_management/
 - **Session expiry:** a token stops working `SESSION_TTL_HOURS` (default 12) after login. It is then deleted, and each login purges older expired sessions.
 - **Brute-force protection:** `LOGIN_MAX_FAILED_ATTEMPTS` (default 5) failed logins for one username lock it for `LOGIN_LOCKOUT_MINUTES` (default 15). Further attempts get HTTP 429 with `Retry-After`. The counter is in memory (per process).
 - **`get_current_user`** (in `app/core/security.py`) resolves the token to a user on every request, or returns 401. `GET /api/auth/me` restores the session on page refresh. Logout deletes the token.
-- **Role gate:** routers in `app/` use the dependency guards `require_bu_head`, `require_lead_or_bu_head` and `require_any_role`. The endpoints in `main.py` call `require_role(user.role, {...})`. Both return 403 for roles that aren't allowed.
-- **Project scope:** `user_can_access_project` (in `app/services/access.py`) decides who can see a project.
+- **Account gate:** routers in `app/` use the dependency guards `require_bu_head`, `require_staff` (engineer or lead account) and `require_any_role`. The endpoints in `main.py` call `require_role(user.role, {...})`. Both return 403 for accounts that aren't allowed. Beyond "is this the BU Head", the account role decides little: lead and engineer are **roles on a project**.
+- **Role on a project** (`project_role` in `app/services/access.py`, decided 2026-09-28): the same person can lead one project and work as an engineer on another, with one login.
   - **BU Head:** all projects.
-  - **Lead:** projects where they're one of the three project leads, or where they're the assigned lead of any WBS node.
-  - **Engineer:** only projects where they have an **approved** resource booking. The BU Head's approval is the only thing that grants access; a draft or pending booking, or a WBS task on its own, grants none.
-  - **Archived projects** are closed to Leads and Engineers (filtered out of `lead_project_ids` / `engineer_approved_project_ids`, so their lists, dashboards and endpoints all drop them). Only the BU Head sees them.
+  - **Lead of a project:** they're one of its three project leads, or the assigned lead of any of its WBS nodes. Lead actions (bookings, WBS editing, approvals, extension requests, the Executive Dashboard and Resource Summary) require this role **on that project**: `project_and_role(db, project_id, user, allowed={"lead"})` in `main.py`, `require_project_lead` in the services.
+  - **Engineer on a project:** their employee id has an **approved** resource booking there. The BU Head's approval is the only thing that grants it; a draft or pending booking, or a WBS task on its own, grants none. Leading a project wins over a booking on it.
+  - **Own work** (Login/Logout, submitting the week, the performance pages) is gated by the **employee record**, not the account role: an account without `employee_id` gets 403. A lead assigned to a subtask does it like any engineer.
+  - **Archived projects** are closed to everyone but the BU Head (filtered out of `lead_project_ids` / `engineer_approved_project_ids`, so their lists, dashboards and endpoints all drop them).
 - **Archived = read-only:** `app/services/archive_guard.py` refuses (409) any database flush that writes an archived project's data, whatever the endpoint. Unarchive first.
 - **Node scope:** `node_assigned_to_engineer` (by employee ID) and `node_assigned_to_lead` (by user ID, with a name fallback).
 

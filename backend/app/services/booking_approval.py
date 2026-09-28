@@ -10,14 +10,14 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 import models
-from app.core.errors import BadRequestError, ConflictError, ForbiddenError, NotFoundError
+from app.core.errors import BadRequestError, ConflictError, NotFoundError
 from app.core.roles import Role
 from app.repositories.bookings import BookingRepository
 from app.repositories.notifications import NotificationRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.work import WorkRepository
 from app.services import notifications as notify
-from app.services.access import user_can_access_project
+from app.services.access import require_project_lead
 from app.services.notifications import RESOURCE_BOOKING_APPROVAL
 
 DRAFT, PENDING_APPROVAL, APPROVED = "draft", "pending_approval", "approved"
@@ -65,8 +65,8 @@ class BookingApprovalService:
 
     def summary(self, user: models.User, project_id: int) -> dict:
         project = self._project(project_id)
-        if user.role == Role.LEAD and not user_can_access_project(self.db, user, project):
-            raise ForbiddenError("You do not have access to this project.")
+        if user.role != Role.BU_HEAD:
+            require_project_lead(self.db, user, project_id)
         bookings = self.bookings.for_project(project_id)
         status = overall_approval_status(b.approval_status for b in bookings)
         # KNOWN (roadmap 7.4): commercial figures are placeholders until the rate card exists.

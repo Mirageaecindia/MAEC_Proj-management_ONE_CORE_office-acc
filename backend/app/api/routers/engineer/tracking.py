@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 import models
 from app.api.deps import get_tracking_service
-from app.core.security import require_engineer
+from app.core.security import require_staff
 from app.services.tracking import TrackingService
 
 router = APIRouter(prefix="/subtask-tracking", tags=["tracking"])
@@ -17,7 +17,7 @@ class TrackingStart(BaseModel):
 
 @router.post("/heartbeat")
 def heartbeat(
-    user: models.User = Depends(require_engineer),
+    user: models.User = Depends(require_staff),
     service: TrackingService = Depends(get_tracking_service),
 ):
     """Sent every minute by each open tab. Returns the subtask the engineer is logged in to, if any."""
@@ -27,7 +27,7 @@ def heartbeat(
 @router.post("/start", status_code=201)
 def start(
     payload: TrackingStart,
-    user: models.User = Depends(require_engineer),
+    user: models.User = Depends(require_staff),
     service: TrackingService = Depends(get_tracking_service),
 ):
     return service.start(user, payload.subtask_id)
@@ -35,7 +35,7 @@ def start(
 
 @router.post("/logout")
 def logout(
-    user: models.User = Depends(require_engineer),
+    user: models.User = Depends(require_staff),
     service: TrackingService = Depends(get_tracking_service),
 ):
     return service.logout(user)

@@ -185,5 +185,5 @@ class TrackingService:
 
 def _employee_id(user: models.User) -> int:
     if user.employee_id is None:
-        raise BadRequestError("Your account is not linked to an employee record.")
+        raise ForbiddenError("Your account is not linked to an employee record.")
     return user.employee_id

@@ -84,9 +84,8 @@ def test_archived_project_is_read_only_for_everyone(client, db, make, world, gov
         headers=world.lead_h,
     )
     assert wbs.status_code == 403
-    # Paths scoped by an entry instead of project access hit the read-only guard.
     approve = client.post(f"/api/time-log-entries/{pending_entry.id}/approve", headers=world.lead_h)
-    assert (approve.status_code, approve.json()["detail"]) == (409, ARCHIVED_READ_ONLY)
+    assert approve.status_code == 403
     # The BU Head can't act on it either (unarchive first).
     stop = client.post(
         f"/api/projects/{project_id}/governance/stop-execution", json={"comments": "x"}, headers=world.bu_h

@@ -3,7 +3,7 @@ from pydantic import BaseModel, field_validator
 
 import models
 from app.api.deps import get_booking_approval_service, get_notification_service
-from app.core.security import get_current_user, require_any_role, require_bu_head, require_lead_or_bu_head
+from app.core.security import get_current_user, require_any_role, require_bu_head
 from app.services.booking_approval import BookingApprovalService
 from app.services.notifications import NotificationService
 
@@ -24,7 +24,7 @@ class BookingRejectRequest(BaseModel):
 @router.get("/projects/{project_id}/resource-summary")
 def resource_summary(
     project_id: int,
-    user: models.User = Depends(require_lead_or_bu_head),
+    user: models.User = Depends(require_any_role),  # project leads: checked in the service
     service: BookingApprovalService = Depends(get_booking_approval_service),
 ):
     return service.summary(user, project_id)

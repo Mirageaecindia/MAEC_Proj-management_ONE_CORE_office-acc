@@ -50,6 +50,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | C7: task assignment | Leads may assign WBS tasks after booking; the engineer sees them once the booking is approved. Safeguards in C7 | this file |
 | D8: while locked | **Logging is allowed** (flagged as over-baseline); **approval is blocked**; Leads may still **reject**. Rules in N14 | this file |
 | Warning on approved + pending | When approved + pending hours reach the alert threshold: a **warning only**, never a lock | this file (N13) |
+| Leads per project | **Everyone is an engineer; the BU Head picks any engineer as a project's Electrical, Mechanical or BIM lead**, with start date, end date and utilization % that count toward the same 100% cap as bookings. A lead can do subtasks (Login/Logout) but **can't book themselves** on a project they lead. **The BU Head approves a lead's own hours.** An engineer who leads any project also sees the Resource Booking page | L1 |
 
 ---
 
@@ -113,6 +114,7 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 
 | ID | Task | Why | Where | Size |
 |---|---|---|---|---|
+| L1 | **Leads are chosen per project from all engineers** (decided 2026-09-28, see *Decided*). Stages: (1) ✅ N12 date-aware capacity; (2) ✅ **done 2026-09-28:** lead/engineer are roles on a project (`project_role`); an engineer set as a project lead has lead powers there only, a lead booked elsewhere works there as an engineer, leads do subtasks with Login/Logout; (3) lead assignments with start/end/% on Create/Edit Project, dropdowns list all active engineers, lead accounts converted to engineers, the BU Head approves leads' hours; (4) frontend: menus and pages follow the role on the selected project | One person leads one project and works on another | `app/services/access.py`, `main.py`, `app/services/projects.py`, `CreateProjectPage.jsx`, `App.jsx` | L |
 | W1 | **BU Head Timeline view** (P1 #15): Timeline & Logs is empty for the BU Head, the Gantt is hard-coded to Sep–Dec 2026, and the Submission phase is missing | The BU Head has no schedule view | `TimelineLogsPage.jsx`, timeline endpoints | M |
 | W2 | **BU Head Weekly Logs view** (P1 #16), read-only across all projects. **Also decide:** archiving hides a project from its Engineers, including their own past timesheets and hours. If hours ever feed appraisals, Engineers need read-only access to their own history in archived projects | The BU Head can't see timesheets | new page + endpoint | M |
 | W3 | **One notification system:** move the Resource Booking page's own 5 s-polling banner to the header bell | Duplicate code and polling load | `ResourceBookingPage.jsx`, `NotificationBell.jsx` | S |

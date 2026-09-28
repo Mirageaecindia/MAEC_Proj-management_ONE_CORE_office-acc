@@ -145,6 +145,8 @@ def test_new_leads_appear_in_discipline_dropdowns(client, db, make, world):
 
 def test_new_engineers_appear_in_employee_dropdowns(client, db, make, world):
     _make_new_accounts(db, make)
+    world.create_project()  # only someone leading a project books engineers
+    world.create_project()  # only someone leading a project books engineers
 
     employees = {employee["name"] for employee in client.get("/api/employees", headers=world.lead_h).json()}
     engineers = {employee["name"] for employee in client.get("/api/engineers", headers=world.lead_h).json()}

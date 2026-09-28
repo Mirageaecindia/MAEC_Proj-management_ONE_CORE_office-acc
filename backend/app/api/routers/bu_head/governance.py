@@ -4,7 +4,7 @@ from pydantic import BaseModel
 import models
 import schemas
 from app.api.deps import get_governance_service, get_work_summary_service
-from app.core.security import require_bu_head, require_lead_or_bu_head
+from app.core.security import require_any_role, require_bu_head
 from app.services.governance import GovernanceService
 from app.services.work_summary import WorkSummaryService
 
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/projects/{project_id}", tags=["governance"])
 @router.get("/executive-dashboard")
 def executive_dashboard(
     project_id: int,
-    user: models.User = Depends(require_lead_or_bu_head),
+    user: models.User = Depends(require_any_role),  # project leads: checked in the service
     service: GovernanceService = Depends(get_governance_service),
 ):
     """Budget burn, hours consumption, threshold status, SPI, monthly chart,
