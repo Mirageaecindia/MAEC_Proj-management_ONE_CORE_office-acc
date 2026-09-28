@@ -111,12 +111,16 @@ certificate on the first request, which takes a few seconds.
 
 ## 6. Create the accounts
 
-Accounts are never seeded. Create them in the backend container (the password is
-prompted for):
+Accounts are never seeded. There are two account types: the **BU Head**, and
+**engineers**, each linked to an employee record. Leads are engineers that the BU Head
+picks per project on Create Project. Create the accounts in the backend container; the
+password is prompted for.
 
 ```bash
 docker compose exec backend python create_user.py --username bu.head --role bu_head --full-name "Your Name"
-docker compose exec backend python create_user.py --username lead.anita --role lead --full-name "Anita Kumar" --discipline Electrical
+
+# Engineers need the id of their employee record. List the ids:
+docker compose exec db psql -U promanage -d promanage -c "SELECT id, employee_code, name FROM employees ORDER BY id"
 docker compose exec backend python create_user.py --username eng.arjun --role engineer --employee-id 1
 ```
 
