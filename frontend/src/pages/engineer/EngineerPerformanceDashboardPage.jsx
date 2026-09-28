@@ -1,9 +1,9 @@
 import { ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 function formatHours(value) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '0.0 Hrs';

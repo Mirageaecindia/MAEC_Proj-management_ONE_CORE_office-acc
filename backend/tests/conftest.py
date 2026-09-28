@@ -2,7 +2,8 @@
 
 Isolation rules, applied before the app is imported:
 - DATABASE_URL points at a throwaway SQLite file, so the real database is
-  never touched.
+  never touched. TEST_DATABASE_URL overrides it to run the suite against an
+  empty, throwaway Postgres (every table is wiped before each test).
 - Azure/SharePoint settings are blanked, so any code path that is not
   explicitly faked fails fast with a SharePointError instead of calling
   Microsoft Graph. (python-dotenv never overrides variables already set.)
@@ -15,7 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 _TMP_DIR = tempfile.mkdtemp(prefix="maec-tests-")
-os.environ["DATABASE_URL"] = f"sqlite:///{Path(_TMP_DIR, 'test.db').as_posix()}"
+os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{Path(_TMP_DIR, 'test.db').as_posix()}"
 for _key in ("AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID", "SHAREPOINT_SITE_ID", "SHAREPOINT_DRIVE_ID"):
     os.environ[_key] = ""
 

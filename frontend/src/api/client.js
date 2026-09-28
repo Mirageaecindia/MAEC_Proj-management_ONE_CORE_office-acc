@@ -1,13 +1,15 @@
 /**
  * The single HTTP client for the MAEC API.
  *
- * - Base URL comes from VITE_API_BASE_URL (never hardcoded in pages).
+ * - Base URL comes from VITE_API_BASE_URL (never hardcoded in pages). Unset
+ *   means the local dev backend; empty means same origin (the Docker build,
+ *   where the web server proxies /api to the backend).
  * - The bearer token is read from the session store on every request.
  * - Non-2xx responses throw an ApiError carrying the status, the
  *   `X-Error-Code` header and FastAPI's `detail` message.
  */
 
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(
   /\/+$/,
   '',
 );

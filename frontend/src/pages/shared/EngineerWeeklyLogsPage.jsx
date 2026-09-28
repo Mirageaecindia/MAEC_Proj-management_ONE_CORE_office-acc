@@ -1,6 +1,7 @@
 import { ArrowLeft } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import {
   DAY_FIELDS,
@@ -10,8 +11,6 @@ import {
   WEEKLY_SUBMISSION_LABELS,
   WEEKLY_SUBMISSION_PILL,
 } from './TimelineLogsPage';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 export function EngineerWeeklyLogsPage() {
   const [searchParams] = useSearchParams();

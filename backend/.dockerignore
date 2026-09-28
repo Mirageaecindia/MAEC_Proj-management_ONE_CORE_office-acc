@@ -1,0 +1,24 @@
+# Keep secrets, local data and dev tooling out of the image.
+.env
+.env.*
+!.env.example
+data/*.csv
+*.db
+*.db-*
+*.sqlite3
+*.log
+*.err
+backups/
+uploads/
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+tests/
+temp_*.py
+*.ps1
+Dockerfile
+.dockerignore

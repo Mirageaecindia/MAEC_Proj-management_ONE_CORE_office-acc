@@ -275,7 +275,8 @@ def upgrade() -> None:
         sa.Column("role", sa.String(length=20), nullable=False),
         sa.Column("discipline", sa.String(length=100), nullable=True),
         sa.Column("employee_id", sa.Integer(), nullable=True),
-        sa.Column("is_active", sa.Boolean(), server_default=sa.text("1"), nullable=False),
+        # sa.true() renders as 1 on SQLite (same as before) and as true on Postgres, which rejects 1.
+        sa.Column("is_active", sa.Boolean(), server_default=sa.true(), nullable=False),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=True
         ),

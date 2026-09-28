@@ -1,12 +1,11 @@
 import { ChevronDown, Pencil, Search, Trash2, UserPlus, X } from 'lucide-react';
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
+import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useRejectResourceBookings } from '../../hooks/useResourceBookings';
 import { countWorkingDays, plannedHoursForRange } from '../../lib/hours';
-
-const API_BASE_URL = 'http://localhost:8000';
 
 function formatMonthHeader(dateObj) {
   return dateObj.toLocaleString('en-US', { month: 'short', year: 'numeric' }).toUpperCase();

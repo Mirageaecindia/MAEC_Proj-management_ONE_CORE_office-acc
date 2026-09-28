@@ -6,8 +6,9 @@ booking, WBS planning, weekly timesheets and an executive governance dashboard.
 
 | Part | Stack | Folder |
 |---|---|---|
-| API | FastAPI · SQLAlchemy · SQLite (Postgres-ready) · Microsoft Graph (MSAL) | [backend/](backend/) |
+| API | FastAPI · SQLAlchemy · SQLite (dev) / Postgres (Docker) · Microsoft Graph (MSAL) | [backend/](backend/) |
 | Web app | React 19 · Vite · React Router | [frontend/](frontend/) |
+| Deployment | Docker Compose: Caddy (web + HTTPS), API, Postgres 18 | [docker-compose.yml](docker-compose.yml), [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) |
 
 **New to the project?** Read the [Project Guide](docs/PROJECT_GUIDE.md) for the
 product, roles, end-to-end lifecycle, architecture, data model, business rules,
@@ -68,6 +69,11 @@ npm run dev
 ```
 The database defaults to `backend/promanage.db` wherever you start uvicorn from.
 Set `DATABASE_URL` in `backend/.env` to use another database.
+
+## Deployment
+The server needs only Docker: `docker compose up -d --build` builds and starts the
+web, API and Postgres containers. Step-by-step server setup, updates and backups:
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Quality checks
 | Command (run inside the folder) | What it does |

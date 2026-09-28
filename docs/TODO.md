@@ -1,6 +1,6 @@
 # MAEC ProManage: prioritised to-do list
 
-Last updated: 2026-09-28 (hours from Login/Logout only, D1). Sajjad is the only person pushing to `main`. **The app is not deployed:** it will be deployed once, when the whole app is developed (see the go-live checklist). All databases today hold test data. Owner:
+Last updated: 2026-09-28 (Docker deployment setup, E9). Sajjad is the only person pushing to `main`. **The app is not deployed yet.** The target is a netcup VPS in Vienna running Docker Compose ([DEPLOYMENT.md](DEPLOYMENT.md)); see the go-live checklist. All databases today hold test data. Owner:
 Sajjad, who now owns all three roles (BU Head, Lead, Engineer) plus the
 SharePoint integration.
 
@@ -130,11 +130,11 @@ Background for every item is in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 | E1 | **Move Lead/Engineer endpoints into `app/`**, incrementally, under working rule 2 (M+ changes only). Extend the guard test as each feature moves | `main.py` is about 2,800 lines | `backend/main.py` → `backend/app/` | L (spread out) |
 | E2 | **Migrate the Lead, Engineer and shared pages** to `features/` + `hooks/` + `api/` with no direct `fetch`, on first M+ change. `ResourceBookingPage` first | Same standard as the BU Head pages | `frontend/src/pages/` | L (spread out) |
 | E3 | ✅ **Done.** `npm run lint` has 0 errors (unused imports, state and functions removed in `WbsStructurePage.jsx`, `pages/lead/ExecutiveDashboardPage.jsx`, `EngineerPerformanceDashboardPage.jsx`). 19 older warnings remain (hook dependencies, fast refresh) | `npm run lint` failed | those files | S |
-| E5 | **Postgres decision, foreign keys, indexes** (after E4). Also align two harmless type differences in adopted dev databases: `projects.timesheets_soft_locked` INTEGER vs BOOLEAN, `wbs_nodes.deliverable_status` VARCHAR(60) vs (40) | Production-grade database | `models.py`, config | M |
+| E5 | **Postgres decided:** the Docker deployment uses Postgres 18 (`psycopg`); the full suite and `alembic check` pass on it (`TEST_DATABASE_URL`, see DEPLOYMENT.md). **Still open:** foreign keys, indexes. Also align two harmless type differences in adopted dev databases: `projects.timesheets_soft_locked` INTEGER vs BOOLEAN, `wbs_nodes.deliverable_status` VARCHAR(60) vs (40) | Production-grade database | `models.py`, config | M |
 | E6 | **Performance:** SQL aggregates instead of per-row queries; less polling | Scales badly | `main.py`, pages | M |
 | E7 | **Delete dead code:** the `gantt_tasks` table (its endpoints were removed in S3), `project_leads`, the legacy `request-extension` endpoint, `leads_loader.py`, `temp_*.py`, `App.css`, and the unused `recharts` dependency | Noise | various | S |
 | E8 | **Tokens in httpOnly cookies** instead of `localStorage` | XSS could steal tokens | `security.py`, `api/client.js`, `AuthContext.jsx` | M |
-| E9 | **Production setup:** single-port build (FastAPI serves the built frontend), structured logging, error monitoring | Deployment | `main.py`, `vite build` | M |
+| E9 | **Production setup.** ✅ Docker Compose: a Caddy container serves the built frontend on ports 80/443 with automatic HTTPS and proxies `/api` to the API container; Postgres in its own container; runbook in `docs/DEPLOYMENT.md`. **Still open:** structured logging, error monitoring | Deployment | `docker-compose.yml`, Dockerfiles | M |
 
 ---
 
@@ -185,10 +185,10 @@ Nothing here is urgent while the app is in development. All of it must be done b
 - [ ] **Hours:** engineers keep MAEC open in a browser tab while working, with the site excluded from Edge sleeping tabs / Chrome Memory Saver (user guide §5.2).
 - [ ] **S1:** rotate the Azure client secret (needs Azure credentials).
 - [ ] **S2:** purge the HR CSV and the old secret from git history; ask Subhika to delete her clone.
-- [ ] **E5:** database decision (SQLite or Postgres), foreign keys, indexes. With Postgres or several workers, run `alembic upgrade head` as a deploy step instead of at startup.
-- [ ] **E8:** tokens in httpOnly cookies. **E9:** single-port production build, structured logging, error monitoring.
-- [ ] **S7:** `backup_db.py --dir <off-machine folder>` scheduled nightly (or the managed database's own backups), plus a restore drill on the production setup.
-- [ ] **CORS and settings:** production origin in the CORS list, `DATABASE_URL`, `.env` values on the server only.
+- [ ] **E5:** foreign keys, indexes. (Postgres is decided. Migrations run at API start, which is safe with the single API process; with several processes, run `alembic upgrade head` as a deploy step instead.)
+- [ ] **E8:** tokens in httpOnly cookies. **E9:** structured logging, error monitoring (the Docker setup is done).
+- [ ] **S7:** the nightly `pg_dump` cron from DEPLOYMENT.md §8, copied off the server, plus a restore drill on the production setup.
+- [ ] **Server settings:** the root `.env` on the server only (`POSTGRES_PASSWORD`, `SITE_ADDRESS` = the real domain). CORS isn't needed: the web app and the API share one origin.
 - [ ] **Clean start:** a fresh production database (no test projects or accounts), real accounts via `create_user.py`, and the legacy `project_leads` seed removed (E7). The only databases that may ever be started are a **fresh one** or **the laptop dev database after its migration**; never a pre-Alembic copy (Subhika's clone, an old backup), which `migrate()` refuses.
 - [ ] **SP6:** SharePoint end-to-end test against the real tenant.
 - [x] Delete `app/core/legacy_schema.py` (done with C1: the only pre-Alembic dev database was adopted; `migrate()` now refuses pre-Alembic databases).

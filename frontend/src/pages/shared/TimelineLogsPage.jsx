@@ -1,9 +1,9 @@
 import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 export const DAY_FIELDS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 export const WEEKLY_SUBMISSION_LABELS = {
   not_submitted: 'Not Submitted',

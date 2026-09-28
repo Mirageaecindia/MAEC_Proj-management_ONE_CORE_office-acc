@@ -1,11 +1,11 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { X } from 'lucide-react';
+import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { useLogoutTracking, useStartTracking, useTrackingState } from '../../hooks/useTracking';
 import { formatDateTimeIST } from '../../utils/displayTime';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const TASK_STATUS_STEPS = ['To Do', 'In-Progress', 'Submitted for Approval', 'Approved'];
 const SUBTASK_STATUS_STEPS = ['To Do', 'In-Progress', 'Done'];

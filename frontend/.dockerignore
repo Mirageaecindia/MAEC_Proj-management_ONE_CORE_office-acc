@@ -1,0 +1,9 @@
+# The image installs its own dependencies and must not pick up a local .env
+# (it would point the build at http://localhost:8000).
+node_modules/
+dist/
+.env
+.env.*
+.eslintcache
+Dockerfile
+.dockerignore

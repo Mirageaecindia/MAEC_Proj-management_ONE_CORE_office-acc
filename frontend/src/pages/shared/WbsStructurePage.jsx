@@ -1,10 +1,10 @@
 import { Pencil, Trash2 } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { countWorkingDays, plannedHoursForRange } from '../../lib/hours';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const PHASES = ['Space Planning', 'STR Coordination', 'ID Coordination', 'BoH Area RCP Coordination', 'Submission'];
 
