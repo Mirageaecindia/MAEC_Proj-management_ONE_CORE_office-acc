@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Literal, List, Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -359,33 +359,18 @@ class WbsNodeUpdate(WbsNodeBase):
     pass
 
 
-class TimeLogEntryOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class HoursReviewIn(BaseModel):
+    """Bulk review: every pending, finished day in the week that the caller is responsible for."""
 
-    id: int
-    project_id: int
-    task_id: int
-    wbs_code: Optional[str] = None
-    task_name: Optional[str] = None
-    employee_id: int
-    employee_name: Optional[str] = None
+    action: Literal["approved", "rejected"]
     week_start_date: date
-    mon_hours: float
-    tue_hours: float
-    wed_hours: float
-    thu_hours: float
-    fri_hours: float
-    sat_hours: float
-    sun_hours: float
-    total_hours: float
-    approval_status: str
-    reviewed_by: Optional[str] = None
-    reviewed_at: Optional[datetime] = None
+    employee_id: Optional[int] = None  # one engineer, or everyone on the caller's tasks
 
 
-class WeeklyHoursActionIn(BaseModel):
-    week_start_date: date
-    employee_id: Optional[int] = None
+class HoursDecisionIn(BaseModel):
+    """One day's hours. A reason is required to reject hours that were already approved."""
+
+    reason: Optional[str] = None
 
 
 class GovernanceActionBase(BaseModel):

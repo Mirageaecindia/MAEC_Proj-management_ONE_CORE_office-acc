@@ -99,7 +99,7 @@ def test_currency_change_needs_confirmation(client, db, world, governed):
 
 
 def _reach_auto_lock(db, make, world, project_id, node):
-    make.time_entry(project_id, node, world.emp1, 70, status="approved", week=date(2026, 9, 14))  # 100 of 100
+    make.time_entry(project_id, node, world.emp1, 70, status="approved", day=date(2026, 9, 14))  # 100 of 100
     enforce_governance(db, project_id)
     project = _project(db, project_id)
     assert (project.timesheets_soft_locked, project.lock_reason) == (True, "auto")

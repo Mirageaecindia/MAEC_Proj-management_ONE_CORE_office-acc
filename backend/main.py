@@ -27,7 +27,7 @@ from app.core.migrations import migrate
 from app.core.security import require_role
 from app.domain.calendar import distribute_hours_over_months as _distribute_hours_over_months
 from app.domain.calendar import month_key as _get_month_key
-from app.domain.timesheets import entry_total as time_entry_total
+from app.domain.timesheets import APPROVED, PENDING_REVIEW, total_hours
 from app.domain.wbs import TO_DO, is_finished
 from app.services.allocation import allocated_pct, over_capacity_message
 from app.services.access import (
@@ -44,14 +44,13 @@ from app.services.booking_approval import BOOKING_APPROVAL_LABELS, booking_appro
 from app.services.governance import extension_request_output, find_pending_extension_request
 from app.services.metrics import executive_dashboard_data
 from app.services.governance_monitor import enforce_governance
-from app.services.hours_review import HoursReview, review_summary, sync_week_status, tasks_by_id, week_status
+from app.services.hours_review import NOT_YOUR_HOURS, HoursReview, tasks_by_id
 from app.services.notifications import EXTENSION_REQUESTED, create_bu_head_notification
 
 logger = logging.getLogger(__name__)
 
 STAFF = {"engineer"}  # everyone but the BU Head; leading a project is a role on the project, not an account
 LEAD_ROW = "Lead assignments are set by the BU Head on the project, not here."
-NOT_YOUR_HOURS = "These hours are approved by the task's lead, or by the BU Head when the task has no active lead or they are a project lead's own."
 TIMESHEETS_LOCKED = "Timesheets are soft-locked by the BU Head — approvals are on hold."
 
 
@@ -705,55 +704,38 @@ def list_wbs_structure(
     return [node_output(db, node) for node in scoped_nodes]
 
 
-def time_entry_hours_by_month(entry) -> dict[str, float]:
-    """Bucket a weekly time entry's hours into the REAL month each day was worked.
-
-    A weekly entry stores one column per weekday relative to ``week_start_date``,
-    so the actual calendar date of every logged day is recoverable. Bucketing by
-    the week's start date instead misfiles any day that falls in a later month
-    than the Monday the week began on: the Thursday and Friday of a week starting
-    Mon 31 Aug are September work, not August work. Grouping per day keeps every
-    month correct even when a week straddles a month boundary.
-    """
-    from datetime import timedelta
-
-    buckets: dict[str, float] = {}
-    if not entry.week_start_date:
-        return buckets
-    for offset, field in enumerate(models.DAY_FIELDS):
-        hours = float(getattr(entry, field, 0) or 0)
-        if hours <= 0:
-            continue
-        worked_on = entry.week_start_date + timedelta(days=offset)
-        key = _get_month_key(worked_on)
-        buckets[key] = round(buckets.get(key, 0.0) + hours, 4)
-    return buckets
-
-
-def time_entry_output(db: Session, entry: models.TimeLogEntry):
-    task = db.query(models.WbsNode).filter_by(id=entry.task_id).first()
-    employee = db.query(models.Employee).filter_by(id=entry.employee_id).first()
-    return schemas.TimeLogEntryOut(
-        id=entry.id,
-        project_id=entry.project_id,
-        task_id=entry.task_id,
-        wbs_code=task.wbs_code if task else None,
-        task_name=task.task_name if task else "",
-        employee_id=entry.employee_id,
-        employee_name=employee.name if employee else "",
-        week_start_date=entry.week_start_date,
-        mon_hours=entry.mon_hours,
-        tue_hours=entry.tue_hours,
-        wed_hours=entry.wed_hours,
-        thu_hours=entry.thu_hours,
-        fri_hours=entry.fri_hours,
-        sat_hours=entry.sat_hours,
-        sun_hours=entry.sun_hours,
-        total_hours=round(time_entry_total(entry), 2),
-        approval_status=entry.approval_status,
-        reviewed_by=entry.reviewed_by,
-        reviewed_at=entry.reviewed_at,
+def time_entries_output(db: Session, entries: list, project: models.Project, user: models.User) -> list[dict]:
+    """Daily rows with their names (two lookups for any number of rows) and what this user may
+    do with each: `can_review` = the user is the row's reviewer and the day is over."""
+    tasks = tasks_by_id(db, entries)
+    employee_ids = {entry.employee_id for entry in entries}
+    employees = (
+        {e.id: e for e in db.query(models.Employee).filter(models.Employee.id.in_(employee_ids))} if employee_ids else {}
     )
+    review = HoursReview(db, project, date.today())
+    out = []
+    for entry in entries:
+        task = tasks.get(entry.task_id)
+        employee = employees.get(entry.employee_id)
+        finished = entry.work_date < review.today
+        out.append({
+            "id": entry.id,
+            "project_id": entry.project_id,
+            "task_id": entry.task_id,
+            "wbs_code": task.wbs_code if task else None,
+            "task_name": task.task_name if task else "",
+            "employee_id": entry.employee_id,
+            "employee_name": employee.name if employee else "",
+            "work_date": entry.work_date.isoformat(),
+            "hours": round(float(entry.hours or 0), 2),
+            "approval_status": entry.approval_status,
+            "reviewed_by": entry.reviewed_by,
+            "reviewed_at": entry.reviewed_at.isoformat() if entry.reviewed_at else None,
+            "review_reason": entry.review_reason,
+            "finished": finished,
+            "can_review": finished and review.may_review(user, task, entry.employee_id),
+        })
+    return out
 
 
 def scoped_wbs_tasks(
@@ -779,120 +761,25 @@ def scoped_wbs_tasks(
 def list_timesheet_entries(
     project_id: int,
     week_start: Optional[str] = None,
-    source: Optional[str] = None,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _, role = project_and_role(db, project_id, user)
+    """The daily hours the caller may see on a project: their own (engineer), their tasks' (lead),
+    everything (BU Head); one week when `week_start` is given."""
+    project, role = project_and_role(db, project_id, user)
     query = db.query(models.TimeLogEntry).filter_by(project_id=project_id)
     if role == "engineer":
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
         query = query.filter_by(employee_id=user.employee_id)
     elif role == "lead":
-        lead_tasks = scoped_wbs_tasks(db, project_id, user, role)
-        task_ids = [task.id for task in lead_tasks]
+        task_ids = [task.id for task in scoped_wbs_tasks(db, project_id, user, role)]
         query = query.filter(models.TimeLogEntry.task_id.in_(task_ids)) if task_ids else query.filter(models.TimeLogEntry.id < 0)
     if week_start:
-        query = query.filter_by(week_start_date=date.fromisoformat(week_start))
-    if source == "tracking":
-        # The Weekly Hours Logging sheet is fed exclusively by automatic
-        # subtask tracking: only engineer subtasks (never main tasks) that
-        # actually have tracked working time are shown.
-        subtask_ids = [
-            node.id
-            for node in db.query(models.WbsNode)
-            .filter(models.WbsNode.project_id == project_id, models.WbsNode.parent_id.isnot(None))
-            .all()
-        ]
-        tracked = or_(*[getattr(models.TimeLogEntry, field) > 0 for field in models.DAY_FIELDS])
-        query = query.filter(
-            models.TimeLogEntry.task_id.in_(subtask_ids) if subtask_ids else models.TimeLogEntry.id < 0,
-            tracked,
-        )
-    return [time_entry_output(db, entry) for entry in query.order_by(models.TimeLogEntry.week_start_date).all()]
-
-
-# --- Weekly-hours submission & approval --------------------------------------
-# The Weekly Hours section keys off a per-(engineer, week) submission record
-# that the ENGINEER creates. Engineer submits -> Lead approves/rejects, and the
-# Lead can only review a week whose status is exactly 'submitted' (enforced
-# here server-side, independent of any frontend button visibility).
-
-WEEKLY_HOURS_STATUS_LABELS = {
-    "not_submitted": "Not Submitted",
-    "submitted": "Submitted for Approval",
-    "approved": "Approved",
-    "rejected": "Rejected",
-}
-
-
-NO_REVIEW = {"can_review": False, "reviewers_total": 0, "reviewers_done": 0, "waiting_on": []}
-
-
-def weekly_submission_output(
-    db: Session, submission: models.WeeklyHoursSubmission, review: Optional[dict] = None
-) -> dict:
-    """`review` (from `review_summary`): whether the caller has hours to review in this week, and
-    how many reviewers have finished ("2 of 3 approved") with the names still pending."""
-    employee = db.query(models.Employee).filter_by(id=submission.employee_id).first()
-    return {
-        **(review or NO_REVIEW),
-        "id": submission.id,
-        "project_id": submission.project_id,
-        "employee_id": submission.employee_id,
-        "employee_name": employee.name if employee else "",
-        "week_start_date": submission.week_start_date.isoformat(),
-        "status": submission.status,
-        "status_label": WEEKLY_HOURS_STATUS_LABELS.get(submission.status, submission.status),
-        "submitted_at": submission.submitted_at.isoformat() if submission.submitted_at else None,
-        "reviewed_by": submission.reviewed_by,
-        "reviewed_at": submission.reviewed_at.isoformat() if submission.reviewed_at else None,
-    }
-
-
-def weekly_submission_for(
-    db: Session, project_id: int, employee_id: int, week: date
-) -> Optional[models.WeeklyHoursSubmission]:
-    return (
-        db.query(models.WeeklyHoursSubmission)
-        .filter_by(project_id=project_id, employee_id=employee_id, week_start_date=week)
-        .first()
-    )
-
-
-def weekly_hours_visible_employee_ids(
-    db: Session, project_id: int, week: date, user: models.User, role: str
-) -> Optional[set]:
-    """Employee ids whose weekly-hours submissions this user may see or review.
-
-    Engineer: only their own real employee id. Lead: engineers assigned to a
-    WBS node in the lead's scope, plus engineers who logged hours on those
-    scoped tasks that week (mirrors the timesheet scoping). BU Head: None,
-    meaning unrestricted.
-    """
-    if role == "bu_head":
-        return None
-    if role == "engineer":
-        if not user.employee_id:
-            raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
-        return {user.employee_id}
-    tasks = scoped_wbs_tasks(db, project_id, user, role)
-    visible = {task.assigned_engineer_id for task in tasks if task.assigned_engineer_id}
-    task_ids = [task.id for task in tasks]
-    if task_ids:
-        logged = (
-            db.query(models.TimeLogEntry.employee_id)
-            .filter(
-                models.TimeLogEntry.project_id == project_id,
-                models.TimeLogEntry.task_id.in_(task_ids),
-                models.TimeLogEntry.week_start_date == week,
-            )
-            .distinct()
-            .all()
-        )
-        visible.update(row[0] for row in logged)
-    return visible
+        first = date.fromisoformat(week_start)
+        query = query.filter(models.TimeLogEntry.work_date >= first, models.TimeLogEntry.work_date < first + timedelta(days=7))
+    entries = query.order_by(models.TimeLogEntry.work_date, models.TimeLogEntry.task_id).all()
+    return time_entries_output(db, entries, project, user)
 
 
 def project_and_role(
@@ -920,164 +807,37 @@ def require_project_access(db: Session, project_id: int, user: models.User) -> m
     return project_and_role(db, project_id, user)[0]
 
 
-@app.get("/api/projects/{project_id}/weekly-hours-submissions")
-def list_weekly_hours_submissions(
+@app.post("/api/projects/{project_id}/hours/review")
+def review_hours_in_bulk(
     project_id: int,
-    week_start: str,
+    payload: schemas.HoursReviewIn,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    project, role = project_and_role(db, project_id, user)
-    week = date.fromisoformat(week_start)
-    visible = weekly_hours_visible_employee_ids(db, project_id, week, user, role)
-    query = db.query(models.WeeklyHoursSubmission).filter_by(project_id=project_id, week_start_date=week)
-    if visible is not None:
-        query = query.filter(
-            models.WeeklyHoursSubmission.employee_id.in_(visible) if visible else models.WeeklyHoursSubmission.id < 0
-        )
-    submissions = query.order_by(models.WeeklyHoursSubmission.employee_id).all()
-    reviews = review_summary(db, project, week, {s.employee_id for s in submissions}, user, date.today())
-    return [weekly_submission_output(db, submission, reviews.get(submission.employee_id)) for submission in submissions]
-
-
-@app.post("/api/projects/{project_id}/weekly-hours/submit")
-def submit_weekly_hours(
-    project_id: int,
-    payload: schemas.WeeklyHoursActionIn,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_role(user.role, STAFF)  # own work: the employee link below is the real gate
-    project = require_project_access(db, project_id, user)
-    if not user.employee_id:
-        raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
-    if project.timesheets_soft_locked:
-        raise HTTPException(
-            status_code=409,
-            detail="Timesheets are soft-locked by the BU Head — weekly submissions are on hold.",
-        )
-    # Only a week with real tracked log hours can be submitted for approval;
-    # mirrors the tracking filter of the timesheet endpoint so the UI's
-    # "Submit for Approval" availability always matches the server-side rule.
-    tracked = or_(*[getattr(models.TimeLogEntry, field) > 0 for field in models.DAY_FIELDS])
-    eligible = (
-        db.query(models.TimeLogEntry)
-        .filter(
-            models.TimeLogEntry.project_id == project_id,
-            models.TimeLogEntry.employee_id == user.employee_id,
-            models.TimeLogEntry.week_start_date == payload.week_start_date,
-            tracked,
-        )
-        .first()
-    )
-    if not eligible:
-        raise HTTPException(
-            status_code=409,
-            detail="This week has no logged hours — nothing to submit for approval.",
-        )
-    # An engineer can only ever submit their OWN weekly hours; any employee_id
-    # in the payload is ignored.
-    submission = weekly_submission_for(db, project_id, user.employee_id, payload.week_start_date)
-    now = datetime.now(timezone.utc)
-    if submission:
-        if submission.status == "approved":
-            raise HTTPException(
-                status_code=409,
-                detail="This week's hours are already approved — a resubmission is not allowed.",
-            )
-        submission.status = "submitted"
-        submission.submitted_at = now
-        submission.reviewed_by = None
-        submission.reviewed_at = None
-        # Resubmitting asks for the rejected hours to be reviewed again (e.g. after a correction).
-        db.query(models.TimeLogEntry).filter_by(
-            project_id=project_id,
-            employee_id=user.employee_id,
-            week_start_date=payload.week_start_date,
-            approval_status="rejected",
-        ).update({"approval_status": "pending_review", "reviewed_by": None, "reviewed_at": None})
-    else:
-        submission = models.WeeklyHoursSubmission(
-            project_id=project_id,
-            employee_id=user.employee_id,
-            week_start_date=payload.week_start_date,
-            status="submitted",
-            submitted_at=now,
-        )
-        db.add(submission)
-    db.flush()
-    sync_week_status(db, project_id, user.employee_id, payload.week_start_date)
-    db.commit()
-    db.refresh(submission)
-    return weekly_submission_output(db, submission)
-
-
-def lead_review_weekly_hours(
-    db: Session, project_id: int, action: str, payload: schemas.WeeklyHoursActionIn, user: models.User
-):
-    if not user.full_name:
-        raise HTTPException(status_code=400, detail="Lead identity is required.")
-    project, role = project_and_role(db, project_id, user, allowed={"lead", "bu_head"})
+    """Approve (or reject) every pending, finished day in the week that the caller is responsible
+    for: one engineer's, or everyone's on the caller's tasks. The unit stays the day."""
+    project, _ = project_and_role(db, project_id, user, allowed={"lead", "bu_head"})
     if project.timesheets_soft_locked:
         raise HTTPException(status_code=409, detail=TIMESHEETS_LOCKED)
-    if payload.employee_id is None:
-        raise HTTPException(status_code=400, detail="employee_id is required to review weekly hours.")
-    # Per task: the caller reviews only the rows they are responsible for; the others wait
-    # for their own reviewer, and the week is Approved once every row is.
-    rows = (
-        db.query(models.TimeLogEntry)
-        .filter_by(project_id=project_id, employee_id=payload.employee_id, week_start_date=payload.week_start_date)
-        .all()
+    first = payload.week_start_date
+    query = db.query(models.TimeLogEntry).filter(  # the whole week, so "none of yours" and "none left" differ
+        models.TimeLogEntry.project_id == project_id,
+        models.TimeLogEntry.work_date >= first,
+        models.TimeLogEntry.work_date < first + timedelta(days=7),
     )
-    tasks = tasks_by_id(db, rows)
+    if payload.employee_id is not None:
+        query = query.filter(models.TimeLogEntry.employee_id == payload.employee_id)
+    entries = query.all()
+    tasks = tasks_by_id(db, entries)
     review = HoursReview(db, project, date.today())
-    yours = [row for row in rows if review.may_review(user, tasks.get(row.task_id), row.employee_id)]
-    if not yours:
+    if not any(review.may_review(user, tasks.get(e.task_id), e.employee_id) for e in entries):
         raise HTTPException(status_code=403, detail=NOT_YOUR_HOURS)
-    submission = weekly_submission_for(db, project_id, payload.employee_id, payload.week_start_date)
-    if not submission:
-        raise HTTPException(
-            status_code=409,
-            detail="This week's hours have not been submitted for approval yet.",
-        )
-    if submission.status != "submitted":
-        raise HTTPException(
-            status_code=409,
-            detail="Only weekly hours that are 'Submitted for Approval' can be approved or rejected.",
-        )
-    mine = [row for row in yours if row.approval_status == "pending_review"]
-    if not mine:
-        raise HTTPException(status_code=409, detail="None of your hours in this week are waiting for review.")
-    now = datetime.now(timezone.utc)
-    for row in mine:
-        row.approval_status, row.reviewed_by, row.reviewed_at = action, user.full_name, now
-    submission.status = week_status(row.approval_status for row in rows)
-    submission.reviewed_by, submission.reviewed_at = user.full_name, now
+    reviewed = review.review_pending(user, entries, tasks, payload.action, datetime.now(timezone.utc))
+    if not reviewed:
+        raise HTTPException(status_code=409, detail="No finished days are waiting for your review in this week.")
     db.commit()
     enforce_governance(db, project_id)  # usage = approved hours: alerts / auto-lock
-    db.refresh(submission)
-    summary = review_summary(db, project, submission.week_start_date, [submission.employee_id], user, date.today())
-    return weekly_submission_output(db, submission, summary.get(submission.employee_id))
-
-
-@app.post("/api/projects/{project_id}/weekly-hours/approve")
-def approve_weekly_hours(
-    project_id: int,
-    payload: schemas.WeeklyHoursActionIn,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    return lead_review_weekly_hours(db, project_id, "approved", payload, user)
-
-
-@app.post("/api/projects/{project_id}/weekly-hours/reject")
-def reject_weekly_hours(
-    project_id: int,
-    payload: schemas.WeeklyHoursActionIn,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    return lead_review_weekly_hours(db, project_id, "rejected", payload, user)
+    return {"reviewed": reviewed, "action": payload.action}
 
 
 @app.get("/api/projects/{project_id}/timeline-logs")
@@ -1100,7 +860,7 @@ def project_timeline_logs(
         entries_query = entries_query.filter(models.TimeLogEntry.task_id.in_(task_ids))
     else:
         entries_query = entries_query.filter(models.TimeLogEntry.id < 0)
-    entries = entries_query.order_by(models.TimeLogEntry.week_start_date).all()
+    entries = entries_query.order_by(models.TimeLogEntry.work_date).all()
 
     engineer_ids = {task.assigned_engineer_id for task in tasks if task.assigned_engineer_id}
     engineers = []
@@ -1109,7 +869,7 @@ def project_timeline_logs(
 
     task_actual = defaultdict(float)
     for entry in entries:
-        task_actual[entry.task_id] += time_entry_total(entry)
+        task_actual[entry.task_id] += float(entry.hours or 0)
 
 
     tasks_out = []
@@ -1144,8 +904,8 @@ def project_timeline_logs(
             "percent_complete": percent,
         })
 
-    total_logged = round(sum(time_entry_total(entry) for entry in entries), 2)
-    entries_out = [time_entry_output(db, entry) for entry in entries]
+    total_logged = total_hours(entries)
+    entries_out = time_entries_output(db, entries, project, user)
     engineer = db.query(models.Employee).filter_by(id=user.employee_id).first() if role == "engineer" and user.employee_id else None
 
     # Per-phase rollup — the single, shared completion rule: a task counts as
@@ -1177,15 +937,15 @@ def project_timeline_logs(
         },
         "tasks": tasks_out,
         "phases": phases_out,
-        "time_entries": [entry.model_dump() for entry in entries_out],
+        "time_entries": entries_out,
         "engineers": [
             {"id": e.id, "employee_code": e.employee_code, "name": e.name, "role_title": e.role_title}
             for e in engineers
         ],
         "summary": {
             "total_hours_logged": total_logged,
-            "approved_hours": round(sum(time_entry_total(e) for e in entries if e.approval_status == "approved"), 2),
-            "pending_hours": round(sum(time_entry_total(e) for e in entries if e.approval_status == "pending_review"), 2),
+            "approved_hours": total_hours(entries, APPROVED),
+            "pending_hours": total_hours(entries, PENDING_REVIEW),
             "scheduled_hours": sum(task.estimated_hours or 0 for task in tasks),
             "total_tasks": len(tasks),
             "completed_tasks": sum(1 for task in tasks if is_finished(task.deliverable_status)),
@@ -1225,7 +985,7 @@ def engineer_performance(
                 models.TimeLogEntry.employee_id == user.employee_id,
                 models.TimeLogEntry.project_id.in_(approved_ids),
             )
-            .order_by(models.TimeLogEntry.week_start_date.desc())
+            .order_by(models.TimeLogEntry.work_date.desc())
             .all()
         )
     node_by_id = {node.id: node for node in nodes}
@@ -1263,16 +1023,16 @@ def engineer_performance(
         row = per_project.get(entry.project_id)
         if not row:
             continue
-        total = time_entry_total(entry)
+        total = float(entry.hours or 0)
         row["logged_hours"] = round(row["logged_hours"] + total, 2)
         if entry.approval_status == "approved":
             row["approved_hours"] = round(row["approved_hours"] + total, 2)
         elif entry.approval_status == "pending_review":
             row["pending_hours"] = round(row["pending_hours"] + total, 2)
 
-    total_logged = round(sum(time_entry_total(entry) for entry in entries), 2)
-    approved_hours = round(sum(time_entry_total(e) for e in entries if e.approval_status == "approved"), 2)
-    pending_hours = round(sum(time_entry_total(e) for e in entries if e.approval_status == "pending_review"), 2)
+    total_logged = total_hours(entries)
+    approved_hours = total_hours(entries, APPROVED)
+    pending_hours = total_hours(entries, PENDING_REVIEW)
     scheduled_hours = sum(node.estimated_hours or 0 for node in nodes)
 
     recent_entries = [
@@ -1280,8 +1040,8 @@ def engineer_performance(
             "id": entry.id,
             "project_name": project_names.get(entry.project_id),
             "task_name": node_by_id[entry.task_id].task_name if entry.task_id in node_by_id else None,
-            "week_start_date": entry.week_start_date.isoformat() if entry.week_start_date else None,
-            "hours": round(time_entry_total(entry), 2),
+            "work_date": entry.work_date.isoformat(),
+            "hours": round(float(entry.hours or 0), 2),
             "approval_status": entry.approval_status,
         }
         for entry in entries[:10]
@@ -1362,34 +1122,8 @@ def engineer_dashboard_data(db: Session, employee_id: int, approved_ids: set[int
         entries_query = entries_query.filter(models.TimeLogEntry.project_id == project_id)
     entries = entries_query.all()
 
-    # Resolve the REAL approval state of each entry. The engineer's approval
-    # workflow is week-level: a Lead approves a week on Timeline & Logs, which is
-    # recorded on WeeklyHoursSubmission. An individual TimeLogEntry is therefore
-    # approved either because the entry itself was approved, or because its week
-    # was approved. This is read-only dashboard logic, so the Lead/BU Head
-    # approval screens keep their own behaviour untouched.
-    submission_status_by_week = {
-        (row.project_id, row.week_start_date): row.status
-        for row in db.query(models.WeeklyHoursSubmission)
-        .filter(
-            models.WeeklyHoursSubmission.employee_id == employee_id,
-            models.WeeklyHoursSubmission.project_id.in_(approved_ids),
-        )
-        .all()
-    }
-
-    def _effective_status(entry) -> str:
-        week_status = submission_status_by_week.get((entry.project_id, entry.week_start_date))
-        if entry.approval_status == "approved":
-            return "approved"
-        if week_status == "approved":
-            return "approved"
-        if week_status == "rejected":
-            return "rejected"
-        return entry.approval_status or "pending_review"
-
-    approved_entries = [entry for entry in entries if _effective_status(entry) == "approved"]
-    pending_entries = [entry for entry in entries if _effective_status(entry) == "pending_review"]
+    approved_entries = [entry for entry in entries if entry.approval_status == APPROVED]
+    pending_entries = [entry for entry in entries if entry.approval_status == PENDING_REVIEW]
 
     # Aggregate by project
     per_project = {}
@@ -1435,17 +1169,13 @@ def engineer_dashboard_data(db: Session, employee_id: int, approved_ids: set[int
 
     for entry in approved_entries:
         row = per_project.get(entry.project_id)
-        if not row:
-            continue
-        total = time_entry_total(entry)
-        row["approved_hours"] = round(row["approved_hours"] + total, 2)
+        if row:
+            row["approved_hours"] = round(row["approved_hours"] + float(entry.hours or 0), 2)
 
     for entry in pending_entries:
         row = per_project.get(entry.project_id)
-        if not row:
-            continue
-        total = time_entry_total(entry)
-        row["pending_hours"] = round(row["pending_hours"] + total, 2)
+        if row:
+            row["pending_hours"] = round(row["pending_hours"] + float(entry.hours or 0), 2)
 
     for row in per_project.values():
         row["logged_hours"] = round(row["approved_hours"] + row["pending_hours"], 2)
@@ -1476,17 +1206,15 @@ def engineer_dashboard_data(db: Session, employee_id: int, approved_ids: set[int
             for month_key, hours in distributed.items():
                 monthly_planned[month_key] += hours
 
-    # Aggregate APPROVED consumed hours into the REAL month each logged day falls
-    # in, splitting normal vs exceeded per project. Bucketing per day (rather than
-    # per week start) is what keeps a month correct when a single week straddles a
-    # month boundary.
+    # Approved hours go into the real month of the day they were worked, split normal vs
+    # exceeded per project.
     for entry in approved_entries:
-        for month_key, hours in time_entry_hours_by_month(entry).items():
-            project_row = per_project.get(entry.project_id)
-            if project_row and project_row.get("exceeded"):
-                monthly_consumed_exceeded[month_key] += hours
-            else:
-                monthly_consumed_normal[month_key] += hours
+        month_key, hours = _get_month_key(entry.work_date), float(entry.hours or 0)
+        project_row = per_project.get(entry.project_id)
+        if project_row and project_row.get("exceeded"):
+            monthly_consumed_exceeded[month_key] += hours
+        else:
+            monthly_consumed_normal[month_key] += hours
 
     # Collect all months that have data and sort them
     all_months = sorted(set(monthly_planned.keys()) | set(monthly_consumed_normal.keys()) | set(monthly_consumed_exceeded.keys()))
@@ -1663,29 +1391,22 @@ def request_extension(
     return action
 
 
-def lead_review_time_log(db: Session, entry_id: int, user: models.User, status: str):
-    if not user.full_name:
-        raise HTTPException(status_code=400, detail="Lead identity is required.")
+def review_time_log(db: Session, entry_id: int, user: models.User, action: str, reason: Optional[str]):
+    """One day's hours: approved or rejected by its reviewer (app/services/hours_review.py)."""
     entry = db.query(models.TimeLogEntry).filter_by(id=entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Time log entry not found.")
     project = db.query(models.Project).filter_by(id=entry.project_id).first()
-    task = db.query(models.WbsNode).filter_by(id=entry.task_id).first()
     if user.role != "bu_head" and project_role(db, user, entry.project_id) is None:
         raise HTTPException(status_code=403, detail="You do not have access to this project.")
-    if not HoursReview(db, project, date.today()).may_review(user, task, entry.employee_id):
-        raise HTTPException(status_code=403, detail=NOT_YOUR_HOURS)
     if project.timesheets_soft_locked:
         raise HTTPException(status_code=409, detail=TIMESHEETS_LOCKED)
-    entry.approval_status = status
-    entry.reviewed_by = user.full_name
-    entry.reviewed_at = datetime.now(timezone.utc)
-    db.flush()
-    sync_week_status(db, entry.project_id, entry.employee_id, entry.week_start_date)
+    task = db.query(models.WbsNode).filter_by(id=entry.task_id).first()
+    HoursReview(db, project, date.today()).review(user, entry, task, action, reason, datetime.now(timezone.utc))
     db.commit()
     enforce_governance(db, entry.project_id)  # usage = approved hours: alerts / auto-lock
     db.refresh(entry)
-    return time_entry_output(db, entry)
+    return time_entries_output(db, [entry], project, user)[0]
 
 
 @app.post("/api/time-log-entries/{entry_id}/approve")
@@ -1694,16 +1415,17 @@ def approve_time_log(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return lead_review_time_log(db, entry_id, user, "approved")
+    return review_time_log(db, entry_id, user, APPROVED, None)
 
 
 @app.post("/api/time-log-entries/{entry_id}/reject")
 def reject_time_log(
     entry_id: int,
+    payload: Optional[schemas.HoursDecisionIn] = None,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return lead_review_time_log(db, entry_id, user, "rejected")
+    return review_time_log(db, entry_id, user, "rejected", payload.reason if payload else None)
 
 
 # --- Automatic subtask working-time tracking ---------------------------------
@@ -2397,6 +2119,17 @@ def advance_wbs_node_status(
     }
 
 
+def did_the_work_by_lead(db: Session, node: models.WbsNode) -> bool:
+    """Did the task's lead do the task or any of its subtasks? Then nobody but the BU Head approves it."""
+    lead = db.get(models.User, node.assigned_lead_user_id) if node.assigned_lead_user_id else None
+    if lead is None or lead.employee_id is None:
+        return False
+    return node.assigned_engineer_id == lead.employee_id or (
+        db.query(models.WbsNode.id).filter_by(parent_id=node.id, assigned_engineer_id=lead.employee_id).first()
+        is not None
+    )
+
+
 @app.post("/api/wbs-nodes/{node_id}/approve")
 def approve_wbs_node(
     node_id: int,
@@ -2404,27 +2137,29 @@ def approve_wbs_node(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Lead-only approval of a submitted parent task.
-
-    Moves a Task from 'Submitted for Approval' to 'Approved'. Only the Lead
-    assigned to that project/task can approve — BU Head is denied here. The
-    BU Head's role in this workflow is governance-level actions on the
-    Executive Dashboard, not individual task approval.
-    """
+    """Approval of a submitted parent task: by its lead, or by the BU Head when the lead did
+    (part of) the work themselves. Nobody approves their own work."""
     node = db.query(models.WbsNode).filter_by(id=node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="WBS node not found.")
-    project_and_role(db, node.project_id, user, allowed={"lead"})
+    project_and_role(db, node.project_id, user, allowed={"lead", "bu_head"})
     if node.parent_id:
         raise HTTPException(
             status_code=400,
             detail="Only parent tasks are approved. Subtasks move directly to 'Done'.",
         )
-    if not node_assigned_to_lead(node, user):
-        raise HTTPException(
-            status_code=403,
-            detail="Only the Lead assigned to this task can approve it.",
-        )
+    did_the_work = user.employee_id is not None and (
+        node.assigned_engineer_id == user.employee_id
+        or db.query(models.WbsNode.id).filter_by(parent_id=node.id, assigned_engineer_id=user.employee_id).first()
+        is not None
+    )
+    if user.role == "bu_head":
+        if not did_the_work_by_lead(db, node):
+            raise HTTPException(status_code=403, detail="The BU Head approves only tasks their lead worked on.")
+    elif not node_assigned_to_lead(node, user):
+        raise HTTPException(status_code=403, detail="Only the Lead assigned to this task can approve it.")
+    elif did_the_work:
+        raise HTTPException(status_code=403, detail="You worked on this task yourself, so the BU Head approves it.")
 
     display_status = map_status_for_display(node.deliverable_status)
     if display_status != "Submitted for Approval":

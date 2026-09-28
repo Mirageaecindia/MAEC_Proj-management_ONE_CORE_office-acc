@@ -1,26 +1,30 @@
 """Hours on Saturday and Sunday count like any other day (TODO N2): offices
-work different weeks, and the Lead's approval decides which hours stand."""
+work different weeks, and the day's approval decides which hours stand."""
 
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import models
-from app.domain.timesheets import entry_total
+from app.domain.timesheets import APPROVED, total_hours
 from app.repositories.work import WorkRepository
 
 
-def test_entry_total_counts_all_seven_days():
-    row = SimpleNamespace(mon_hours=1, tue_hours=1, wed_hours=1, thu_hours=1, fri_hours=1, sat_hours=2, sun_hours=3)
+def test_total_hours_is_the_one_totals_function():
+    rows = [
+        SimpleNamespace(hours=h, approval_status=s) for h, s in ((1, APPROVED), (2.5, "pending_review"), (3, APPROVED))
+    ]
 
-    assert entry_total(row) == 10
+    assert total_hours(rows) == 6.5
+    assert total_hours(rows, APPROVED) == 4
 
 
 def test_approved_weekend_hours_count_toward_usage(client, db, make, world, governed):
     project_id, node_a, *_ = governed
-    logged = make.time_entry(project_id, node_a, world.emp1, week=date(2026, 9, 14), sat_hours=6, sun_hours=4)
-    approved = client.post(f"/api/time-log-entries/{logged.id}/approve", headers=world.lead_h)
-    assert approved.status_code == 200, approved.text
-    assert approved.json()["total_hours"] == 10
+    saturday = make.time_entry(project_id, node_a, world.emp1, 6, day=date(2026, 9, 19))
+    sunday = make.time_entry(project_id, node_a, world.emp1, 4, day=date(2026, 9, 20))
+    for row in (saturday, sunday):
+        approved = client.post(f"/api/time-log-entries/{row.id}/approve", headers=world.lead_h)
+        assert approved.status_code == 200, approved.text
 
     summary = client.get(f"/api/projects/{project_id}/executive-dashboard", headers=world.bu_h).json()["summary"]
 
@@ -44,5 +48,4 @@ def test_tracked_session_on_a_saturday_is_kept(client, db, make, world, governed
 
     assert ended.status_code == 200, ended.text
     entry = db.query(models.TimeLogEntry).filter_by(task_id=subtask.id).one()
-    assert entry.sat_hours == 1.0
-    assert entry_total(entry) == 1.0
+    assert (entry.work_date, entry.hours) == (last_saturday.date(), 1.0)

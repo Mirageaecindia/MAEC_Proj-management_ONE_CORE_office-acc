@@ -32,28 +32,9 @@ def dash(make, world):
     return project_id, node
 
 
-def add_entry(make, project_id, node, employee, week, status="pending_review", **days):
-    values = {
-        "mon_hours": 0.0,
-        "tue_hours": 0.0,
-        "wed_hours": 0.0,
-        "thu_hours": 0.0,
-        "fri_hours": 0.0,
-        "sat_hours": 0.0,
-        "sun_hours": 0.0,
-    }
-    values.update(days)
-    entry = models.TimeLogEntry(
-        project_id=project_id,
-        task_id=node.id,
-        employee_id=employee.id,
-        week_start_date=week,
-        approval_status=status,
-        **values,
-    )
-    make.db.add(entry)
-    make.db.commit()
-    return entry
+def add_entry(make, project_id, node, employee, day, hours, status="pending_review"):
+    """One day's hours, as Logout banks them."""
+    return make.time_entry(project_id, node, employee, hours, status=status, day=day)
 
 
 def dashboard(client, world, project_id):
@@ -77,8 +58,8 @@ def bar_months(body):
 def test_approved_hours_in_two_months_are_separate_independent_bars(client, world, make, dash):
     project_id, node = dash
 
-    add_entry(make, project_id, node, world.emp1, date(2026, 8, 3), status="approved", mon_hours=4.0)
-    add_entry(make, project_id, node, world.emp1, date(2026, 9, 7), status="approved", mon_hours=6.0)
+    add_entry(make, project_id, node, world.emp1, date(2026, 8, 3), 4.0, status="approved")
+    add_entry(make, project_id, node, world.emp1, date(2026, 9, 7), 6.0, status="approved")
 
     body = dashboard(client, world, project_id)
 
@@ -91,7 +72,8 @@ def test_approved_hours_in_two_months_are_separate_independent_bars(client, worl
 def test_week_straddling_month_boundary_uses_the_real_work_month(client, world, make, dash):
     project_id, node = dash
 
-    add_entry(make, project_id, node, world.emp1, date(2026, 8, 31), status="approved", thu_hours=5.0, fri_hours=5.0)
+    add_entry(make, project_id, node, world.emp1, date(2026, 9, 3), 5.0, status="approved")
+    add_entry(make, project_id, node, world.emp1, date(2026, 9, 4), 5.0, status="approved")
 
     body = dashboard(client, world, project_id)
 
@@ -102,14 +84,14 @@ def test_week_straddling_month_boundary_uses_the_real_work_month(client, world, 
 
 def test_new_approved_hours_update_total_and_add_a_new_month_bar(client, world, make, dash):
     project_id, node = dash
-    add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), status="approved", mon_hours=5.0)
+    add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), 5.0, status="approved")
 
     before = dashboard(client, world, project_id)
     assert before["summary"]["total_hours_consumption"] == 5.0
     assert consumed(before, "2026-07") == 5.0
     assert "2026-08" not in bar_months(before)
 
-    add_entry(make, project_id, node, world.emp1, date(2026, 8, 3), status="approved", mon_hours=4.0)
+    add_entry(make, project_id, node, world.emp1, date(2026, 8, 3), 4.0, status="approved")
 
     after = dashboard(client, world, project_id)
     assert after["summary"]["total_hours_consumption"] == 9.0
@@ -120,10 +102,10 @@ def test_new_approved_hours_update_total_and_add_a_new_month_bar(client, world, 
 
 def test_more_hours_in_an_existing_month_only_move_that_month(client, world, make, dash):
     project_id, node = dash
-    add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), status="approved", mon_hours=5.0)
-    add_entry(make, project_id, node, world.emp1, date(2026, 8, 3), status="approved", mon_hours=4.0)
+    add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), 5.0, status="approved")
+    add_entry(make, project_id, node, world.emp1, date(2026, 8, 3), 4.0, status="approved")
 
-    add_entry(make, project_id, node, world.emp1, date(2026, 7, 13), status="approved", tue_hours=3.0)
+    add_entry(make, project_id, node, world.emp1, date(2026, 7, 14), 3.0, status="approved")
 
     body = dashboard(client, world, project_id)
     assert consumed(body, "2026-07") == 8.0
@@ -133,8 +115,8 @@ def test_more_hours_in_an_existing_month_only_move_that_month(client, world, mak
 
 def test_pending_hours_are_excluded_from_total_and_chart(client, world, make, dash):
     project_id, node = dash
-    add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), status="approved", mon_hours=3.0)
-    add_entry(make, project_id, node, world.emp1, date(2026, 8, 3), status="pending_review", mon_hours=8.0)
+    add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), 3.0, status="approved")
+    add_entry(make, project_id, node, world.emp1, date(2026, 8, 3), 8.0, status="pending_review")
 
     body = dashboard(client, world, project_id)
 
@@ -146,7 +128,7 @@ def test_pending_hours_are_excluded_from_total_and_chart(client, world, make, da
 
 def test_rejected_hours_are_excluded_from_total_and_chart(client, world, make, dash):
     project_id, node = dash
-    add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), status="rejected", mon_hours=9.0)
+    add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), 9.0, status="rejected")
 
     body = dashboard(client, world, project_id)
 
@@ -154,40 +136,24 @@ def test_rejected_hours_are_excluded_from_total_and_chart(client, world, make, d
     assert consumed(body, "2026-07") in (None, 0.0)
 
 
-def test_real_weekly_lead_approval_counts_the_engineers_hours(client, world, make, dash):
+def test_the_leads_approval_of_a_day_counts_the_engineers_hours(client, world, make, dash):
     project_id, node = dash
-    add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), status="pending_review", mon_hours=6.0)
+    row = add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), 6.0, status="pending_review")
 
     pending = dashboard(client, world, project_id)
     assert pending["summary"]["total_hours_consumption"] == 0.0
 
-    make.db.add(
-        models.WeeklyHoursSubmission(
-            project_id=project_id,
-            employee_id=world.emp1.id,
-            week_start_date=date(2026, 7, 6),
-            status="approved",
-        )
-    )
-    make.db.commit()
+    assert client.post(f"/api/time-log-entries/{row.id}/approve", headers=world.lead_h).status_code == 200
 
     approved = dashboard(client, world, project_id)
     assert approved["summary"]["total_hours_consumption"] == 6.0
     assert consumed(approved, "2026-07") == 6.0
 
 
-def test_rejected_week_excludes_its_hours(client, world, make, dash):
+def test_a_rejected_day_excludes_its_hours(client, world, make, dash):
     project_id, node = dash
-    add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), status="pending_review", mon_hours=6.0)
-    make.db.add(
-        models.WeeklyHoursSubmission(
-            project_id=project_id,
-            employee_id=world.emp1.id,
-            week_start_date=date(2026, 7, 6),
-            status="rejected",
-        )
-    )
-    make.db.commit()
+    row = add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), 6.0, status="pending_review")
+    assert client.post(f"/api/time-log-entries/{row.id}/reject", headers=world.lead_h).status_code == 200
 
     body = dashboard(client, world, project_id)
 
@@ -197,9 +163,10 @@ def test_rejected_week_excludes_its_hours(client, world, make, dash):
 
 def test_total_always_equals_the_sum_of_the_monthly_bars(client, world, make, dash):
     project_id, node = dash
-    add_entry(make, project_id, node, world.emp1, date(2026, 8, 3), status="approved", mon_hours=4.0)
-    add_entry(make, project_id, node, world.emp1, date(2026, 8, 31), status="approved", thu_hours=5.0, fri_hours=5.0)
-    add_entry(make, project_id, node, world.emp1, date(2026, 9, 7), status="approved", mon_hours=2.0)
+    add_entry(make, project_id, node, world.emp1, date(2026, 8, 3), 4.0, status="approved")
+    add_entry(make, project_id, node, world.emp1, date(2026, 9, 3), 5.0, status="approved")
+    add_entry(make, project_id, node, world.emp1, date(2026, 9, 4), 5.0, status="approved")
+    add_entry(make, project_id, node, world.emp1, date(2026, 9, 7), 2.0, status="approved")
 
     body = dashboard(client, world, project_id)
 
@@ -209,7 +176,7 @@ def test_total_always_equals_the_sum_of_the_monthly_bars(client, world, make, da
 
 def test_hours_from_a_project_the_engineer_is_not_approved_for_are_hidden(client, world, make, dash):
     project_id, node = dash
-    add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), status="approved", mon_hours=4.0)
+    add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), 4.0, status="approved")
 
     make.db.query(models.ResourceBooking).filter_by(project_id=project_id).delete()
     make.db.commit()

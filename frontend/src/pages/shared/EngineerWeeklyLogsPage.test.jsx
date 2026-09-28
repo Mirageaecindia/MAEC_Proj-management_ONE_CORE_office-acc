@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { EngineerWeeklyLogsPage } from './EngineerWeeklyLogsPage';
@@ -51,6 +51,7 @@ const NODES = [
   },
 ];
 
+// One row per subtask, engineer and day (Thursday 24 Sep 2026), as GET /timesheet returns them.
 const ENTRIES = [
   {
     id: 1,
@@ -60,18 +61,14 @@ const ENTRIES = [
     task_name: 'subtask 1',
     employee_id: 3,
     employee_name: 'Ritu',
-    week_start_date: '2026-09-21',
-    mon_hours: 0,
-    tue_hours: 0,
-    wed_hours: 0,
-    thu_hours: 0.02,
-    fri_hours: 0,
-    sat_hours: 0,
-    sun_hours: 0,
-    total_hours: 0.02,
+    work_date: '2026-09-24',
+    hours: 0.02,
     approval_status: 'pending_review',
     reviewed_by: null,
     reviewed_at: null,
+    review_reason: null,
+    finished: true,
+    can_review: false,
   },
   {
     id: 2,
@@ -81,18 +78,14 @@ const ENTRIES = [
     task_name: 'subtask 2',
     employee_id: 3,
     employee_name: 'Ritu',
-    week_start_date: '2026-09-21',
-    mon_hours: 0,
-    tue_hours: 0,
-    wed_hours: 0,
-    thu_hours: 0.01,
-    fri_hours: 0,
-    sat_hours: 0,
-    sun_hours: 0,
-    total_hours: 0.01,
+    work_date: '2026-09-24',
+    hours: 0.01,
     approval_status: 'pending_review',
     reviewed_by: null,
     reviewed_at: null,
+    review_reason: null,
+    finished: true,
+    can_review: false,
   },
 ];
 
@@ -103,40 +96,32 @@ const TIMELINE = {
   phases: [],
 };
 
-let submissionsData = [];
+let entriesData = [];
 
 const ROUTES = [
   [/\/api\/projects$/, () => PROJECTS.map((project) => ({ ...project, my_role: currentRole }))],
   [/\/api\/projects\/1\/wbs-structure$/, NODES],
-  [/\/api\/projects\/1\/timesheet\?/, ENTRIES],
-  [/\/api\/projects\/1\/weekly-hours-submissions\?/, submissionsData],
+  [/\/api\/projects\/1\/timesheet\?/, () => entriesData],
   [/\/api\/projects\/1\/timeline-logs$/, TIMELINE],
 ];
 
 function fakeApi(url, options) {
   const method = (options && options.method) || 'GET';
-  console.log('FETCH', method, url);
-  if (method === 'POST') {
-    if (/\/weekly-hours\/approve$/.test(url)) {
-      submissionsData.length = 0;
-      submissionsData.push({ employee_id: 3, status: 'approved', week_start_date: '2026-09-21' });
-      return Promise.resolve(
-        new Response(JSON.stringify({ ok: true }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      );
-    }
-    if (/\/weekly-hours\/reject$/.test(url)) {
-      submissionsData.length = 0;
-      submissionsData.push({ employee_id: 3, status: 'rejected', week_start_date: '2026-09-21' });
-      return Promise.resolve(
-        new Response(JSON.stringify({ ok: true }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      );
-    }
+  const decision = url.match(/\/time-log-entries\/(\d+)\/(approve|reject)$/);
+  if (method === 'POST' && decision) {
+    const [, id, action] = decision;
+    const reason = JSON.parse(options.body).reason;
+    entriesData = entriesData.map((entry) =>
+      String(entry.id) === id
+        ? {
+            ...entry,
+            approval_status: action === 'approve' ? 'approved' : 'rejected',
+            reviewed_by: 'Anita Kumar',
+            review_reason: reason,
+          }
+        : entry,
+    );
+    return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
   }
   const match = ROUTES.find(([pattern]) => pattern.test(url));
   const fixture = match && (typeof match[1] === 'function' ? match[1]() : match[1]);
@@ -157,7 +142,7 @@ function renderPage(route = '/weekly-logs?projectId=1&employeeId=3&weekStart=202
 describe('Engineer Weekly Logs details page', () => {
   beforeEach(() => {
     currentRole = 'engineer';
-    submissionsData.length = 0;
+    entriesData = ENTRIES;
     vi.stubGlobal('fetch', vi.fn(fakeApi));
   });
   afterEach(() => {
@@ -165,7 +150,7 @@ describe('Engineer Weekly Logs details page', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows the engineer, week range, and every subtask as a separate entry', async () => {
+  it('shows the engineer, the week, and one row per subtask and day', async () => {
     const { container } = renderPage();
 
     expect(await screen.findByText('Ritu')).toBeTruthy();
@@ -175,89 +160,59 @@ describe('Engineer Weekly Logs details page', () => {
     expect(within(details).getByText('subtask 1')).toBeTruthy();
     expect(within(details).getByText('subtask 2')).toBeTruthy();
     expect(within(details).getByText('task 1')).toBeTruthy();
-    expect(within(details).getByText('task 2')).toBeTruthy();
     expect(within(details).getByText('1.1')).toBeTruthy();
-    expect(within(details).getAllByText('Done')).toHaveLength(2);
-    expect(within(details).getByText(/Thu, Sep 24 · 0\.02 hrs/)).toBeTruthy();
-    expect(within(details).getByText(/Thu, Sep 24 · 0\.01 hrs/)).toBeTruthy();
+    expect(within(details).getAllByText('Thu, Sep 24')).toHaveLength(2);
     expect(within(details).getByText('0.02 hrs')).toBeTruthy();
     expect(within(details).getByText('0.01 hrs')).toBeTruthy();
+    expect(within(details).getAllByText('Pending review')).toHaveLength(2);
   });
 
-  it('engineer sees only the read-only approval status in the APPROVAL column — no Submit, no Approve/Reject', async () => {
+  it('an engineer only reads the status of each day', async () => {
     renderPage();
 
     await screen.findByText('subtask 1');
-    expect(screen.getAllByText('Not Submitted')).toHaveLength(2);
-    expect(screen.queryAllByRole('button', { name: 'Submit for Approval' })).toHaveLength(0);
     expect(screen.queryAllByRole('button', { name: 'Approve' })).toHaveLength(0);
     expect(screen.queryAllByRole('button', { name: 'Reject' })).toHaveLength(0);
   });
+});
 
-  it('engineer APPROVAL column reflects the real week status (submitted/approved) as a read-only display, no action buttons', async () => {
-    submissionsData.push({ employee_id: 3, status: 'submitted', week_start_date: '2026-09-21' });
-    renderPage();
-
-    expect(await screen.findByText('subtask 1'));
-    expect(screen.getAllByText('Submitted for Approval')).toHaveLength(2);
-    expect(screen.queryAllByRole('button', { name: 'Submit for Approval' })).toHaveLength(0);
-    expect(screen.queryAllByRole('button', { name: 'Approve' })).toHaveLength(0);
-    expect(screen.queryAllByRole('button', { name: 'Reject' })).toHaveLength(0);
-  });
-
-  it('tampering with employeeId in the URL still shows only the engineer’s own rows with no approval controls', async () => {
-    renderPage('/weekly-logs?projectId=1&employeeId=9999&weekStart=2026-09-21');
-
-    expect(await screen.findByText('Ritu')).toBeTruthy();
-    expect(screen.getByText('subtask 1')).toBeTruthy();
-    expect(screen.queryAllByRole('button', { name: 'Approve' })).toHaveLength(0);
-  });
-
-  it('lead viewing the engineer’s weekly log detail sees a read-only view — no Approve/Reject (approval lives on the Timeline & Logs page)', async () => {
+describe('Reviewing days on the Engineer Weekly Logs page', () => {
+  beforeEach(() => {
     currentRole = 'lead';
-    submissionsData.push({ employee_id: 3, status: 'submitted', week_start_date: '2026-09-21' });
-    renderPage();
-
-    await screen.findByText('subtask 1');
-    expect(screen.getAllByText('Submitted for Approval')).toHaveLength(2);
-    expect(screen.queryAllByRole('button', { name: 'Approve' })).toHaveLength(0);
-    expect(screen.queryAllByRole('button', { name: 'Reject' })).toHaveLength(0);
+    entriesData = ENTRIES.map((entry) => ({ ...entry, can_review: true }));
+    vi.stubGlobal('fetch', vi.fn(fakeApi));
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
   });
 
-  it('lead still sees full log details (hours/dates/status) in the read-only detail view', async () => {
-    currentRole = 'lead';
-    submissionsData.push({ employee_id: 3, status: 'submitted', week_start_date: '2026-09-21' });
-    const { container } = renderPage();
-
-    await screen.findByText('subtask 1');
-    const details = container.querySelector('.details-table');
-    expect(within(details).getByText('subtask 1')).toBeTruthy();
-    expect(within(details).getByText('subtask 2')).toBeTruthy();
-    expect(within(details).getByText(/Thu, Sep 24 · 0\.02 hrs/)).toBeTruthy();
-    expect(within(details).getByText(/Thu, Sep 24 · 0\.01 hrs/)).toBeTruthy();
-    expect(screen.queryAllByRole('button', { name: 'Approve' })).toHaveLength(0);
-    expect(screen.queryAllByRole('button', { name: 'Reject' })).toHaveLength(0);
-  });
-
-  it('lead sees the approved status as read-only after the week was approved on the main page', async () => {
-    currentRole = 'lead';
-    submissionsData.push({ employee_id: 3, status: 'approved', week_start_date: '2026-09-21' });
+  it('approves one day at a time and names the reviewer', async () => {
     renderPage();
 
-    await screen.findByText('subtask 1');
-    expect(screen.getAllByText('Approved')).toHaveLength(2);
-    expect(screen.queryAllByRole('button', { name: 'Approve' })).toHaveLength(0);
-    expect(screen.queryAllByRole('button', { name: 'Reject' })).toHaveLength(0);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Approve' }))[0]);
+
+    expect(await screen.findByText('Approved')).toBeTruthy();
+    expect(screen.getByText('by Anita Kumar')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Approve' })).toHaveLength(1); // the other day is still pending
   });
 
-  it('lead sees the rejected status as read-only after the week was rejected on the main page', async () => {
-    currentRole = 'lead';
-    submissionsData.push({ employee_id: 3, status: 'rejected', week_start_date: '2026-09-21' });
+  it('taking approved hours back asks for a reason and shows it', async () => {
+    entriesData = [{ ...entriesData[0], approval_status: 'approved' }];
     renderPage();
 
-    await screen.findByText('subtask 1');
-    expect(screen.getAllByText('Rejected')).toHaveLength(2);
-    expect(screen.queryAllByRole('button', { name: 'Approve' })).toHaveLength(0);
-    expect(screen.queryAllByRole('button', { name: 'Reject' })).toHaveLength(0);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject' }));
+    const confirm = screen.getByRole('button', { name: 'Confirm reject' });
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Reason for rejecting approved hours'), {
+      target: { value: 'Wrong subtask' },
+    });
+    fireEvent.click(confirm);
+
+    expect(await screen.findByText('Rejected')).toBeTruthy();
+    expect(screen.getByText('Wrong subtask')).toBeTruthy();
+    const call = fetch.mock.calls.find(([url]) => /\/time-log-entries\/1\/reject$/.test(url));
+    expect(JSON.parse(call[1].body)).toEqual({ reason: 'Wrong subtask' });
+    expect(screen.queryByRole('button', { name: 'Reject' })).toBeNull(); // rejected hours are final here
   });
 });

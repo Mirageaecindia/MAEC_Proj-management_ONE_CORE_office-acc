@@ -67,7 +67,7 @@ def test_dashboard_figures_for_reference_scenario(client, world, governed):
 
 def test_project_at_alert_threshold_reports_warning_and_splits_the_chart(client, make, world, governed):
     project_id, _, node_b, _ = governed
-    make.time_entry(project_id, node_b, world.emp1, 60, status="approved", week=date(2026, 9, 14))
+    make.time_entry(project_id, node_b, world.emp1, 60, status="approved", day=date(2026, 9, 14))
 
     data = _dashboard(client, world.bu_h, project_id)
 
@@ -82,17 +82,13 @@ def test_project_at_alert_threshold_reports_warning_and_splits_the_chart(client,
 
 
 def test_usage_counts_approved_hours_only(client, make, world, governed):
-    project_id, node_a, node_b, _ = governed
-    make.time_entry(project_id, node_a, world.emp1, 25, status="rejected", week=date(2026, 9, 14))
-    # Approving the engineer's whole week approves its pending rows too (weekly route).
-    week = models.WeeklyHoursSubmission(
-        project_id=project_id, employee_id=world.emp1.id, week_start_date=date(2026, 9, 7), status="approved"
-    )
-    make._save(week)
+    project_id, node_a, node_b, pending = governed
+    make.time_entry(project_id, node_a, world.emp1, 25, status="rejected", day=date(2026, 9, 14))
+    assert client.post(f"/api/time-log-entries/{pending.id}/approve", headers=world.lead_h).status_code == 200
 
     data = _dashboard(client, world.bu_h, project_id)
 
-    assert data["summary"]["approved_hours"] == 50.0  # 30 row-approved + 20 week-approved
+    assert data["summary"]["approved_hours"] == 50.0  # 30 + the 20 approved just now
     assert data["summary"]["pending_hours"] == 0.0
     assert data["summary"]["rejected_hours"] == 25.0
     assert data["summary"]["logged_hours"] == 50.0  # rejected hours excluded
@@ -102,7 +98,7 @@ def test_usage_counts_approved_hours_only(client, make, world, governed):
 def test_budget_burn_past_the_contract_value_is_flagged_as_over_budget(client, make, world, governed):
     # TODO N5: 130 approved of 100 target hours on a 100,000 contract.
     project_id, _, node_b, _ = governed
-    make.time_entry(project_id, node_b, world.emp1, 100, status="approved", week=date(2026, 9, 14))
+    make.time_entry(project_id, node_b, world.emp1, 100, status="approved", day=date(2026, 9, 14))
 
     burn = _dashboard(client, world.bu_h, project_id)["commercial_budget_burn"]
 

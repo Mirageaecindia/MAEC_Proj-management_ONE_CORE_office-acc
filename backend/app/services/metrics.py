@@ -3,9 +3,8 @@ budget burn, per-discipline breakdown and the monthly chart.
 
 Consumption and the governance level are APPROVED hours measured at project
 level against the BU Head's baseline (target effort hours + approved
-extensions); see app/domain/governance.py. An hour is approved when its row or
-its engineer's week was approved (app/domain/timesheets.effective_status);
-rejected hours never count. WBS planned hours drive SPI, the planned series of
+extensions); see app/domain/governance.py. Hours are approved per day
+(app/services/hours_review.py); rejected hours never count. WBS planned hours drive SPI, the planned series of
 the monthly chart and the (informational) per-discipline breakdown.
 
 Every figure is derived from stored rows (wbs_nodes, time_log_entries,
@@ -20,7 +19,7 @@ from sqlalchemy.orm import Session
 import models
 from app.domain.calendar import distribute_hours_over_months, month_key, month_label
 from app.domain.governance import NORMAL, read_governance, split_monthly_consumption
-from app.domain.timesheets import APPROVED, PENDING_REVIEW, effective_status, entry_total
+from app.domain.timesheets import APPROVED, PENDING_REVIEW
 from app.repositories.work import WorkRepository
 
 UNASSIGNED = "Unassigned"
@@ -33,12 +32,8 @@ class ProjectMetricsService:
     def dashboard_data(self, project: models.Project) -> dict:
         nodes = self.work.nodes_for_project(project.id)
         entries = self.work.entries_for_project(project.id)
-        totals = {entry.id: entry_total(entry) for entry in entries}
-        weeks = self.work.week_statuses(project.id)
-        statuses = {
-            entry.id: effective_status(entry.approval_status, weeks.get((entry.employee_id, entry.week_start_date)))
-            for entry in entries
-        }
+        totals = {entry.id: float(entry.hours or 0) for entry in entries}
+        statuses = {entry.id: entry.approval_status for entry in entries}
 
         scheduled_hours = sum(node.estimated_hours or 0 for node in nodes)
         approved_hours = sum(totals[e.id] for e in entries if statuses[e.id] == APPROVED)
@@ -230,7 +225,7 @@ class ProjectMetricsService:
                     planned[key] += hours
         for entry in entries:
             if totals[entry.id] > 0 and statuses[entry.id] == APPROVED:
-                logged[month_key(entry.week_start_date)] += totals[entry.id]
+                logged[month_key(entry.work_date)] += totals[entry.id]
         split = split_monthly_consumption(logged, alert_hours)
 
         return [

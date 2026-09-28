@@ -4,7 +4,7 @@ from collections import defaultdict
 
 import models
 from app.core.errors import NotFoundError
-from app.domain.timesheets import APPROVED, PENDING_REVIEW, REJECTED, effective_status, entry_total
+from app.domain.timesheets import APPROVED, PENDING_REVIEW, REJECTED
 from app.domain.wbs import TO_DO, is_finished
 from app.repositories.projects import ProjectRepository
 from app.repositories.work import WorkRepository
@@ -29,7 +29,6 @@ class WorkSummaryService:
 
         nodes = self.work.nodes_for_project(project_id, order_by_code=True)
         entries = self.work.entries_for_project(project_id)
-        weeks = self.work.week_statuses(project_id)
         node_by_id = {node.id: node for node in nodes}
 
         phase_stats = defaultdict(_stats)
@@ -59,10 +58,10 @@ class WorkSummaryService:
         lead_pending_entries = defaultdict(int)
         task_eng_approved = defaultdict(float)
         for entry in entries:
-            status = effective_status(entry.approval_status, weeks.get((entry.employee_id, entry.week_start_date)))
+            status = entry.approval_status
             if status == REJECTED:
                 continue  # rejected hours never count
-            total = entry_total(entry)
+            total = float(entry.hours or 0)
             task = node_by_id.get(entry.task_id)
             lead = task.assigned_lead if task else None
             eng_logged[entry.employee_id] += total

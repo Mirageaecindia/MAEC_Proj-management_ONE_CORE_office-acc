@@ -28,6 +28,7 @@ export function TaskDetailsPage() {
     const navigate = useNavigate();
     const { user, role, authHeaders, logout } = useAuth();
     const isStaff = role === 'engineer'; // everyone but the BU Head
+    const isBuHead = role === 'bu_head';
 
     const nodeId = Number(searchParams.get('nodeId')) || null;
     const projectId = Number(searchParams.get('projectId')) || null;
@@ -440,8 +441,8 @@ export function TaskDetailsPage() {
                             )}
                         </div>
 
-                        {/* Your Actions — Lead approval workflow */}
-                        {isLead && node && (
+                        {/* Your Actions: the lead's; the BU Head approves a task its lead worked on themselves */}
+                        {node && (isLead || (isBuHead && node.node_type === 'task' && node.deliverable_status === 'Submitted for Approval')) && (
                             <div className="td-actions">
                                 <h3>Your Actions</h3>
                                 {node.node_type === 'subtask' ? (
@@ -490,6 +491,11 @@ export function TaskDetailsPage() {
                                         >
                                             {updating ? 'Approving...' : 'Approve Task'}
                                         </button>
+                                        {isBuHead && (
+                                            <div className="td-actions-note">
+                                                You approve a task when its lead did part of the work themselves; otherwise its lead approves it.
+                                            </div>
+                                        )}
                                     </div>
                                 ) : currentStatusIdx >= statusSteps.length - 1 ? (
                                     <div className="td-actions-note">This task has reached its final status.</div>

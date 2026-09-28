@@ -77,7 +77,7 @@ sequenceDiagram
     L->>API: Build WBS (phases → tasks → subtasks), assign engineers
     E->>API: Move task To Do → In-Progress
     E->>API: Login / heartbeat / Logout on a subtask
-    API->>API: Bank tracked hours into the weekly timesheet (any day)
+    API->>API: Bank the day's hours on the subtask (any day)
     L->>API: Approve / reject timesheet entries
     E->>API: Subtasks Done → submit task for approval
     L->>API: Approve task
@@ -101,7 +101,7 @@ Step by step:
    - Subtasks are single-day units of 1–4 hours. Leads can create them, and engineers can create them under their own tasks.
 4. **Execution (Engineer).**
    - The engineer opens a subtask in Task Details and presses **Login**; **Logout** ends the work. Worked time is Logout − Login (idle time included), paused while the laptop is off, capped at 8 hours per day. This is the only source of hours: there is no manual timesheet.
-   - On Logout, the hours are added to the login day's column in the weekly timesheet row for the subtask.
+   - On Logout, the hours are added to the day's row for the subtask (one row per subtask, engineer and day).
    - The engineer moves statuses forward. A task can be submitted only once all its subtasks are Done.
 5. **Review (Lead).** The Lead approves or rejects timesheet entries (Timeline & Logs), and approves submitted tasks (Task Details).
 6. **Governance (BU Head).**
@@ -284,7 +284,7 @@ $1`sharepoint_disciplines` (JSON list), `sharepoint_site_url`, `archived_at` (se
 | `resource_bookings` | Engineer allocated to a project | `project_id`, `employee_id`, `planned_hours`, `utilization_rate` (%), `start_date`, `end_date`, `approval_status` (`draft` → `pending_approval` → `approved`), `submitted_at`, `approved_at` |
 | `wbs_nodes` | Tasks (level 1) and subtasks (level 2) | `project_id`, `parent_id`, `wbs_code`, `task_name`, `phase`, `assigned_lead(_user_id)`, `assigned_engineer_id`, `estimated_hours`, `deliverable_status`, `start_date`, `end_date`, `target_due_date`, `actual_start_datetime`, `actual_end_datetime`, `description`, `severity` |
 | `wbs_node_history` | Status changes and comments per node | `node_id`, `user_name`, `action` (`status_change`/`comment`), `old_status`, `new_status`, `comment` |
-| `time_log_entries` | Weekly timesheet row (one per project × task × employee × week) | `week_start_date` (Monday), `mon_hours` … `sun_hours`, `approval_status` (`pending_review`/`approved`/`rejected`), `reviewed_by`, `reviewed_at` |
+| `time_log_entries` | One day's hours (one per project × subtask × employee × day) | `work_date`, `hours`, `approval_status`, `review_reason` (`pending_review`/`approved`/`rejected`), `reviewed_by`, `reviewed_at` |
 | `time_sessions` | Automatic tracking session on a subtask | `subtask_id`, `task_id`, `employee_id`, `login_at`, `logout_at`, `active_seconds`, `status` (`active`/`ended`) |
 | `extension_requests` | Lead's request for extra hours | `requested_hours`, `justification`, `status` (`pending`/`approved`/`rejected`), `decision_comments`, `decided_by`, `decided_at` |
 $1, `archive`, `unarchive`, `edit_project` (before → after per field)), plus a snapshot: `discipline`, `consumption_pct`, `threshold_pct`, `consumption_hours`, `comments`, `created_by`, `requested_hours` |
@@ -326,7 +326,7 @@ Shared helpers that the Lead/Engineer code in `main.py` needs (access rules, das
 | Subtask planned hours | Whole number from **1 to 4**. Start date must equal end date (a single-day unit). |
 | Resource booking planned hours | Weekdays in the booking range × 8. Calculated by the server (the booking % is not applied). |
 | Allocation cap | Sum of an engineer's `utilization_rate` across all projects must be ≤ 100%. Otherwise the API returns 400 with `X-Error-Code: ALLOCATION_LIMIT`. |
-| Weekly timesheet total | **All seven days** (offices work different weeks: KSA Sun–Thu, Indian offices often Saturday). The Lead's approval decides which hours stand. |
+| Weekly timesheet total | The sum of the week's daily rows, **all seven days** (offices work different weeks: KSA Sun–Thu, Indian offices often Saturday). Each day's approval decides whether it counts. `total_hours` in `app/domain/timesheets.py` is the one totals function. |
 
 ### 7.3 Status workflows
 
@@ -358,14 +358,18 @@ router `app/api/routers/engineer/tracking.py`, tests `tests/test_tracking.py`.
 - **Worked time = Logout − Login.** Nothing is measured in the browser: idle time and other programs count, and nothing logs the engineer out.
 - **Heartbeat:** while the engineer is signed in to MAEC, every open tab posts `/heartbeat` once a minute (`hooks/useTracking.js`, mounted in `App.jsx`), including background tabs. The server stores `last_seen_at`.
 - **Laptop off:** when the next heartbeat comes more than **5 minutes** after the last one, the session is closed at `last_seen_at` (the gap is not counted), and a new session opens on the same subtask if Login is still allowed. A Logout after such a gap also ends at `last_seen_at`.
-- **Logout** banks the time into the login day's column (weekends included) of the weekly row for the subtask, at most **8 hours per engineer per day**. The Lead's approval decides what counts toward usage.
+- **Logout** banks the time into the login day's row for the subtask (weekends included), at most **8 hours per engineer per day**. The day's approval decides whether it counts toward usage.
 - **Two tabs at once:** `time_sessions.version_id` (optimistic locking) makes sure only one of two simultaneous heartbeats closes and resumes a session, so time is banked once.
 - The engineer sees only the Login/Logout state, never a timer or hours.
-- The Weekly Hours Logging sheet on Timeline & Logs shows only tracked subtask rows (`?source=tracking`).
 
-### 7.5 Timesheet approval
-- Entries start as `pending_review`. The task's assigned lead approves or rejects each entry.
-- While a project is soft-locked, engineers can't log hours and leads can't approve.
+### 7.5 Hours approval (`app/services/hours_review.py`)
+Decided 2026-09-28: approval is **per day**; there is no week submission or week approval.
+- **Reviewer of a row:** a project lead's own hours → the BU Head; otherwise the lead of the row's task while they lead the project and their lead period is running; otherwise (no lead, replaced, period over, or the lead is the engineer) → the BU Head. Nobody approves their own hours.
+- **Only finished days** (before today) are reviewed, so approved hours never change under a later Logout. More hours on an already-reviewed day put it back to `pending_review`.
+- **Transitions** (`review_transition` in `app/domain/timesheets.py`): pending → approved or rejected; approved → rejected only with a reason (a `GovernanceAction` `hours_unapproved` on the BU Head's dashboard); rejected → approved never (corrections, TODO H2).
+- **Bulk:** `POST /projects/{id}/hours/review` approves (or rejects) every pending, finished day in a week that the caller is responsible for, for one engineer or all. `GET /projects/{id}/timesheet` returns each row with `can_review` for the caller.
+- **Tasks:** a task is approved by its lead, unless the lead did the task or any of its subtasks themselves; then the BU Head approves it.
+- While a project is soft-locked nobody approves, the BU Head included.
 
 ### 7.6 Resource booking approval
 - Draft → Lead **Submit** (every booking on the project becomes `pending_approval`, plus a notification to the BU Head) → BU Head **Approve** (every booking becomes `approved`) or **Reject** with a required reason (every booking goes back to `draft` so the Lead can adjust and re-submit; the reason is in the Leads' notification). Either decision marks the notification read.
@@ -376,7 +380,7 @@ router `app/api/routers/engineer/tracking.py`, tests `tests/test_tracking.py`.
 |---|---|
 | Baseline hours | `target_effort_hours` + `extension_approved_hours` (whole project) |
 | WBS planned hours | Sum of `estimated_hours` over all WBS nodes (shown for comparison; `wbs_exceeds_target` flags a WBS larger than the target) |
-| Approved hours (usage) | Hours (all seven days) of rows the Lead approved, or rows in a week the Lead approved (`effective_status` in `app/domain/timesheets.py`). Pending and rejected hours never count |
+| Approved hours (usage) | Hours of the days that were approved (one SQL sum). Pending and rejected hours never count |
 | Logged hours | Approved + pending (rejected excluded); shown for information, with `rejected_hours` separately |
 | Consumption % | approved ÷ baseline × 100 |
 | Governance level | `normal`; `warning` at ≥ `governance_threshold_pct`; `hard_stop` at ≥ 100%. No baseline (target not set) → not configured, always normal |
@@ -449,12 +453,13 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 **Time**
 | Method | Path | Roles | Purpose |
 |---|---|---|---|
-| GET | `/api/projects/{id}/timesheet?week_start=&source=tracking` | all (scoped) | Weekly timesheet rows |
-| POST | `/api/time-log-entries/{id}/approve` · `/reject` | Lead (assigned) | Review an entry (blocked when soft-locked) |
+| GET | `/api/projects/{id}/timesheet?week_start=` | all (scoped) | The week's daily rows, each with `can_review` for the caller |
+| POST | `/api/time-log-entries/{id}/approve` · `/reject` | the row's reviewer | Decide one day; `reject` takes `{reason}`, required for approved hours (blocked when soft-locked) |
+| POST | `/api/projects/{id}/hours/review` | project leads, BU Head | Bulk: every pending, finished day the caller reviews in the week (`action`, `week_start_date`, `employee_id?`) |
 | GET | `/api/projects/{id}/timeline-logs` | all (scoped) | Tasks with actual vs estimated hours, per-phase completion, entries, summary |
 | POST | `/api/subtask-tracking/heartbeat` | Engineer | Keep the session alive (resume after the laptop was off); returns the active session |
 | POST | `/api/subtask-tracking/start` | Engineer | Login on an assigned subtask |
-| POST | `/api/subtask-tracking/logout` | Engineer | Logout: bank Logout − Login into the weekly row |
+| POST | `/api/subtask-tracking/logout` | Engineer | Logout: bank Logout − Login into the day's row |
 
 **Dashboards and governance**
 | Method | Path | Roles | Purpose |

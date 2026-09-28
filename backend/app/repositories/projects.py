@@ -13,7 +13,6 @@ PROJECT_CHILD_MODELS = (
     models.ResourceBooking,
     models.TimeLogEntry,
     models.TimeSession,
-    models.WeeklyHoursSubmission,
     models.GovernanceAction,
     models.ExtensionRequest,
     models.Notification,

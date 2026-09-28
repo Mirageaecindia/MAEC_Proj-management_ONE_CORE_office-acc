@@ -35,7 +35,6 @@ _PROJECT_DATA = (
     models.TimeLogEntry,
     models.TimeSession,
     models.ResourceBooking,
-    models.WeeklyHoursSubmission,
     models.ExtensionRequest,
     models.GovernanceAction,
 )

@@ -26,7 +26,7 @@ from app.domain.governance import (
     read_governance,
     split_monthly_consumption,
 )
-from app.domain.timesheets import APPROVED, PENDING_REVIEW, REJECTED, effective_status
+from app.domain.timesheets import PENDING_REVIEW
 from app.repositories.work import WorkRepository
 
 # --- Pure rules -----------------------------------------------------------------------------
@@ -72,35 +72,19 @@ def test_monthly_split_uses_cumulative_hours():
     assert split == {"2026-08": (50, 0), "2026-09": (30, 20), "2026-10": (0, 20)}
 
 
-@pytest.mark.parametrize(
-    ("entry_status", "week_status", "expected"),
-    [
-        (PENDING_REVIEW, None, PENDING_REVIEW),
-        (PENDING_REVIEW, "submitted", PENDING_REVIEW),
-        (PENDING_REVIEW, APPROVED, APPROVED),  # the Lead approved the whole week
-        (PENDING_REVIEW, REJECTED, REJECTED),
-        (APPROVED, REJECTED, APPROVED),  # a row approval wins
-        (REJECTED, None, REJECTED),
-        (None, None, PENDING_REVIEW),
-    ],
-)
-def test_effective_status_combines_row_and_week_approval(entry_status, week_status, expected):
-    assert effective_status(entry_status, week_status) == expected
-
-
 # --- Workflow through the API ---------------------------------------------------------------
 
 
-def _log(client, world, node, week, **days):
-    """Hours as Logout banks them: a pending weekly row for the Lead to review."""
+def _log(client, world, node, day, hours):
+    """Hours as Logout banks them: one pending day for the task's lead to review."""
     with SessionLocal() as db:
         entry = models.TimeLogEntry(
             project_id=node.project_id,
             task_id=node.id,
             employee_id=world.emp1.id,
-            week_start_date=date.fromisoformat(week),
+            work_date=date.fromisoformat(day),
+            hours=hours,
             approval_status=PENDING_REVIEW,
-            **days,
         )
         db.add(entry)
         db.commit()
@@ -111,14 +95,14 @@ def _approve(client, world, entry_id):
     return client.post(f"/api/time-log-entries/{entry_id}/approve", headers=world.lead_h)
 
 
-def _log_and_approve(client, world, node, week, **days):
-    response = _approve(client, world, _log(client, world, node, week, **days))
+def _log_and_approve(client, world, node, day, hours):
+    response = _approve(client, world, _log(client, world, node, day, hours))
     assert response.status_code == 200, response.text
 
 
 def _reach_baseline(client, world, node):
     """30h already approved + 70h approved now = 100% of the 100h baseline."""
-    _log_and_approve(client, world, node, "2026-09-14", mon_hours=20, tue_hours=20, wed_hours=20, thu_hours=10)
+    _log_and_approve(client, world, node, "2026-09-14", 70)
 
 
 def _notifications(client, headers, project_id, kind):
@@ -141,7 +125,7 @@ def _project(db, project_id):
 def test_pending_hours_do_not_count_until_the_lead_approves(client, db, world, governed):
     project_id, node_a, *_ = governed
 
-    entry_id = _log(client, world, node_a, "2026-09-14", mon_hours=20, tue_hours=20, wed_hours=20, thu_hours=10)
+    entry_id = _log(client, world, node_a, "2026-09-14", 70)
 
     assert _project(db, project_id).timesheets_soft_locked is False  # 120h logged, only 30h approved
     assert _dashboard(client, world, project_id)["governance_status"]["consumption_pct"] == 30.0
@@ -153,7 +137,7 @@ def test_pending_hours_do_not_count_until_the_lead_approves(client, db, world, g
 
 def test_rejected_hours_do_not_count(client, db, world, governed):
     project_id, node_a, *_ = governed
-    entry_id = _log(client, world, node_a, "2026-09-14", mon_hours=20, tue_hours=20, wed_hours=20, thu_hours=10)
+    entry_id = _log(client, world, node_a, "2026-09-14", 70)
 
     assert client.post(f"/api/time-log-entries/{entry_id}/reject", headers=world.lead_h).status_code == 200
 
@@ -165,15 +149,13 @@ def test_rejected_hours_do_not_count(client, db, world, governed):
 
 def test_approving_a_whole_week_counts_its_hours(client, db, world, governed):
     project_id, node_a, *_ = governed
-    _log(client, world, node_a, "2026-09-14", mon_hours=20, tue_hours=20, wed_hours=20, thu_hours=10)
-    week = {"week_start_date": "2026-09-14"}
-    submitted = client.post(f"/api/projects/{project_id}/weekly-hours/submit", json=week, headers=world.eng_h)
-    assert submitted.status_code == 200, submitted.text
+    _log(client, world, node_a, "2026-09-14", 30)
+    _log(client, world, node_a, "2026-09-15", 40)
     assert _project(db, project_id).timesheets_soft_locked is False
 
     approved = client.post(
-        f"/api/projects/{project_id}/weekly-hours/approve",
-        json={**week, "employee_id": world.emp1.id},
+        f"/api/projects/{project_id}/hours/review",
+        json={"action": "approved", "week_start_date": "2026-09-14", "employee_id": world.emp1.id},
         headers=world.lead_h,
     )
 
@@ -185,24 +167,19 @@ def test_approving_a_whole_week_counts_its_hours(client, db, world, governed):
 
 def test_sql_and_dashboard_agree_on_approved_hours(client, db, make, world, governed):
     project_id, node_a, node_b, _ = governed
-    make.time_entry(project_id, node_b, world.emp1, 7, status="rejected", week=date(2026, 9, 14))
-    make.time_entry(project_id, node_a, world.emp2, 9, status="pending_review", week=date(2026, 9, 21))
-    make._save(
-        models.WeeklyHoursSubmission(
-            project_id=project_id, employee_id=world.emp2.id, week_start_date=date(2026, 9, 21), status="approved"
-        )
-    )
+    make.time_entry(project_id, node_b, world.emp1, 7, status="rejected", day=date(2026, 9, 14))
+    make.time_entry(project_id, node_a, world.emp2, 9, status="approved", day=date(2026, 9, 21))
 
     dashboard = _dashboard(client, world, project_id)
 
-    # 30 row-approved + 9 in an approved week; 20 pending and 7 rejected excluded.
+    # 30 + 9 approved; 20 pending and 7 rejected excluded.
     assert WorkRepository(db).approved_hours(project_id) == dashboard["summary"]["approved_hours"] == 39.0
 
 
 def test_reaching_the_threshold_alerts_bu_head_and_project_leads_once(client, db, world, governed):
     project_id, node_a, *_ = governed
 
-    _log_and_approve(client, world, node_a, "2026-09-14", mon_hours=20, tue_hours=20, wed_hours=10)
+    _log_and_approve(client, world, node_a, "2026-09-14", 50)
 
     assert _project(db, project_id).governance_alert_level == WARNING  # 80 of 100 approved
     assert _project(db, project_id).timesheets_soft_locked is False
@@ -211,7 +188,7 @@ def test_reaching_the_threshold_alerts_bu_head_and_project_leads_once(client, db
     assert _notifications(client, world.other_lead_h, project_id, "threshold_warning") == []
 
     # Still in the warning band: no repeat alert.
-    _log_and_approve(client, world, node_a, "2026-09-21", mon_hours=5)
+    _log_and_approve(client, world, node_a, "2026-09-21", 5)
     assert len(_notifications(client, world.bu_h, project_id, "threshold_warning")) == 1
 
 
@@ -280,7 +257,7 @@ def test_approved_extension_lifts_the_automatic_lock(client, db, world, governed
     assert len(_notifications(client, world.lead_h, project_id, "execution_resumed")) == 1
     actions = [a.action for a in db.query(models.GovernanceAction).filter_by(project_id=project_id)]
     assert "resume_execution" in actions
-    _log(client, world, node_a, "2026-09-21", mon_hours=2)
+    _log(client, world, node_a, "2026-09-21", 2)
 
 
 def test_rejected_extension_keeps_the_lock(client, db, world, governed):
@@ -310,7 +287,7 @@ def test_manual_resume_over_the_baseline_is_not_relocked_by_the_next_approval(cl
     )
 
     assert resumed.status_code == 200
-    _log_and_approve(client, world, node_a, "2026-09-21", mon_hours=4)
+    _log_and_approve(client, world, node_a, "2026-09-21", 4)
     project = _project(db, project_id)
     assert project.timesheets_soft_locked is False
     assert project.governance_alert_level == HARD_STOP
@@ -349,7 +326,7 @@ def test_extension_too_small_to_get_below_the_baseline_keeps_the_lock(client, db
     # TODO N14(d): otherwise the unlock would stick, and because the level stays
     # hard_stop, later approvals would never lock the project again.
     project_id, node_a, *_ = governed
-    _log_and_approve(client, world, node_a, "2026-09-14", mon_hours=20, tue_hours=20, wed_hours=20, thu_hours=20)
+    _log_and_approve(client, world, node_a, "2026-09-14", 80)
     assert _project(db, project_id).timesheets_soft_locked is True  # 110 of 100 approved
 
     def approve_extension(hours):

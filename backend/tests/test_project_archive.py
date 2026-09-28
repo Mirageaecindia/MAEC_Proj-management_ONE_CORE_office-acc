@@ -61,7 +61,7 @@ def test_archive_ends_tracking_cancels_the_pending_extension_and_is_audited(clie
     session = db.get(models.TimeSession, session_id)
     assert session.status == "ended"
     banked = db.query(models.TimeLogEntry).filter_by(task_id=subtask.id).one()
-    assert sum(getattr(banked, field) for field in models.DAY_FIELDS) == 0.5  # 30 minutes kept
+    assert banked.hours == 0.5  # 30 minutes kept
     assert db.get(models.ExtensionRequest, request_id).status == "cancelled"
     assert db.get(models.Project, project_id).extension_status == "cancelled"
     audit = db.query(models.GovernanceAction).filter_by(project_id=project_id, action="archive").one()
@@ -145,7 +145,7 @@ def test_unarchive_restores_the_lock(client, db, world, governed):
 
 def test_governance_skips_archived_projects(client, db, make, world, governed):
     project_id, node_a, *_ = governed
-    make.time_entry(project_id, node_a, world.emp1, 90, status="approved", week=date(2026, 9, 14))  # 120 of 100
+    make.time_entry(project_id, node_a, world.emp1, 90, status="approved", day=date(2026, 9, 14))  # 120 of 100
     _archive(client, world.bu_h, project_id)
 
     db.expire_all()

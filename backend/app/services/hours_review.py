@@ -1,6 +1,6 @@
-"""Who approves which hours (decided 2026-09-28).
+"""Who approves which hours, and the decisions themselves (decided 2026-09-28).
 
-Hours are approved per timesheet row: one subtask, one engineer, one week.
+Hours are approved per day, per subtask, per engineer:
 1. A project lead's own hours: the BU Head.
 2. Otherwise the lead of the row's task, while they lead the project and
    their lead period hasn't ended.
@@ -8,35 +8,41 @@ Hours are approved per timesheet row: one subtask, one engineer, one week.
    over, or the lead is the engineer themselves): the BU Head.
 Nobody approves their own hours, and no hours are left without a reviewer.
 
-"Approve week" approves only the caller's rows; the week becomes Approved once
-every row is (see `week_status`). Usage counts each row as it is approved.
+Only finished days are reviewed. Usage counts each day as it is approved; the
+week is nothing more than the sum of its days.
 """
 
 from collections.abc import Iterable
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy.orm import Session
 
 import models
+from app.core.errors import BadRequestError, ConflictError, ForbiddenError
 from app.core.roles import Role
-from app.domain.timesheets import APPROVED, PENDING_REVIEW, REJECTED
+from app.domain.timesheets import APPROVED, PENDING_REVIEW, REASON_REQUIRED, review_transition, reviewable
 
 BU_HEAD = None  # reviewer id meaning "the BU Head"
-SUBMITTED = "submitted"
+NOT_YOUR_HOURS = (
+    "These hours are approved by the task's lead, or by the BU Head when the task has no active lead "
+    "or they are a project lead's own."
+)
+DAY_NOT_OVER = "A day is reviewed once it is over (yesterday or earlier)."
+HOURS_UNAPPROVED = "hours_unapproved"  # GovernanceAction.action: approved hours taken back, with the reason
 
 
-def week_status(row_statuses: Iterable[str]) -> str:
-    """A submitted week's status, derived from its rows: waiting while any row is pending."""
-    statuses = set(row_statuses)
-    if PENDING_REVIEW in statuses or not statuses:
-        return SUBMITTED
-    return REJECTED if REJECTED in statuses else APPROVED
+def tasks_by_id(db: Session, entries: Iterable[models.TimeLogEntry]) -> dict[int, models.WbsNode]:
+    ids = {entry.task_id for entry in entries}
+    return {node.id: node for node in db.query(models.WbsNode).filter(models.WbsNode.id.in_(ids))} if ids else {}
 
 
 class HoursReview:
     """The reviewer rule for one project, loaded once (two small queries) and applied to any number of rows."""
 
     def __init__(self, db: Session, project: models.Project, today: date):
+        self.db = db
+        self.project = project
+        self.today = today
         lead_ids = {
             project.project_lead_electrical_user_id,
             project.project_lead_mechanical_user_id,
@@ -68,75 +74,56 @@ class HoursReview:
         reviewer = self.reviewer(task, employee_id)
         return user.role == Role.BU_HEAD if reviewer is BU_HEAD else reviewer == user.id
 
+    def review(
+        self,
+        user: models.User,
+        entry: models.TimeLogEntry,
+        task: models.WbsNode | None,
+        action: str,
+        reason: str | None,
+        now: datetime,
+    ) -> None:
+        """One decision on one day's hours. The caller checks the project lock and commits."""
+        if not self.may_review(user, task, entry.employee_id):
+            raise ForbiddenError(NOT_YOUR_HOURS)
+        if not reviewable(entry.work_date, self.today):
+            raise ConflictError(DAY_NOT_OVER)
+        problem = review_transition(entry.approval_status, action, reason)
+        if problem == REASON_REQUIRED:
+            raise BadRequestError(problem)
+        if problem:
+            raise ConflictError(problem)
+        reviewer = user.full_name or user.username
+        if entry.approval_status == APPROVED:  # taken back: audited, shown on the BU Head's dashboard
+            task_name = task.task_name if task is not None else f"task #{entry.task_id}"
+            self.db.add(
+                models.GovernanceAction(
+                    project_id=entry.project_id,
+                    action=HOURS_UNAPPROVED,
+                    comments=f"{entry.hours:g} h on {entry.work_date.isoformat()} ({task_name}) rejected: {reason}",
+                    created_by=reviewer,
+                )
+            )
+        entry.approval_status, entry.reviewed_by, entry.reviewed_at = action, reviewer, now
+        entry.review_reason = (reason or "").strip() or None
 
-def sync_week_status(db: Session, project_id: int, employee_id: int, week: date) -> None:
-    """Keep a submitted week's status in step with its rows (a no-op before the engineer submits)."""
-    submission = (
-        db.query(models.WeeklyHoursSubmission)
-        .filter_by(project_id=project_id, employee_id=employee_id, week_start_date=week)
-        .first()
-    )
-    if submission is None:
-        return
-    rows = db.query(models.TimeLogEntry.approval_status).filter_by(
-        project_id=project_id, employee_id=employee_id, week_start_date=week
-    )
-    submission.status = week_status(status for (status,) in rows)
-
-
-def tasks_by_id(db: Session, entries: Iterable[models.TimeLogEntry]) -> dict[int, models.WbsNode]:
-    ids = {entry.task_id for entry in entries}
-    return {node.id: node for node in db.query(models.WbsNode).filter(models.WbsNode.id.in_(ids))} if ids else {}
-
-
-def review_summary(
-    db: Session,
-    project: models.Project,
-    week: date,
-    employee_ids: Iterable[int],
-    user: models.User,
-    today: date,
-) -> dict[int, dict]:
-    """Per engineer, for one week: whether `user` has rows to review, and how many reviewers have
-    finished ("2 of 3 approved") with the names still pending. Four queries for the whole list."""
-    employee_ids = set(employee_ids)
-    if not employee_ids:
-        return {}
-    entries = (
-        db.query(models.TimeLogEntry)
-        .filter(
-            models.TimeLogEntry.project_id == project.id,
-            models.TimeLogEntry.week_start_date == week,
-            models.TimeLogEntry.employee_id.in_(employee_ids),
-        )
-        .all()
-    )
-    tasks = tasks_by_id(db, entries)
-    review = HoursReview(db, project, today)
-    per_employee: dict[int, dict[int | None, bool]] = {}  # reviewer -> still has pending rows
-    mine: set[int] = set()
-    for entry in entries:
-        task = tasks.get(entry.task_id)
-        reviewer = review.reviewer(task, entry.employee_id)
-        pending = entry.approval_status == PENDING_REVIEW
-        reviewers = per_employee.setdefault(entry.employee_id, {})
-        reviewers[reviewer] = reviewers.get(reviewer, False) or pending
-        if pending and review.may_review(user, task, entry.employee_id):
-            mine.add(entry.employee_id)
-    lead_ids = {reviewer for reviewers in per_employee.values() for reviewer in reviewers} - {BU_HEAD}
-    names = (
-        dict(db.query(models.User.id, models.User.full_name).filter(models.User.id.in_(lead_ids))) if lead_ids else {}
-    )
-    summary = {}
-    for employee_id in employee_ids:
-        reviewers = per_employee.get(employee_id, {})
-        waiting = [
-            ("BU Head" if r is BU_HEAD else names.get(r) or "Lead") for r, pending in reviewers.items() if pending
+    def review_pending(
+        self,
+        user: models.User,
+        entries: Iterable[models.TimeLogEntry],
+        tasks: dict[int, models.WbsNode],
+        action: str,
+        now: datetime,
+    ) -> int:
+        """Bulk: every pending, finished day among `entries` that `user` is responsible for.
+        Returns how many were decided."""
+        mine = [
+            entry
+            for entry in entries
+            if entry.approval_status == PENDING_REVIEW
+            and reviewable(entry.work_date, self.today)
+            and self.may_review(user, tasks.get(entry.task_id), entry.employee_id)
         ]
-        summary[employee_id] = {
-            "can_review": employee_id in mine,
-            "reviewers_total": len(reviewers),
-            "reviewers_done": len(reviewers) - len(waiting),
-            "waiting_on": sorted(waiting),
-        }
-    return summary
+        for entry in mine:
+            self.review(user, entry, tasks.get(entry.task_id), action, None, now)
+        return len(mine)

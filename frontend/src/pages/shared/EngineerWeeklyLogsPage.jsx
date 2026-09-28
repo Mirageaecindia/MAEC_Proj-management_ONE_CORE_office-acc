@@ -3,14 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
-import {
-  DAY_FIELDS,
-  getMonday,
-  formatDateStr,
-  getWeekInfo,
-  WEEKLY_SUBMISSION_LABELS,
-  WEEKLY_SUBMISSION_PILL,
-} from './TimelineLogsPage';
+import { HOURS_STATUS_LABELS, HOURS_STATUS_PILL } from '../../utils/hours';
+import { getMonday, formatDateStr, getWeekInfo } from './TimelineLogsPage';
 
 export function EngineerWeeklyLogsPage() {
   const [searchParams] = useSearchParams();
@@ -24,7 +18,7 @@ export function EngineerWeeklyLogsPage() {
   const [selectedId, setSelectedId] = useState('');
   const [nodes, setNodes] = useState([]);
   const [entries, setEntries] = useState([]);
-  const [submissions, setSubmissions] = useState([]);
+  const [rejecting, setRejecting] = useState(null); // { id, reason } while a reason is being typed
   const [timelineEngineers, setTimelineEngineers] = useState([]);
   const [scopeEngineerName, setScopeEngineerName] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -44,13 +38,6 @@ export function EngineerWeeklyLogsPage() {
   }, [weekStartParam]);
   const weekStartStr = useMemo(() => formatDateStr(monday), [monday]);
   const weekInfo = useMemo(() => getWeekInfo(monday), [monday]);
-  const dayDates = useMemo(
-    () =>
-      DAY_FIELDS.map(
-        (_, index) => new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index),
-      ),
-    [monday],
-  );
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/projects`, { headers: authHeaders() })
@@ -74,19 +61,6 @@ export function EngineerWeeklyLogsPage() {
     return entries.filter((entry) => String(entry.employee_id) === targetEmployeeId);
   }, [entries, isEngineer, targetEmployeeId]);
 
-  // The week-level submission record that drives the APPROVAL column. Approval
-  // happens once per engineer per week, not per entry, so the engineer's own
-  // record (engineer view) or the selected engineer's record (lead view) rules.
-  const weekSubmission = useMemo(() => {
-    if (isEngineer) return submissions[0] || null;
-    return submissions.find((submission) => String(submission.employee_id) === targetEmployeeId) || null;
-  }, [submissions, isEngineer, targetEmployeeId]);
-
-  const weeklyStatus = useMemo(
-    () => (weekSubmission ? weekSubmission.status : 'not_submitted'),
-    [weekSubmission],
-  );
-
   const engineerName = useMemo(() => {
     if (detailsRows.length > 0 && detailsRows[0].employee_name) return detailsRows[0].employee_name;
     if (isEngineer && scopeEngineerName) return scopeEngineerName;
@@ -103,7 +77,7 @@ export function EngineerWeeklyLogsPage() {
   }, [nodes]);
 
   const grandTotal = useMemo(
-    () => detailsRows.reduce((sum, entry) => sum + (Number(entry.total_hours) || 0), 0),
+    () => detailsRows.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0),
     [detailsRows],
   );
 
@@ -113,11 +87,7 @@ export function EngineerWeeklyLogsPage() {
       setLoaded(false);
       const requests = [
         fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/wbs-structure`, { headers: authHeaders() }),
-        fetch(
-          `${API_BASE_URL}/api/projects/${projectIdNum}/timesheet?week_start=${weekStr}&source=tracking`,
-          { headers: authHeaders() },
-        ),
-        fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/weekly-hours-submissions?week_start=${weekStr}`, {
+        fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timesheet?week_start=${weekStr}`, {
           headers: authHeaders(),
         }),
       ];
@@ -126,16 +96,14 @@ export function EngineerWeeklyLogsPage() {
           fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timeline-logs`, { headers: authHeaders() }),
         );
       }
-      const [nodesRes, timesheetRes, submissionsRes, timelineRes] = await Promise.all(requests);
-      if (!nodesRes.ok || !timesheetRes.ok || !submissionsRes.ok) {
+      const [nodesRes, timesheetRes, timelineRes] = await Promise.all(requests);
+      if (!nodesRes.ok || !timesheetRes.ok) {
         throw new Error('Failed to load the engineer weekly log data.');
       }
       const nodesData = await nodesRes.json();
       const timesheetData = await timesheetRes.json();
-      const submissionsData = await submissionsRes.json();
       setNodes(nodesData);
-      setEntries(timesheetData);
-      setSubmissions(Array.isArray(submissionsData) ? submissionsData : []);
+      setEntries(Array.isArray(timesheetData) ? timesheetData : []);
       if (timelineRes) {
         const timelineData = await timelineRes.json();
         setTimelineEngineers(Array.isArray(timelineData.engineers) ? timelineData.engineers : []);
@@ -154,24 +122,32 @@ export function EngineerWeeklyLogsPage() {
     }
   }, [projectId, weekStartStr]);
 
-  const fmtHours = (value) => {
-    const number = Number(value) || 0;
-    return Math.round(number * 100) / 100;
-  };
+  const dayLabel = (isoDate) =>
+    new Date(`${isoDate}T00:00:00`).toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
 
-  const workedDaysFor = (entry) =>
-    DAY_FIELDS.map((day, index) => {
-      const hours = fmtHours(entry[`${day}_hours`] || 0);
-      if (hours <= 0) return null;
-      return {
-        date: dayDates[index].toLocaleDateString('en-US', {
-          weekday: 'short',
-          month: 'short',
-          day: 'numeric',
-        }),
-        hours,
-      };
-    }).filter(Boolean);
+  // One day's hours: approved or rejected by its reviewer. Taking approved hours back needs a reason.
+  const decide = async (entry, action, reason = null) => {
+    try {
+      setError('');
+      const response = await fetch(`${API_BASE_URL}/api/time-log-entries/${entry.id}/${action}`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || `Could not ${action} these hours.`);
+      }
+      setRejecting(null);
+      await loadDetails(projectId, weekStartStr);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
 
   return (
     <main className="timeline-page">
@@ -202,8 +178,8 @@ export function EngineerWeeklyLogsPage() {
             </h2>
             <p>
               {isEngineer
-                ? 'Your automatic subtask working-time for this week, recorded from Login/Logout: the time between them counts, except while the laptop was off.'
-                : `Logged hours for ${engineerName || 'the selected engineer'} this week, recorded automatically per subtask. The week is approved by the assigned lead after you submit it for review.`}
+                ? 'Your hours for this week, one row per subtask and day from Login/Logout. Each day is approved by the task’s lead once the day is over.'
+                : `Logged hours for ${engineerName || 'the selected engineer'} this week, one row per subtask and day. Approve or reject each finished day you are the reviewer of.`}
             </p>
           </div>
 
@@ -238,8 +214,7 @@ export function EngineerWeeklyLogsPage() {
                   <th>PARENT TASK</th>
                   <th>SUBTASK</th>
                   <th>STATUS</th>
-                  <th>ACTUAL HOURS</th>
-                  <th>TIME LOG &amp; DETAILS</th>
+                  <th>HOURS</th>
                   <th>APPROVAL</th>
                 </tr>
               </thead>
@@ -247,20 +222,12 @@ export function EngineerWeeklyLogsPage() {
                 {detailsRows.map((entry) => {
                   const node = nodeMap[entry.task_id];
                   const parent = node && node.parent_id ? nodeMap[node.parent_id] : null;
-                  const workedDays = workedDaysFor(entry);
+                  const pending = entry.approval_status === 'pending_review';
 
                   return (
                     <tr key={entry.id}>
                       <td>
-                        {workedDays.length === 0 ? (
-                          <span className="time-log-empty">—</span>
-                        ) : (
-                          workedDays.map(({ date }) => (
-                            <span key={date} className="time-log-item">
-                              {date}
-                            </span>
-                          ))
-                        )}
+                        <span className="time-log-item">{dayLabel(entry.work_date)}</span>
                       </td>
                       <td>{project?.project_name || '—'}</td>
                       <td>{entry.wbs_code || '—'}</td>
@@ -276,25 +243,67 @@ export function EngineerWeeklyLogsPage() {
                       </td>
                       <td>{node?.deliverable_status || '—'}</td>
                       <td>
-                        <strong className="total-hours-blue">{entry.total_hours.toFixed(2)} hrs</strong>
+                        <strong className="total-hours-blue">{entry.hours.toFixed(2)} hrs</strong>
                       </td>
-                      <td className="col-time-log">
-                        {workedDays.length === 0 ? (
-                          <span className="time-log-empty">No tracked hours this week</span>
-                        ) : (
-                          workedDays.map(({ date, hours }) => (
-                            <span key={date} className="time-log-item">
-                              {date} · {hours.toFixed(2)} hrs
-                            </span>
-                          ))
-                        )}
-                      </td>
-                      <td>
+                      <td className="col-approval">
                         <span
-                          className={`approval-pill ${WEEKLY_SUBMISSION_PILL[weeklyStatus] || 'status-none'}`}
+                          className={`approval-pill ${HOURS_STATUS_PILL[entry.approval_status] || 'status-none'}`}
                         >
-                          {WEEKLY_SUBMISSION_LABELS[weeklyStatus] || weeklyStatus}
+                          {HOURS_STATUS_LABELS[entry.approval_status] || entry.approval_status}
                         </span>
+                        {entry.reviewed_by && (
+                          <small className="review-progress">by {entry.reviewed_by}</small>
+                        )}
+                        {entry.review_reason && (
+                          <small className="review-progress">{entry.review_reason}</small>
+                        )}
+                        {entry.can_review &&
+                          entry.approval_status !== 'rejected' &&
+                          rejecting?.id !== entry.id && (
+                            <span className="review-actions">
+                              {pending && (
+                                <button
+                                  type="button"
+                                  className="review-btn review-approve"
+                                  onClick={() => decide(entry, 'approve')}
+                                >
+                                  Approve
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="review-btn review-reject"
+                                onClick={() =>
+                                  pending
+                                    ? decide(entry, 'reject')
+                                    : setRejecting({ id: entry.id, reason: '' })
+                                }
+                              >
+                                Reject
+                              </button>
+                            </span>
+                          )}
+                        {rejecting?.id === entry.id && (
+                          <span className="review-actions">
+                            <input
+                              aria-label="Reason for rejecting approved hours"
+                              placeholder="Reason (required)"
+                              value={rejecting.reason}
+                              onChange={(e) => setRejecting({ id: entry.id, reason: e.target.value })}
+                            />
+                            <button
+                              type="button"
+                              className="review-btn review-reject"
+                              disabled={!rejecting.reason.trim()}
+                              onClick={() => decide(entry, 'reject', rejecting.reason.trim())}
+                            >
+                              Confirm reject
+                            </button>
+                            <button type="button" className="review-btn" onClick={() => setRejecting(null)}>
+                              Cancel
+                            </button>
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -308,8 +317,8 @@ export function EngineerWeeklyLogsPage() {
           <div className="footer-info">
             <span>
               {isEngineer
-                ? 'You can only view your own weekly logs. Submit a week for your lead’s review; hours are recorded automatically per subtask via Login/Logout tracking — active time only.'
-                : 'Read-only detail view. Approve or reject this week from the Approval column on the Timeline & Logs page.'}
+                ? 'You can only view your own logs. Hours are recorded per subtask from Login/Logout; each day is reviewed once it is over.'
+                : 'Rejected hours are never approved again: the engineer corrects them instead.'}
             </span>
           </div>
           <Link

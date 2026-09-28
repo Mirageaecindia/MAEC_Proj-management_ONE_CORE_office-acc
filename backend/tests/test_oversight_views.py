@@ -40,7 +40,7 @@ def test_bu_head_timeline_and_timesheet_views(client, world, tracked):
     assert timeline["scope"]["role"] == "bu_head"
     assert [t["id"] for t in timeline["tasks"]] == [node.id]
     assert timeline["summary"]["total_hours_logged"] == 8.0
-    assert [(e["employee_name"], e["total_hours"]) for e in this_week] == [("Arjun Mehta", 8.0)]
+    assert [(e["employee_name"], e["hours"]) for e in this_week] == [("Arjun Mehta", 8.0)]
     assert other_week == []
 
 
@@ -60,13 +60,11 @@ def test_bu_head_timeline_and_timesheet_views(client, world, tracked):
         ("post", "/api/projects/{project_id}/resource-bookings", {"employee_id": 1}),
         ("post", "/api/projects/{project_id}/resource-bookings/submit", None),
         ("post", "/api/projects/{project_id}/extension-requests", {"requested_hours": 5}),
-        ("post", "/api/projects/{project_id}/weekly-hours/submit", {"week_start_date": "2026-09-07"}),
         (
             "post",
-            "/api/projects/{project_id}/weekly-hours/approve",
-            {"week_start_date": "2026-09-07", "employee_id": 1},
+            "/api/projects/{project_id}/hours/review",
+            {"action": "approved", "week_start_date": "2026-09-07", "employee_id": 1},
         ),
-        ("post", "/api/projects/{project_id}/weekly-hours/reject", {"week_start_date": "2026-09-07", "employee_id": 1}),
     ],
 )
 def test_bu_head_cannot_perform_lead_or_engineer_actions(client, world, tracked, method, path, body):

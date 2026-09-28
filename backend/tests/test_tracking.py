@@ -10,7 +10,7 @@ import pytest
 
 import models
 from app.core.database import SessionLocal
-from app.domain.timesheets import entry_total
+from app.domain.timesheets import total_hours
 from app.repositories.tracking import TrackingRepository
 from app.services.tracking import TrackingService
 
@@ -39,7 +39,7 @@ def _rewind(db, session_id, *, logged_in, last_seen):
 
 
 def _banked_hours(db, subtask):
-    return sum(entry_total(entry) for entry in db.query(models.TimeLogEntry).filter_by(task_id=subtask.id))
+    return total_hours(db.query(models.TimeLogEntry).filter_by(task_id=subtask.id))
 
 
 def test_worked_time_is_logout_minus_login_idle_included(client, db, world, subtask):

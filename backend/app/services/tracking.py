@@ -35,7 +35,6 @@ from app.domain.timesheets import PENDING_REVIEW
 from app.repositories.tracking import ACTIVE, ENDED, TrackingRepository
 from app.services.access import user_can_access_project
 from app.services.governance_monitor import enforce_governance
-from app.services.hours_review import sync_week_status
 
 HEARTBEAT_GRACE = timedelta(minutes=5)  # the browser beats every minute; background tabs can lag
 DAILY_LIMIT_SECONDS = 8 * 3600
@@ -44,17 +43,14 @@ DAILY_LIMIT_SECONDS = 8 * 3600
 def upsert_subtask_time_log(
     db: Session, project_id: int, task_id: int, employee_id: int, day: date, seconds: int
 ) -> models.TimeLogEntry | None:
-    """Fold worked seconds into the weekly time-log row (project x subtask x
-    engineer x week) that the Lead approves. Every day of the week is banked;
-    approval decides what stands."""
+    """Fold worked seconds into the day's row (project x subtask x engineer x day)
+    that the task's lead approves. Every day is banked; approval decides what stands."""
     hours = round(seconds / 3600, 2)
     if hours <= 0:
         return None
-    week_start = day - timedelta(days=day.weekday())
-    field = models.DAY_FIELDS[day.weekday()]
     entry = (
         db.query(models.TimeLogEntry)
-        .filter_by(project_id=project_id, task_id=task_id, employee_id=employee_id, week_start_date=week_start)
+        .filter_by(project_id=project_id, task_id=task_id, employee_id=employee_id, work_date=day)
         .first()
     )
     if entry is None:
@@ -62,16 +58,15 @@ def upsert_subtask_time_log(
             project_id=project_id,
             task_id=task_id,
             employee_id=employee_id,
-            week_start_date=week_start,
+            work_date=day,
+            hours=0,
             approval_status=PENDING_REVIEW,
         )
         db.add(entry)
-    setattr(entry, field, round((getattr(entry, field) or 0) + hours, 2))
+    entry.hours = round((entry.hours or 0) + hours, 2)
     if entry.approval_status != PENDING_REVIEW:
-        # New hours on a reviewed row need review too: never count them as already approved.
+        # More hours on a reviewed day (a session that started the day before) need review too.
         entry.approval_status, entry.reviewed_by, entry.reviewed_at = PENDING_REVIEW, None, None
-        db.flush()
-        sync_week_status(db, project_id, employee_id, week_start)
     return entry
 
 

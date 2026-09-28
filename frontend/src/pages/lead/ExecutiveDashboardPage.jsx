@@ -433,6 +433,7 @@ export function ExecutiveDashboardPage() {
                       {entry.action === 'approve_extension' && `Approved extension of ${formatHours(entry.requested_hours)}`}
                       {entry.action === 'reject_extension' && `Rejected extension of ${formatHours(entry.requested_hours)}`}
                       {entry.action === 'stop_execution' && 'Stopped execution'}
+                      {entry.action === 'hours_unapproved' && 'Approved hours taken back'}
                       {entry.comments && ` — ${entry.comments}`}
                       {entry.created_by && ` by ${entry.created_by}`}
                     </span>

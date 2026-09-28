@@ -259,65 +259,28 @@ class ExtensionRequest(Base):
     decided_at = Column(DateTime(timezone=True), nullable=True)
 
 
-DAY_FIELDS = ("mon_hours", "tue_hours", "wed_hours", "thu_hours", "fri_hours", "sat_hours", "sun_hours")
-
-
 class TimeLogEntry(Base):
     """
-    Weekly submitted working-hours log against a real WBS node assignment.
-
-    One row per (project, WBS task, engineer, ISO week). Scoped server-side by
-    role: an engineer only ever sees/edits their own rows; a lead sees rows for
-    tasks assigned under them and may approve/reject them; BU Head sees the
-    project-wide rollup.
+    One day's hours of one engineer on one subtask, banked by Logout
+    (app/services/tracking.py) and approved per day by the task's lead or the
+    BU Head (app/services/hours_review.py). The weekly timesheet is the sum of
+    its days. Scoped server-side by the role on the project.
     """
     __tablename__ = "time_log_entries"
     __table_args__ = (
-        UniqueConstraint("project_id", "task_id", "employee_id", "week_start_date", name="uq_time_log_week"),
+        UniqueConstraint("project_id", "task_id", "employee_id", "work_date", name="uq_time_log_day"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, nullable=False, index=True)
     task_id = Column(Integer, nullable=False, index=True)
     employee_id = Column(Integer, nullable=False, index=True)
-    week_start_date = Column(Date, nullable=False, index=True)
-    mon_hours = Column(Float, nullable=False, default=0)
-    tue_hours = Column(Float, nullable=False, default=0)
-    wed_hours = Column(Float, nullable=False, default=0)
-    thu_hours = Column(Float, nullable=False, default=0)
-    fri_hours = Column(Float, nullable=False, default=0)
-    sat_hours = Column(Float, nullable=False, default=0)
-    sun_hours = Column(Float, nullable=False, default=0)
-    approval_status = Column(String(20), nullable=False, default="pending_review")
+    work_date = Column(Date, nullable=False, index=True)
+    hours = Column(Float, nullable=False, default=0)
+    approval_status = Column(String(20), nullable=False, default="pending_review", index=True)
     reviewed_by = Column(String(150), nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-
-class WeeklyHoursSubmission(Base):
-    """
-    An engineer's weekly-hours submission for one project + ISO week.
-
-    Unlike TimeLogEntry (one row per task/subtask), this is the WEEK-level
-    workflow record the Weekly Hours section keys off of. A row only exists
-    once the engineer submits: status goes not_submitted -> submitted ->
-    approved | rejected. Only a week whose status is exactly 'submitted' can
-    be approved or rejected — enforced server-side, never just in the UI.
-    """
-    __tablename__ = "weekly_hours_submissions"
-    __table_args__ = (
-        UniqueConstraint("project_id", "employee_id", "week_start_date", name="uq_weekly_hours_submission"),
-    )
-
-    id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, nullable=False, index=True)
-    employee_id = Column(Integer, nullable=False, index=True)
-    week_start_date = Column(Date, nullable=False, index=True)
-    status = Column(String(20), nullable=False, default="submitted", index=True)
-    submitted_at = Column(DateTime(timezone=True), nullable=True)
-    reviewed_by = Column(String(150), nullable=True)
-    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    review_reason = Column(Text, nullable=True)  # why approved hours were taken back, or a rejection note
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

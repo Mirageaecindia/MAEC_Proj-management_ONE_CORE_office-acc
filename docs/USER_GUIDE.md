@@ -75,7 +75,7 @@ username for 15 minutes.
 3. **BU Head approves** (engineers now see the project) or **rejects with a reason**.
 4. **Lead builds the WBS**: main tasks per phase, subtasks, engineer assignments.
 5. **Engineer works** subtasks: tracks time (Login/Logout) and moves statuses forward.
-6. **Engineer submits the week**; **Lead approves** it. Approved hours now count.
+6. **The task's lead approves each day** (the BU Head for a lead's own hours). Approved hours now count.
 7. **Governance runs automatically**: alert at the threshold, automatic lock at 100% of the baseline.
 8. **Lead requests an extension**; **BU Head decides**. The BU Head can also stop, resume, edit or archive the project.
 
@@ -189,22 +189,33 @@ once the engineer has submitted it ("Submitted for Approval"). Main-task
 statuses are otherwise driven by the engineer; comments are added by engineers.
 
 ### 4.4 Timeline & Logs (approve hours)
-The weekly sheet lists the engineers who logged hours on your tasks. Hours are
-approved **per task, by that task's lead**: **Approve** or **Reject** on a
-submitted week acts only on the engineer's hours on *your* tasks. If they also
-worked under another lead, the week shows e.g. **"1 of 2 approved · waiting on
-Priya Nair"** and becomes Approved once every lead has approved their part.
-Each approved part counts toward the project's usage straight away.
+Hours are recorded **per subtask and per day**, and approved **per day** by the
+lead of the task they were worked on. There is no week submission: the week is
+just the sum of its days.
+
+- The weekly sheet shows each engineer's hours per day, coloured by that day's
+  status, with the week's status and e.g. **"2 of 3 days approved"**.
+- **Approve week** on an engineer's row approves every pending, finished day of
+  theirs on *your* tasks. **Approve all on my tasks** does it for every engineer
+  at once. Approved days count toward the project's usage straight away.
+- Click the engineer to open their **weekly log**: one row per subtask and day,
+  with **Approve** / **Reject** per day. Rejecting hours that were already
+  approved needs a **reason**; it is recorded in the audit log and shown on the
+  BU Head's dashboard. Rejected hours are never approved again: the engineer
+  corrects them instead (TODO H2).
+- **Only a finished day can be reviewed** (yesterday or earlier), so approved
+  hours never change under a later Logout on the same day.
 
 Who approves what:
 - **An engineer's hours:** the lead of the task they logged them on.
 - **A project lead's own hours** (subtasks they did themselves): the **BU Head**,
-  never the lead.
+  never the lead. The same goes for **a task the lead worked on**: it is approved
+  by the BU Head, not by the lead (see §4.3).
 - **Hours on a task with no lead, or whose lead's period has ended:** the BU Head,
   so no hours are left without someone to approve them.
 - Nobody can approve while the project is locked, the BU Head included.
-- New hours logged on already-approved work go back to "waiting for review";
-  they are never counted as approved without a review.
+- New hours logged on an already-approved day (a session that ran past midnight)
+  put that day back to "pending review".
 
 ### 4.5 Executive Dashboard (Lead view)
 The project's governance figures for your projects, the audit log, and the
@@ -230,14 +241,14 @@ to open Task Details.
   - **Keep MAEC open in a browser tab** while you work (minimised or behind other windows is fine). The tab tells the server once a minute that your laptop is on.
   - **Laptop switched off, asleep or offline** for more than 5 minutes: the time stops at the last signal and that gap is not counted. When you open MAEC again, it carries on by itself on the same subtask; you don't need to log in again. Closing every MAEC tab has the same effect as switching off.
   - **Forgot to log out** with the laptop on: the time keeps counting, up to **8 hours per day**. Your Lead sees the hours and can reject them.
-  - One subtask at a time. **Logout** adds the time to your weekly row for that subtask, on the day you logged in.
+  - One subtask at a time. **Logout** adds the time to that day's row for the subtask (the day you logged in).
   - Edge "sleeping tabs" and Chrome "Memory Saver" can freeze a background tab. Add the MAEC address under *Always keep these sites active* in the browser settings.
 
 ### 5.3 Timeline & Logs
-Your tracked hours for the week. **Submit for Approval** sends the week to the
-leads of the tasks you worked on (or the BU Head, see §4.4); the status shows
-Submitted, Approved or Rejected. After a rejection you can submit again, which
-asks for the rejected hours to be reviewed again.
+Your hours for the week, one row per subtask and day, each with its status:
+Pending review, Approved or Rejected. Nothing to submit: each day is reviewed by
+the task's lead once the day is over. Open your weekly log for the day-by-day
+detail, the reviewer's name and any rejection reason.
 
 ### 5.4 Performance Dashboard
 Your own figures per project: hours consumption, governance status, schedule
@@ -256,8 +267,7 @@ index, task completion and a monthly chart.
 | BU Head **rejects** (with reason) | Back to draft | Bell with the reason; can edit and resubmit | Nothing |
 | Lead **creates a task** assigned to an engineer | It in WBS (read-only) | It in WBS | It in their WBS |
 | Engineer **tracks time** (Logout) | Pending hours on the dashboard | Hours in Timeline & Logs | Hours in Timeline & Logs |
-| Engineer **submits the week** | — | Approve / Reject buttons | "Submitted" |
-| Task lead **approves their part of the week** | **Usage, budget burn and SPI go up** | Same figures | "Approved"; Performance Dashboard updates |
+| Task lead **approves a day** (or the week's pending days) | **Usage, budget burn and SPI go up** | Same figures | "Approved"; Performance Dashboard updates |
 | Approved hours reach the **alert threshold** | Bell: threshold alert; ALERT on the card | Bell: threshold alert | — |
 | Approved hours reach **100% of the baseline** | Bell: locked; BASELINE REACHED | Bell: locked; approvals refused | Logging and tracking refused |
 | Lead **requests an extension** | Bell + request on the dashboard | "Pending BU Head approval" | — |
@@ -280,8 +290,8 @@ Use three windows: **BU** (BU Head), **LEAD** (the Electrical lead), **ENG** (an
 4. **ENG:** the project now appears in WBS Structure (empty until tasks exist).
 5. **LEAD:** WBS Structure: add a main task in *Space Planning* assigned to ENG, then **+ Subtask** on it.
 6. **ENG:** WBS shows the task and subtask. Open the subtask: **Login**, keep the tab active a few minutes, **Logout**.
-7. **ENG:** Timeline & Logs: the hours appear. **Submit for Approval**.
-8. **LEAD:** Timeline & Logs: **Approve** ENG's week. **BU:** Executive Dashboard: approved hours and budget burn go up.
+7. **ENG:** Timeline & Logs: the hours appear as Pending review (they can be reviewed from the next day).
+8. **LEAD:** the next day, Timeline & Logs: **Approve week** on ENG's row. **BU:** Executive Dashboard: approved hours and budget burn go up.
 9. **Threshold and lock.** Hours come only from Login/Logout, so use a small target: **BU:** Edit the project → target effort **1 h**, threshold **50%**. **ENG:** Login on a subtask, wait about **35 minutes**, Logout; submit the week. **LEAD:** approve the week → **ALERT** (bell for BU and LEAD). **ENG:** another **30 minutes**, Logout, submit; **LEAD:** approve → at 100% the project **locks** (BASELINE REACHED, bell). **ENG:** Login on the subtask is refused.
 10. **LEAD:** Executive Dashboard: request an extension of, say, 10 h with a justification. **BU:** bell; dashboard: **Approve Extension**. If usage is now under 100%, the lock lifts automatically ("System" in the audit log); LEAD is notified.
 11. **BU:** **Stop the Execution** (comment, confirm) → locked; **Resume Execution** → reopened. Both in the audit log.

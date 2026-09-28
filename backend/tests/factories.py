@@ -77,15 +77,15 @@ class Factory:
         values.update(fields)
         return self._save(models.WbsNode(**values))
 
-    def time_entry(self, project_id, node, employee, hours=0, status="pending_review", week=WEEK, **day_hours):
+    def time_entry(self, project_id, node, employee, hours, status="pending_review", day=WEEK):
+        """One day's hours on a node, as Logout banks them (a Monday in the past by default)."""
         return self._save(
             models.TimeLogEntry(
                 project_id=project_id,
                 task_id=node.id,
                 employee_id=employee.id,
-                week_start_date=week,
-                mon_hours=hours,
+                work_date=day,
+                hours=hours,
                 approval_status=status,
-                **day_hours,
             )
         )

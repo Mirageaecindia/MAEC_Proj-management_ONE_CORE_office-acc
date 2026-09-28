@@ -8,8 +8,6 @@ own hours; a lead can't be booked as an engineer on a project they lead.
 
 from datetime import date
 
-from test_project_roles import _approve_booking
-
 import models
 from factories import WEEK
 
@@ -133,43 +131,20 @@ def test_the_bu_head_approves_a_leads_own_hours(client, db, make, world):
     engineer_row = make.time_entry(
         project_id, make.wbs_node(project_id, world.lead_e, engineer=world.emp1), world.emp1, 8
     )
-    week = {"week_start_date": WEEK.isoformat()}
 
-    # Rows: the lead can't approve their own; the BU Head can't approve an engineer's with an active lead.
+    # The lead can't approve their own day; the BU Head can, but not an engineer's day with an active lead.
     assert client.post(f"/api/time-log-entries/{own_row.id}/approve", headers=world.lead_h).status_code == 403
     assert client.post(f"/api/time-log-entries/{engineer_row.id}/approve", headers=world.bu_h).status_code == 403
     assert client.post(f"/api/time-log-entries/{engineer_row.id}/approve", headers=world.lead_h).status_code == 200
-    # Weeks: the lead submits their own week; only the BU Head can approve it.
-    assert (
-        client.post(f"/api/projects/{project_id}/weekly-hours/submit", json=week, headers=world.lead_h).status_code
-        == 200
-    )
-    review = {**week, "employee_id": anita.id}
-    assert (
-        client.post(f"/api/projects/{project_id}/weekly-hours/approve", json=review, headers=world.lead_h).status_code
-        == 403
-    )
-    assert (
-        client.post(f"/api/projects/{project_id}/weekly-hours/approve", json=review, headers=world.bu_h).status_code
-        == 200
-    )
+    assert client.post(f"/api/time-log-entries/{own_row.id}/approve", headers=world.bu_h).status_code == 200
 
 
-def test_weekly_submissions_say_whose_hours_the_bu_head_reviews(client, db, make, world):
+def test_the_timesheet_says_whose_days_the_caller_reviews(client, db, make, world):
     project_id = world.create_project()["id"]
     anita = db.get(models.Employee, world.lead_e.employee_id)
     make.time_entry(project_id, make.wbs_node(project_id, world.lead_e, engineer=anita), anita, 8)
     make.time_entry(project_id, make.wbs_node(project_id, world.lead_e, engineer=world.emp1), world.emp1, 8)
-    _approve_booking(client, world, project_id, world.emp1, world.lead_h)  # Arjun works on it as an engineer
-    week = {"week_start_date": WEEK.isoformat()}
-    for headers in (world.lead_h, world.eng_h):
-        submitted = client.post(f"/api/projects/{project_id}/weekly-hours/submit", json=week, headers=headers)
-        assert submitted.status_code == 200, submitted.text
 
-    rows = client.get(
-        f"/api/projects/{project_id}/weekly-hours-submissions?week_start={WEEK}", headers=world.bu_h
-    ).json()
+    rows = client.get(f"/api/projects/{project_id}/timesheet?week_start={WEEK}", headers=world.bu_h).json()
 
     assert {row["employee_name"]: row["can_review"] for row in rows} == {"Anita Kumar": True, "Arjun Mehta": False}
-    arjun = next(row for row in rows if row["employee_name"] == "Arjun Mehta")
-    assert (arjun["reviewers_done"], arjun["reviewers_total"], arjun["waiting_on"]) == (0, 1, ["Anita Kumar"])

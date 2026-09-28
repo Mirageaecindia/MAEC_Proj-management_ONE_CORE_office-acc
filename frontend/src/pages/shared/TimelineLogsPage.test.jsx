@@ -5,7 +5,6 @@ import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { TimelineLogsPage } from './TimelineLogsPage';
 
 let currentRole = 'engineer';
-let submissions = [];
 let timesheetData;
 
 vi.mock('../../AuthContext', () => ({
@@ -78,6 +77,7 @@ const NODES = [
   },
 ];
 
+// One row per subtask, engineer and day (Thursday 24 Sep 2026), as GET /timesheet returns them.
 const ENTRIES = [
   {
     id: 1,
@@ -87,18 +87,14 @@ const ENTRIES = [
     task_name: 'subtask 1',
     employee_id: 3,
     employee_name: 'Ritu',
-    week_start_date: '2026-09-21',
-    mon_hours: 0,
-    tue_hours: 0,
-    wed_hours: 0,
-    thu_hours: 0.02,
-    fri_hours: 0,
-    sat_hours: 0,
-    sun_hours: 0,
-    total_hours: 0.02,
+    work_date: '2026-09-24',
+    hours: 0.02,
     approval_status: 'pending_review',
     reviewed_by: null,
     reviewed_at: null,
+    review_reason: null,
+    finished: true,
+    can_review: false,
   },
   {
     id: 2,
@@ -108,18 +104,14 @@ const ENTRIES = [
     task_name: 'subtask 2',
     employee_id: 3,
     employee_name: 'Ritu',
-    week_start_date: '2026-09-21',
-    mon_hours: 0,
-    tue_hours: 0,
-    wed_hours: 0,
-    thu_hours: 0.01,
-    fri_hours: 0,
-    sat_hours: 0,
-    sun_hours: 0,
-    total_hours: 0.01,
+    work_date: '2026-09-24',
+    hours: 0.01,
     approval_status: 'pending_review',
     reviewed_by: null,
     reviewed_at: null,
+    review_reason: null,
+    finished: true,
+    can_review: false,
   },
 ];
 
@@ -171,49 +163,19 @@ const ROUTES = [
   [/\/api\/projects\/1\/timeline-logs$/, TIMELINE],
 ];
 
-function submission(status, overrides = {}) {
-  return {
-    id: 1,
-    project_id: 1,
-    employee_id: 3,
-    employee_name: 'Ritu',
-    week_start_date: '2026-09-21',
-    status,
-    status_label:
-      status === 'submitted'
-        ? 'Submitted for Approval'
-        : status === 'approved'
-          ? 'Approved'
-          : status === 'rejected'
-            ? 'Rejected'
-            : 'Not Submitted',
-    submitted_at: '2026-09-24T10:00:00+00:00',
-    reviewed_by: null,
-    reviewed_at: null,
-    ...overrides,
-  };
-}
-
 function fakeApi(url, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
 
-  if (method === 'POST') {
-    if (/\/weekly-hours\/submit$/.test(url)) {
-      submissions = [submission('submitted')];
-      return Promise.resolve(new Response(JSON.stringify(submission('submitted')), { status: 200 }));
-    }
-    if (/\/weekly-hours\/approve$/.test(url)) {
-      submissions = [submission('approved')];
-      return Promise.resolve(new Response(JSON.stringify(submission('approved')), { status: 200 }));
-    }
-    if (/\/weekly-hours\/reject$/.test(url)) {
-      submissions = [submission('rejected')];
-      return Promise.resolve(new Response(JSON.stringify(submission('rejected')), { status: 200 }));
-    }
-  }
-
-  if (/\/api\/projects\/1\/weekly-hours-submissions\?/.test(url)) {
-    return Promise.resolve(new Response(JSON.stringify(submissions), { status: 200 }));
+  if (method === 'POST' && /\/hours\/review$/.test(url)) {
+    const body = JSON.parse(options.body);
+    timesheetData = timesheetData.map((entry) =>
+      entry.can_review && (body.employee_id == null || entry.employee_id === body.employee_id)
+        ? { ...entry, approval_status: body.action, can_review: false }
+        : entry,
+    );
+    return Promise.resolve(
+      new Response(JSON.stringify({ reviewed: 1, action: body.action }), { status: 200 }),
+    );
   }
 
   if (/\/api\/projects\/1\/timesheet\?/.test(url)) {
@@ -244,10 +206,11 @@ function renderPage() {
   );
 }
 
+const reviewable = (entries) => entries.map((entry) => ({ ...entry, can_review: true }));
+
 describe('Timeline Logs page groups the weekly log by engineer and navigates to details', () => {
   beforeEach(() => {
     currentRole = 'engineer';
-    submissions = [];
     timesheetData = ENTRIES;
     vi.stubGlobal('fetch', vi.fn(fakeApi));
     // The page opens on the browser's current week; pin it to the fixtures' week.
@@ -260,58 +223,37 @@ describe('Timeline Logs page groups the weekly log by engineer and navigates to 
     vi.useRealTimers();
   });
 
-  it('shows each engineer once as a link, no inline details, no approve/reject, only Submit', async () => {
+  it('shows each engineer once as a link with the week’s status, and nothing to approve', async () => {
     const { container } = renderPage();
 
     await screen.findByText('Ritu');
 
     expect(screen.getAllByText('Ritu')).toHaveLength(1);
     expect(container.querySelectorAll('tr.timesheet-engineer-group-row')).toHaveLength(1);
-    expect(container.querySelector('.timesheet-expand-toggle')).toBeNull();
-    expect(screen.queryByText(/pending review/)).toBeNull();
     expect(screen.getByText(/2 logged subtasks this week/)).toBeTruthy();
-
     const link = screen.getByRole('link', { name: /Ritu/ });
     expect(link.getAttribute('href')).toBe('/weekly-logs?projectId=1&employeeId=3&weekStart=2026-09-21');
-
     expect(screen.queryByText('subtask 1')).toBeNull();
-    expect(screen.queryByText('subtask 2')).toBeNull();
-    expect(container.querySelector('.timesheet-group-detail-row')).toBeNull();
 
-    // week not yet submitted -> Not Submitted pill + Submit button for engineer
-    expect(screen.getAllByText('Not Submitted').length).toBeGreaterThan(0);
-    expect(screen.getByText('Submit for Approval')).toBeTruthy();
-    expect(screen.queryByText('Approve')).toBeNull();
-    expect(screen.queryByText('Reject')).toBeNull();
+    expect(screen.getByText('Pending review')).toBeTruthy();
+    expect(screen.getByText('0 of 1 days approved')).toBeTruthy();
+    expect(screen.queryByText('Submit for Approval')).toBeNull(); // no week submission any more
+    expect(screen.queryByText('Approve week')).toBeNull();
   });
 
   it('counts Saturday and Sunday hours in the weekly total (TODO N2)', async () => {
-    timesheetData = [{ ...ENTRIES[0], sat_hours: 2, sun_hours: 1, total_hours: 3.02 }, ENTRIES[1]];
+    timesheetData = [...ENTRIES, { ...ENTRIES[0], id: 9, work_date: '2026-09-26', hours: 3 }];
     renderPage();
 
-    expect(await screen.findByText('3.03 hrs')).toBeTruthy(); // 0.02 + 0.01 weekday + 3 weekend
+    expect(await screen.findByText('3.03 hrs')).toBeTruthy(); // 0.02 + 0.01 Thursday + 3 Saturday
   });
 
-  it('submitting the week hides Submit and shows Submitted for Approval', async () => {
-    renderPage();
-    await screen.findByText('Submit for Approval');
-
-    fireEvent.click(screen.getByText('Submit for Approval'));
-
-    expect((await screen.findAllByText('Submitted for Approval')).length).toBeGreaterThan(0);
-    expect(screen.queryByText('Submit for Approval')).toBeNull();
-    expect(screen.queryByText('Approve')).toBeNull();
-    expect(screen.queryByText('Reject')).toBeNull();
-  });
-
-  it('engineer sees no Submit or status pill on a week with no logged hours', async () => {
+  it('shows no status on a week with no logged hours', async () => {
     timesheetData = [];
-    submissions = [];
     renderPage();
 
     await screen.findByText('No hours logged for this week yet.');
-    expect(screen.queryByText('Submit for Approval')).toBeNull();
-    expect(screen.queryByText('Not Submitted')).toBeNull();
+    expect(screen.queryByText('Pending review')).toBeNull();
     expect(screen.getByText(/Weekly Hours Logging \(Week/)).toBeTruthy();
   });
 
@@ -331,89 +273,56 @@ describe('Timeline Logs page groups the weekly log by engineer and navigates to 
   });
 });
 
-describe('Lead review of the weekly-hours submission', () => {
+describe('Approving a week, day by day, from the Timeline Logs page', () => {
   beforeEach(() => {
     currentRole = 'lead';
-    submissions = [];
     vi.stubGlobal('fetch', vi.fn(fakeApi));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(SERVER_DATE.datetime));
   });
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
-  it('does not show approve/reject before the week is submitted', async () => {
+  it('offers Approve week only when the server says pending days are this viewer’s to review', async () => {
+    timesheetData = ENTRIES; // can_review: false
     renderPage();
 
-    await screen.findByText('Not Submitted');
-    expect(screen.queryByText('Submit for Approval')).toBeNull();
-    expect(screen.queryByText('Approve')).toBeNull();
-    expect(screen.queryByText('Reject')).toBeNull();
+    await screen.findByText('Pending review');
+    expect(screen.queryByText('Approve week')).toBeNull();
+    expect(screen.queryByText(/Approve all on my tasks/)).toBeNull();
   });
 
-  it('shows approve/reject for a submitted week and persists the review', async () => {
-    submissions = [submission('submitted', { can_review: true, reviewers_done: 0, reviewers_total: 1 })];
+  it('approves the engineer’s pending days on my tasks and shows the week as approved', async () => {
+    timesheetData = reviewable(ENTRIES);
     renderPage();
 
-    const approve = await screen.findByText('Approve');
-    expect(approve).toBeTruthy();
-    expect(screen.getByText('Reject')).toBeTruthy();
-    expect(screen.getByText('Submitted for Approval')).toBeTruthy();
-
-    fireEvent.click(approve);
+    fireEvent.click(await screen.findByText('Approve week'));
 
     await screen.findByText('Approved');
-    expect(screen.queryByText('Approve')).toBeNull();
-    expect(screen.queryByText('Reject')).toBeNull();
-    expect(submissions[0].status).toBe('approved');
+    expect(screen.queryByText('Approve week')).toBeNull();
+    const call = fetch.mock.calls.find(
+      ([url, options]) => /\/hours\/review$/.test(url) && options?.method === 'POST',
+    );
+    expect(JSON.parse(call[1].body)).toEqual({
+      action: 'approved',
+      week_start_date: '2026-09-21',
+      employee_id: 3,
+    });
   });
 
-  it('shows a rejected week with no review buttons', async () => {
-    submissions = [submission('rejected')];
+  it('approves everything pending on my tasks in one click', async () => {
+    timesheetData = reviewable(ENTRIES);
     renderPage();
 
-    await screen.findByText('Rejected');
-    expect(screen.queryByText('Approve')).toBeNull();
-    expect(screen.queryByText('Reject')).toBeNull();
-  });
-});
+    fireEvent.click(await screen.findByText('Approve all on my tasks (2)'));
 
-describe('Per-task review of a week', () => {
-  beforeEach(() => vi.stubGlobal('fetch', vi.fn(fakeApi)));
-  afterEach(() => {
-    cleanup();
-    vi.unstubAllGlobals();
-  });
-
-  it('shows Approve to whoever the server says has hours to review (e.g. the BU Head for a lead)', async () => {
-    currentRole = 'bu_head';
-    submissions = [submission('submitted', { can_review: true, reviewers_done: 0, reviewers_total: 1 })];
-    renderPage();
-
-    expect(await screen.findByText('Approve')).toBeTruthy();
-  });
-
-  it('hides it from a lead of the project who is not this week’s reviewer', async () => {
-    currentRole = 'lead';
-    submissions = [submission('submitted', { can_review: false, reviewers_done: 0, reviewers_total: 1 })];
-    renderPage();
-
-    await screen.findByText('Submitted for Approval');
-    expect(screen.queryByText('Approve')).toBeNull();
-  });
-
-  it('shows how many of the week’s reviewers have approved', async () => {
-    currentRole = 'lead';
-    submissions = [
-      submission('submitted', {
-        can_review: false,
-        reviewers_done: 1,
-        reviewers_total: 2,
-        waiting_on: ['Priya Nair'],
-      }),
-    ];
-    renderPage();
-
-    expect(await screen.findByText(/1 of 2 approved · waiting on Priya Nair/)).toBeTruthy();
+    await screen.findByText('Approved');
+    const call = fetch.mock.calls.find(
+      ([url, options]) => /\/hours\/review$/.test(url) && options?.method === 'POST',
+    );
+    expect(JSON.parse(call[1].body).employee_id).toBeNull();
   });
 });
