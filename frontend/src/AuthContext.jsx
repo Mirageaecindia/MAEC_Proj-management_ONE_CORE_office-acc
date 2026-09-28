@@ -81,6 +81,7 @@ export function AuthProvider({ children }) {
       full_name: data.full_name || null,
       role: data.role,
       employee_id: data.engineer_id || null,
+      leads_projects: Boolean(data.leads_projects),
     });
     return data;
   }, []);
@@ -100,11 +101,14 @@ export function AuthProvider({ children }) {
   }, [token]);
 
   const role = user ? user.role : null;
+  // Leading is a role on a project; an engineer who leads any project also gets the lead pages.
+  const leadsProjects = Boolean(user?.leads_projects);
 
   return (
     <AuthContext.Provider value={{
       user,
       role,
+      leadsProjects,
       token,
       loading,
       login,

@@ -8,6 +8,8 @@ own hours; a lead can't be booked as an engineer on a project they lead.
 
 from datetime import date
 
+from test_project_roles import _approve_booking
+
 import models
 from factories import WEEK
 
@@ -152,3 +154,21 @@ def test_the_bu_head_approves_a_leads_own_hours(client, db, make, world):
         client.post(f"/api/projects/{project_id}/weekly-hours/approve", json=review, headers=world.bu_h).status_code
         == 200
     )
+
+
+def test_weekly_submissions_say_whose_hours_the_bu_head_reviews(client, db, make, world):
+    project_id = world.create_project()["id"]
+    anita = db.get(models.Employee, world.lead_e.employee_id)
+    make.time_entry(project_id, make.wbs_node(project_id, world.lead_e, engineer=anita), anita, 8)
+    make.time_entry(project_id, make.wbs_node(project_id, world.lead_e, engineer=world.emp1), world.emp1, 8)
+    _approve_booking(client, world, project_id, world.emp1, world.lead_h)  # Arjun works on it as an engineer
+    week = {"week_start_date": WEEK.isoformat()}
+    for headers in (world.lead_h, world.eng_h):
+        submitted = client.post(f"/api/projects/{project_id}/weekly-hours/submit", json=week, headers=headers)
+        assert submitted.status_code == 200, submitted.text
+
+    rows = client.get(
+        f"/api/projects/{project_id}/weekly-hours-submissions?week_start={WEEK}", headers=world.bu_h
+    ).json()
+
+    assert {row["employee_name"]: row["lead_hours"] for row in rows} == {"Anita Kumar": True, "Arjun Mehta": False}

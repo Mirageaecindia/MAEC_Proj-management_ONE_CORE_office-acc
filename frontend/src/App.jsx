@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import { MaecHeader } from './components/MaecHeader';
 import { useTrackingState } from './hooks/useTracking';
+import { canAccess } from './utils/access';
 import { LoginPage } from './pages/LoginPage';
 import { QueryProvider } from './providers/QueryProvider';
 
@@ -48,20 +49,21 @@ const TaskDetailsPage = lazyPage(() => import('./pages/shared/TaskDetailsPage'),
 
 function ExecutiveDashboardRouter() {
   const { role } = useAuth();
-  if (role === 'lead') return <LeadExecutiveDashboardPage />;
+  if (role === 'engineer') return <LeadExecutiveDashboardPage />; // an engineer who leads a project
   return <BuHeadExecutiveDashboardPage />;
 }
 
 function HomeRedirect() {
-  const { role } = useAuth();
-  if (role === 'engineer') return <Navigate to="/wbs-structure" replace />;
-  if (role === 'lead') return <Navigate to="/resource-booking" replace />;
+  const { role, leadsProjects } = useAuth();
+  if (role === 'engineer')
+    return <Navigate to={leadsProjects ? '/resource-booking' : '/wbs-structure'} replace />;
   return <Navigate to="/created-projects" replace />;
 }
 
+/** `roles`: account roles; 'lead' means an engineer who leads at least one project. */
 function ProtectedRoute({ children, roles }) {
-  const { role } = useAuth();
-  if (!role || !roles.includes(role)) return <Navigate to="/" replace />;
+  const { role, leadsProjects } = useAuth();
+  if (!role || !canAccess(roles, { role, leadsProjects })) return <Navigate to="/" replace />;
   return children;
 }
 

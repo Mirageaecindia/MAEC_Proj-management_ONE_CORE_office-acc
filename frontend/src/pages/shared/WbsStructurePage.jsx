@@ -25,9 +25,7 @@ const EMPTY_NODE = {
 export function WbsStructurePage() {
   const navigate = useNavigate();
   const { user, role, authHeaders } = useAuth();
-  const isLead = role === 'lead';
   const isBuHead = role === 'bu_head';
-  const isEngineer = role === 'engineer';
   const employeeId = user?.employee_id;
   const isAssignedToMe = (task) => task.assigned_engineer_id === employeeId;
 
@@ -48,6 +46,10 @@ export function WbsStructurePage() {
   const [toast, setToast] = useState(null);
   const [uploadPhase, setUploadPhase] = useState('');
   const fileInputRef = useRef(null);
+  // Lead and engineer are roles on the selected project, not on the account.
+  const project = projects.find((p) => String(p.id) === String(selectedId));
+  const isLead = project?.my_role === 'lead';
+  const isEngineer = project?.my_role === 'engineer';
 
   const loadTasks = useCallback(async (projectId = selectedId) => {
     if (!projectId) {
@@ -85,7 +87,7 @@ export function WbsStructurePage() {
         if (active) setError(err.message);
       });
     return () => { active = false; };
-  }, [isBuHead, isEngineer, isLead, authHeaders]);
+  }, [authHeaders]);
 
   useEffect(() => {
     let active = true;

@@ -32,25 +32,29 @@ Accounts are created from the command line (there is no sign-up page yet), in `b
 ```powershell
 # BU Head
 .venv\Scripts\python.exe create_user.py --username buhead --role bu_head --full-name "BU Head"
-# Leads: one per discipline (Electrical, Mechanical, BIM)
-.venv\Scripts\python.exe create_user.py --username lead.anita --role lead --full-name "Anita Kumar" --discipline Electrical
-# Engineers: linked to an employee row (employees come from backend/data/employee_leads.csv)
+# Everyone else is an engineer, linked to an employee row (employees come from backend/data/employee_leads.csv).
+# There are no lead accounts: the BU Head picks any engineer as a project's lead on Create Project.
 .venv\Scripts\python.exe create_user.py --username eng.arjun --role engineer --full-name "Arjun Mehta" --employee-id 1
 # A leaver
 .venv\Scripts\python.exe create_user.py --username eng.arjun --deactivate
 ```
-You are prompted for the password. For testing, create **one BU Head, one Lead
-per discipline and at least two engineers**, and use three browsers (or one
-normal and two private windows) to be logged in as three roles at once.
+You are prompted for the password. For testing, create **one BU Head and at
+least four engineers** (some will be chosen as leads), and use three browsers
+(or one normal and two private windows) to be logged in as several people at once.
 
 ### 1.3 After login
 | Role | Lands on | Tabs |
 |---|---|---|
 | **BU Head** | Projects | Projects · Create Project · Resource Booking · WBS Structure · Timeline & Logs · Executive Dashboard · Work Summary · SharePoint Mirror |
-| **Lead** | Resource Booking | Resource Booking · WBS Structure · Timeline & Logs · Executive Dashboard · SharePoint Mirror |
+| **Engineer who leads a project** | Resource Booking | Resource Booking · WBS Structure · Timeline & Logs · Executive Dashboard · Performance Dashboard · SharePoint Mirror |
 | **Engineer** | WBS Structure | WBS Structure · Timeline & Logs · Performance Dashboard · SharePoint Mirror |
 
-The **bell** in the header (BU Head and Lead) shows notifications: bookings to
+Lead is a role on a project, not a kind of account: each page follows your role
+on the **selected project**. On a project you lead you see the lead view
+(bookings, WBS editing, approvals); on a project you only work on, the engineer
+view. The account badge reads "Lead / Engineer" once you lead any project.
+
+The **bell** in the header (BU Head and project leads) shows notifications: bookings to
 approve, decisions, threshold alerts, locks, archive notices. Open it to read
 them; **Mark read** clears one. A session lasts 12 hours; five wrong passwords lock that
 username for 15 minutes.
@@ -117,7 +121,7 @@ Each project card shows its baseline. Buttons:
 The Create form, filled in (the SharePoint section is hidden; folders are not renamed).
 - Every changed field is written to the **audit log** as before → after.
 - **Currency change**: asks for confirmation. Amounts are relabelled, not converted, so enter the value in the new currency too.
-- **Replacing a Lead**: their WBS tasks move to the new Lead of that discipline. The old Lead loses the project; both are notified.
+- **Replacing a lead**: their WBS tasks move to the new lead of that discipline, and their lead booking is replaced by the new lead's. The old lead loses the project (unless booked on it as an engineer); both are notified.
 - **Changing target hours re-checks the lock**: lowering it past 100% usage locks timesheets; raising it back under 100% reopens an *automatic* lock (a manual stop stays).
 
 ### 3.4 Archive / Reopen

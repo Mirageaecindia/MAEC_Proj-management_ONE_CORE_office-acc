@@ -39,20 +39,20 @@ The core idea is **governance of effort**: hours are the unit of cost. Every hou
 
 ## 2. Roles and responsibilities
 
-There are three roles. The role comes only from the logged-in account, never from the URL or the browser.
+There are two account roles, BU Head and engineer, and one role on a project: **lead**. The BU Head chooses any engineer as a project's Electrical, Mechanical or BIM lead (Create Project), so the same person can lead one project and work as an engineer on another. Roles come only from the logged-in account and the project's data, never from the URL or the browser.
 
 | Role | Responsibilities | Pages (tabs) |
 |---|---|---|
 | **BU Head** (Business Unit Head) | Creates projects and their commercial baseline. Owns SharePoint provisioning. Approves resource bookings. Monitors hours, budget and schedule. Approves or rejects extension requests. Can stop execution (soft-lock timesheets). Read-only view of WBS, tasks and timesheets. | Projects (Created Projects), Create Project, Resource Booking, WBS Structure, Timeline & Logs, Executive Dashboard, Work Summary, SharePoint Mirror |
-| **Lead** (discipline lead: Electrical, Mechanical or BIM) | Books engineers and submits bookings for approval. Builds the WBS (manually or by CSV/XLSX upload). Assigns engineers. Moves subtasks forward. Approves submitted tasks. Approves or rejects engineers' timesheet entries. Requests extra hours from the BU Head. | Resource Booking, WBS Structure, Timeline & Logs, Executive Dashboard, SharePoint Mirror |
-| **Engineer** | Works on assigned WBS tasks and subtasks. Plans own subtasks. Moves task status forward and submits tasks for approval. Adds comments. Working time on subtasks is tracked automatically. | WBS Structure, Timeline & Logs, Performance Dashboard, SharePoint Mirror |
+| **Lead of a project** (an engineer chosen by the BU Head, with a period and a utilization %) | On that project: books engineers and submits bookings for approval. Builds the WBS (manually or by CSV/XLSX upload). Assigns engineers (and themselves) to subtasks. Approves submitted tasks. Approves or rejects engineers' hours (the BU Head approves the lead's own). Requests extra hours from the BU Head. | An engineer who leads any project also gets Resource Booking and Executive Dashboard; each page follows their role on the selected project |
+| **Engineer** | Works on assigned WBS tasks and subtasks. Plans own subtasks. Moves task status forward and submits tasks for approval. Adds comments. Working time on subtasks comes from Login/Logout. | WBS Structure, Timeline & Logs, Performance Dashboard, SharePoint Mirror |
 
 **How identity connects to data**
 - A **User** is a login account (`users` table).
 - An **Employee** is an HR record (`employees` table), seeded from the HR CSV.
-- **Engineers** are linked to their Employee through `users.employee_id`. WBS assignments, bookings and timesheets all reference `employees.id`.
-- **Leads** are identified by `users.id`. Projects store the three lead user IDs (`project_lead_electrical_user_id` and so on), and WBS nodes store `assigned_lead_user_id`. Older rows without an ID fall back to matching the lead's full name.
-- A lead's **discipline** (`users.discipline` = Electrical / Mechanical / BIM) filters the lead dropdowns on Create Project.
+- Every engineer account is linked to its Employee through `users.employee_id`. WBS assignments, bookings and timesheets all reference `employees.id`.
+- **Project leads** are identified by `users.id`: projects store the three lead user IDs (`project_lead_electrical_user_id` and so on), and WBS nodes store `assigned_lead_user_id`. Older rows without an ID fall back to matching the lead's full name. Each lead slot also has an approved `resource_bookings` row with `role = "lead"` (period and %), which is what holds the lead's capacity and lists them for subtasks.
+- `project_role` (`app/services/access.py`) derives a person's role on a project: lead, engineer (approved booking) or none. Login and `/me` return `leads_projects`; every project returns `my_role` for the caller.
 
 ---
 
@@ -175,7 +175,7 @@ MAEC_project_management/
 │   ├── schemas.py             Pydantic request/response models, status and phase constants
 │   ├── database.py            Shim re-exporting app.core.database (old imports keep working)
 │   ├── auth.py                Shim re-exporting app.core.security
-│   ├── create_user.py         CLI to create, (de)activate and set the discipline of login accounts
+│   ├── create_user.py         CLI to create and (de)activate login accounts
 │   ├── backup_db.py           Nightly SQLite backup with retention (see §12)
 │   ├── seed_and_verify.py     Older end-to-end smoke script (TestClient)
 │   ├── seed_users.py, check_users.py, inspect_db.py, temp_*.py, leads_loader.py
@@ -242,7 +242,7 @@ MAEC_project_management/
 - **Session expiry:** a token stops working `SESSION_TTL_HOURS` (default 12) after login. It is then deleted, and each login purges older expired sessions.
 - **Brute-force protection:** `LOGIN_MAX_FAILED_ATTEMPTS` (default 5) failed logins for one username lock it for `LOGIN_LOCKOUT_MINUTES` (default 15). Further attempts get HTTP 429 with `Retry-After`. The counter is in memory (per process).
 - **`get_current_user`** (in `app/core/security.py`) resolves the token to a user on every request, or returns 401. `GET /api/auth/me` restores the session on page refresh. Logout deletes the token.
-- **Account gate:** routers in `app/` use the dependency guards `require_bu_head`, `require_staff` (engineer or lead account) and `require_any_role`. The endpoints in `main.py` call `require_role(user.role, {...})`. Both return 403 for accounts that aren't allowed. Beyond "is this the BU Head", the account role decides little: lead and engineer are **roles on a project**.
+- **Account gate:** routers in `app/` use the dependency guards `require_bu_head`, `require_staff` (engineer accounts) and `require_any_role`. The endpoints in `main.py` call `require_role(user.role, {...})`. Both return 403 for accounts that aren't allowed. Beyond "is this the BU Head", the account role decides little: lead and engineer are **roles on a project**.
 - **Role on a project** (`project_role` in `app/services/access.py`, decided 2026-09-28): the same person can lead one project and work as an engineer on another, with one login.
   - **BU Head:** all projects.
   - **Lead of a project:** they're one of its three project leads, or the assigned lead of any of its WBS nodes. Lead actions (bookings, WBS editing, approvals, extension requests, the Executive Dashboard and Resource Summary) require this role **on that project**: `project_and_role(db, project_id, user, allowed={"lead"})` in `main.py`, `require_project_lead` in the services.
@@ -277,7 +277,7 @@ There are no database foreign keys. Relationships are plain integer columns and 
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `users` | Login accounts | `username` (unique), `password_hash`, `full_name`, `role` (`bu_head`/`lead`/`engineer`), `discipline` (leads), `employee_id` (engineers), `is_active` (deactivated accounts can't log in) |
+| `users` | Login accounts | `username` (unique), `password_hash`, `full_name`, `role` (`bu_head`/`engineer`), `employee_id` (engineers), `is_active` (deactivated accounts can't log in) |
 | `login_sessions` | Bearer tokens | `token` (unique), `user_id` |
 | `employees` | HR roster (seeded from CSV) | `employee_code`, `name`, `role_title`, `discipline` (= designation) |
 $1`sharepoint_disciplines` (JSON list), `sharepoint_site_url`, `archived_at` (set when archived) |
@@ -568,7 +568,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 ## 12. Development workflow
 
 - **Setup and run:** see [README.md](../README.md). Backend: `backend\.venv\Scripts\python.exe -m uvicorn main:app --reload` (port 8000). Frontend: `npm run dev` (port 5173).
-- **Accounts:** `backend\.venv\Scripts\python.exe create_user.py --username … --role bu_head|lead|engineer --full-name "…" [--employee-id N] [--discipline Electrical|Mechanical|BIM]` (leads need a discipline). Leavers: `create_user.py --username … --deactivate` logs them out at once and blocks login; `--activate` reverses it. See [backend/USERS.md](../backend/USERS.md).
+- **Accounts:** `backend\.venv\Scripts\python.exe create_user.py --username … --role bu_head|engineer --full-name "…" [--employee-id N]` (engineers need an employee record; project leads are chosen among them on Create Project). Leavers: `create_user.py --username … --deactivate` logs them out at once and blocks login; `--activate` reverses it. See [backend/USERS.md](../backend/USERS.md).
 - **Backups:** `backend\.venv\Scripts\python.exe backup_db.py` takes a consistent snapshot (safe while the server runs) into `backend/backups/` and keeps the newest 14. Schedule it nightly with Windows Task Scheduler; the command and the restore steps are in the script's docstring.
 - **Tests:** `backend\.venv\Scripts\python.exe -m pytest` runs 77 characterization tests of the BU Head API against an isolated temp database with SharePoint disabled. Assertions marked `KNOWN (roadmap X.Y)` record current, known-wrong behaviour.
 - **Quality:** ruff (backend), ESLint + Prettier (frontend), and pre-commit hooks that also block secrets, databases and data CSVs. Legacy shared files are on a "ratchet" exception list and are cleaned up when they're refactored.

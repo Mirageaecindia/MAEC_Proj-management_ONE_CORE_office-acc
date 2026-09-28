@@ -54,7 +54,6 @@ export function ResourceBookingPage() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const { role, authHeaders, logout } = useAuth();
-  const isLead = role === 'lead';
   const isBuHead = role === 'bu_head';
 
   const rawTargetId = searchParams.get('projectId') || location.state?.projectId;
@@ -117,6 +116,7 @@ export function ResourceBookingPage() {
   }, []);
 
   const project = projects.find((p) => String(p.id) === String(selectedId));
+  const isLead = project?.my_role === 'lead'; // a role on the selected project, not on the account
   const projectId = project?.id;
 
   const approvalStatus = useMemo(() => {

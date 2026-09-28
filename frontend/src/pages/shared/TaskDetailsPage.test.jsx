@@ -9,7 +9,7 @@ import { TaskDetailsPage } from './TaskDetailsPage';
 const WAIT = { timeout: 5000 };
 
 vi.mock('../../AuthContext', () => {
-  const auth = { role: 'engineer', authHeaders: () => ({}), logout: vi.fn() }; // stable, like the real context
+  const auth = { role: 'engineer', user: { employee_id: 3 }, authHeaders: () => ({}), logout: vi.fn() }; // stable
   return { useAuth: () => auth };
 });
 
@@ -17,6 +17,7 @@ const SUBTASK = {
   id: 5,
   project_id: 1,
   parent_id: 4,
+  assigned_engineer_id: 3,
   node_type: 'subtask',
   wbs_code: '1.1',
   task_name: 'Cable schedule',
@@ -37,7 +38,8 @@ const session = (subtaskId) => ({
 function fakeApi(url, options = {}) {
   let body;
   if (/\/api\/wbs-nodes\/5$/.test(url)) body = SUBTASK;
-  else if (/\/api\/projects\/1$/.test(url)) body = { id: 1, project_name: 'Hotel Tower' };
+  else if (/\/api\/projects\/1$/.test(url))
+    body = { id: 1, project_name: 'Hotel Tower', my_role: 'engineer' };
   else if (/\/subtask-tracking\/start$/.test(url)) {
     activeSession = session(JSON.parse(options.body).subtask_id);
     body = { active_session: activeSession };

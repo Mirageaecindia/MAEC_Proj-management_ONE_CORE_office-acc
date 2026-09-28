@@ -14,14 +14,11 @@ import {
 
 export function EngineerWeeklyLogsPage() {
   const [searchParams] = useSearchParams();
-  const { role, authHeaders } = useAuth();
+  const { authHeaders } = useAuth();
 
   const targetProjectId = searchParams.get('projectId') ? Number(searchParams.get('projectId')) : null;
   const targetEmployeeId = searchParams.get('employeeId') ? String(searchParams.get('employeeId')) : '';
   const weekStartParam = searchParams.get('weekStart') || '';
-
-  const isEngineer = role === 'engineer';
-  const isLead = role === 'lead';
 
   const [projects, setProjects] = useState([]);
   const [selectedId, setSelectedId] = useState('');
@@ -34,6 +31,9 @@ export function EngineerWeeklyLogsPage() {
   const [error, setError] = useState('');
 
   const project = projects.find((p) => String(p.id) === String(selectedId));
+  // Lead and engineer are roles on the selected project, not on the account.
+  const isEngineer = project?.my_role === 'engineer';
+  const isLead = project?.my_role === 'lead';
   const projectId = project?.id;
 
   const monday = useMemo(() => {

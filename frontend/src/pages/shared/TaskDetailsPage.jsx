@@ -26,15 +26,18 @@ function formatDate(dateStr) {
 export function TaskDetailsPage() {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
-    const { role, authHeaders, logout } = useAuth();
-    const isEngineer = role === 'engineer';
-    const isLead = role === 'lead';
+    const { user, role, authHeaders, logout } = useAuth();
+    const isStaff = role === 'engineer'; // everyone but the BU Head
 
     const nodeId = Number(searchParams.get('nodeId')) || null;
     const projectId = Number(searchParams.get('projectId')) || null;
 
     const [node, setNode] = useState(null);
     const [project, setProject] = useState(null);
+    // Leading is a role on this project. Working on the node (status, Login/Logout, comments)
+    // belongs to whoever it is assigned to: an engineer, or a lead doing their own subtask.
+    const isLead = project?.my_role === 'lead';
+    const isEngineer = Boolean(user?.employee_id) && node?.assigned_engineer_id === user?.employee_id;
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [commentText, setCommentText] = useState('');
@@ -46,7 +49,7 @@ export function TaskDetailsPage() {
 
     // Subtask Login/Logout (Engineer). The heartbeat runs app-wide (App.jsx);
     // the Engineer sees only which subtask they are logged in to, never hours.
-    const tracking = useTrackingState({ enabled: isEngineer });
+    const tracking = useTrackingState({ enabled: isStaff });
     const startTracking = useStartTracking();
     const logoutTracking = useLogoutTracking();
     const activeSession = tracking.data?.active_session ?? null;

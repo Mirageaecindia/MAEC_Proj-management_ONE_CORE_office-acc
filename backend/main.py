@@ -839,13 +839,19 @@ WEEKLY_HOURS_STATUS_LABELS = {
 }
 
 
-def weekly_submission_output(db: Session, submission: models.WeeklyHoursSubmission) -> dict:
+def weekly_submission_output(
+    db: Session, submission: models.WeeklyHoursSubmission, lead_ids: Optional[set] = None
+) -> dict:
+    """`lead_hours`: these are a project lead's hours, so the BU Head reviews them, not a lead."""
     employee = db.query(models.Employee).filter_by(id=submission.employee_id).first()
+    if lead_ids is None:
+        lead_ids = lead_employee_ids(db, submission.project_id)
     return {
         "id": submission.id,
         "project_id": submission.project_id,
         "employee_id": submission.employee_id,
         "employee_name": employee.name if employee else "",
+        "lead_hours": submission.employee_id in lead_ids,
         "week_start_date": submission.week_start_date.isoformat(),
         "status": submission.status,
         "status_label": WEEKLY_HOURS_STATUS_LABELS.get(submission.status, submission.status),
@@ -939,8 +945,9 @@ def list_weekly_hours_submissions(
         query = query.filter(
             models.WeeklyHoursSubmission.employee_id.in_(visible) if visible else models.WeeklyHoursSubmission.id < 0
         )
+    lead_ids = lead_employee_ids(db, project_id)  # once for the whole list
     return [
-        weekly_submission_output(db, submission)
+        weekly_submission_output(db, submission, lead_ids)
         for submission in query.order_by(models.WeeklyHoursSubmission.employee_id).all()
     ]
 

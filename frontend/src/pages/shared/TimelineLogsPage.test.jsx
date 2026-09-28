@@ -166,7 +166,7 @@ const TIMELINE = {
 
 const ROUTES = [
   [/\/api\/server-date$/, SERVER_DATE],
-  [/\/api\/projects$/, PROJECTS],
+  [/\/api\/projects$/, () => PROJECTS.map((project) => ({ ...project, my_role: currentRole }))],
   [/\/api\/projects\/1\/wbs-structure$/, NODES],
   [/\/api\/projects\/1\/timeline-logs$/, TIMELINE],
 ];
@@ -221,7 +221,8 @@ function fakeApi(url, options = {}) {
   }
 
   const match = ROUTES.find(([pattern]) => pattern.test(url));
-  const [status, body] = match ? [200, match[1]] : [404, { detail: `No fixture for ${url}` }];
+  const fixture = match && (typeof match[1] === 'function' ? match[1]() : match[1]);
+  const [status, body] = match ? [200, fixture] : [404, { detail: `No fixture for ${url}` }];
   return Promise.resolve(new Response(JSON.stringify(body), { status }));
 }
 
@@ -374,5 +375,32 @@ describe('Lead review of the weekly-hours submission', () => {
     await screen.findByText('Rejected');
     expect(screen.queryByText('Approve')).toBeNull();
     expect(screen.queryByText('Reject')).toBeNull();
+  });
+});
+
+describe("Who reviews a project lead's week", () => {
+  beforeEach(() => {
+    submissions = [submission('submitted', { lead_hours: true })]; // Ritu leads this project
+    vi.stubGlobal('fetch', vi.fn(fakeApi));
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('the BU Head approves or rejects it', async () => {
+    currentRole = 'bu_head';
+    renderPage();
+
+    expect(await screen.findByText('Approve')).toBeTruthy();
+    expect(screen.getByText('Reject')).toBeTruthy();
+  });
+
+  it('a lead of the project cannot', async () => {
+    currentRole = 'lead';
+    renderPage();
+
+    await screen.findByText('Submitted for Approval');
+    expect(screen.queryByText('Approve')).toBeNull();
   });
 });

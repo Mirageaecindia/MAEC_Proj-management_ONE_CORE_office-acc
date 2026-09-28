@@ -10,15 +10,45 @@ vi.mock('../../AuthContext', () => ({
   useAuth: () => ({ role: currentRole, authHeaders, logout: vi.fn() }),
 }));
 
-const PROJECTS = [
-  { id: 1, project_name: 'TEST 1' },
-];
+const PROJECTS = [{ id: 1, project_name: 'TEST 1' }];
 
 const NODES = [
-  { id: 1, project_id: 1, parent_id: null, wbs_code: '1', task_name: 'task 1', deliverable_status: 'Not Started', assigned_engineer_id: 3 },
-  { id: 2, project_id: 1, parent_id: 1, wbs_code: '1.1', task_name: 'subtask 1', deliverable_status: 'Done', assigned_engineer_id: 3 },
-  { id: 3, project_id: 1, parent_id: null, wbs_code: null, task_name: 'task 2', deliverable_status: 'Not Started', assigned_engineer_id: 3 },
-  { id: 4, project_id: 1, parent_id: 3, wbs_code: null, task_name: 'subtask 2', deliverable_status: 'Done', assigned_engineer_id: 3 },
+  {
+    id: 1,
+    project_id: 1,
+    parent_id: null,
+    wbs_code: '1',
+    task_name: 'task 1',
+    deliverable_status: 'Not Started',
+    assigned_engineer_id: 3,
+  },
+  {
+    id: 2,
+    project_id: 1,
+    parent_id: 1,
+    wbs_code: '1.1',
+    task_name: 'subtask 1',
+    deliverable_status: 'Done',
+    assigned_engineer_id: 3,
+  },
+  {
+    id: 3,
+    project_id: 1,
+    parent_id: null,
+    wbs_code: null,
+    task_name: 'task 2',
+    deliverable_status: 'Not Started',
+    assigned_engineer_id: 3,
+  },
+  {
+    id: 4,
+    project_id: 1,
+    parent_id: 3,
+    wbs_code: null,
+    task_name: 'subtask 2',
+    deliverable_status: 'Done',
+    assigned_engineer_id: 3,
+  },
 ];
 
 const ENTRIES = [
@@ -31,7 +61,13 @@ const ENTRIES = [
     employee_id: 3,
     employee_name: 'Ritu',
     week_start_date: '2026-09-21',
-    mon_hours: 0, tue_hours: 0, wed_hours: 0, thu_hours: 0.02, fri_hours: 0, sat_hours: 0, sun_hours: 0,
+    mon_hours: 0,
+    tue_hours: 0,
+    wed_hours: 0,
+    thu_hours: 0.02,
+    fri_hours: 0,
+    sat_hours: 0,
+    sun_hours: 0,
     total_hours: 0.02,
     approval_status: 'pending_review',
     reviewed_by: null,
@@ -46,7 +82,13 @@ const ENTRIES = [
     employee_id: 3,
     employee_name: 'Ritu',
     week_start_date: '2026-09-21',
-    mon_hours: 0, tue_hours: 0, wed_hours: 0, thu_hours: 0.01, fri_hours: 0, sat_hours: 0, sun_hours: 0,
+    mon_hours: 0,
+    tue_hours: 0,
+    wed_hours: 0,
+    thu_hours: 0.01,
+    fri_hours: 0,
+    sat_hours: 0,
+    sun_hours: 0,
     total_hours: 0.01,
     approval_status: 'pending_review',
     reviewed_by: null,
@@ -64,7 +106,7 @@ const TIMELINE = {
 let submissionsData = [];
 
 const ROUTES = [
-  [/\/api\/projects$/, PROJECTS],
+  [/\/api\/projects$/, () => PROJECTS.map((project) => ({ ...project, my_role: currentRole }))],
   [/\/api\/projects\/1\/wbs-structure$/, NODES],
   [/\/api\/projects\/1\/timesheet\?/, ENTRIES],
   [/\/api\/projects\/1\/weekly-hours-submissions\?/, submissionsData],
@@ -78,17 +120,30 @@ function fakeApi(url, options) {
     if (/\/weekly-hours\/approve$/.test(url)) {
       submissionsData.length = 0;
       submissionsData.push({ employee_id: 3, status: 'approved', week_start_date: '2026-09-21' });
-      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
     }
     if (/\/weekly-hours\/reject$/.test(url)) {
       submissionsData.length = 0;
       submissionsData.push({ employee_id: 3, status: 'rejected', week_start_date: '2026-09-21' });
-      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
     }
   }
   const match = ROUTES.find(([pattern]) => pattern.test(url));
-  const [status, body] = match ? [200, match[1]] : [404, { detail: `No fixture for ${url}` }];
-  return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }));
+  const fixture = match && (typeof match[1] === 'function' ? match[1]() : match[1]);
+  const [status, body] = match ? [200, fixture] : [404, { detail: `No fixture for ${url}` }];
+  return Promise.resolve(
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }),
+  );
 }
 
 function renderPage(route = '/weekly-logs?projectId=1&employeeId=3&weekStart=2026-09-21') {

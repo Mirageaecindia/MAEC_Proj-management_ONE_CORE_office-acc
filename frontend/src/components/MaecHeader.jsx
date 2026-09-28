@@ -2,6 +2,7 @@ import { CircleUserRound, LogOut } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
+import { canAccess } from '../utils/access';
 import maecLogo from '../assets/maec-logo.png';
 import { NotificationBell } from './NotificationBell';
 
@@ -17,27 +18,25 @@ const allTabs = [
   { label: 'SharePoint Mirror', path: '/sharepoint-mirror', roles: ['lead', 'engineer', 'bu_head'] },
 ];
 
-/** Roles that receive notifications (governance alerts, booking and extension decisions). */
-const NOTIFIED_ROLES = ['bu_head', 'lead'];
-
 const ROLE_LABELS = {
   bu_head: 'BU Head',
-  lead: 'Lead',
   engineer: 'Engineer',
 };
 
 export function MaecHeader({ subtitle }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const location = useLocation();
-  const { user, role, logout } = useAuth();
+  const { user, role, leadsProjects, logout } = useAuth();
   const menuRef = useRef(null);
 
   const displaySubtitle = subtitle || (location.pathname.startsWith('/resource-booking') ? 'MEP Enterprise Workspace' : 'Project Management');
 
-  const visibleTabs = allTabs.filter((tab) => tab.roles.includes(role));
+  const visibleTabs = allTabs.filter((tab) => canAccess(tab.roles, { role, leadsProjects }));
 
   const displayName = user?.full_name || user?.username || 'User';
-  const roleLabel = ROLE_LABELS[role] || '';
+  const roleLabel = role === 'engineer' && leadsProjects ? 'Lead / Engineer' : ROLE_LABELS[role] || '';
+  // Governance alerts, booking and extension decisions go to the BU Head and project leads.
+  const notified = role === 'bu_head' || leadsProjects;
 
   const initials = displayName
     .split(' ')
@@ -72,7 +71,7 @@ export function MaecHeader({ subtitle }) {
           <strong className="brand-title">{displaySubtitle}</strong>
         </NavLink>
         <div className="user-menu">
-          {NOTIFIED_ROLES.includes(role) && <NotificationBell />}
+          {notified && <NotificationBell />}
           <div className="account-control" ref={menuRef}>
             <button
               className="account-pill"

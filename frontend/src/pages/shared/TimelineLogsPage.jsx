@@ -126,8 +126,10 @@ export function TimelineLogsPage() {
 
   const project = projects.find((p) => String(p.id) === String(selectedId));
   const projectId = project?.id;
-  const isEngineer = role === 'engineer';
-  const isLead = role === 'lead';
+  // Lead and engineer are roles on the selected project, not on the account.
+  const isBuHead = role === 'bu_head';
+  const isEngineer = project?.my_role === 'engineer';
+  const isLead = project?.my_role === 'lead';
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/projects`, { headers: authHeaders() })
@@ -385,6 +387,8 @@ export function TimelineLogsPage() {
           days,
           total,
           weekStatus: (submissionByEmployee[String(group.employee_id)] || {}).status || 'not_submitted',
+          // A project lead's hours are reviewed by the BU Head; an engineer's by the project's leads.
+          leadHours: Boolean((submissionByEmployee[String(group.employee_id)] || {}).lead_hours),
         };
       }),
     [engineerGroups, submissionByEmployee],
@@ -700,7 +704,7 @@ export function TimelineLogsPage() {
                             Submit for Approval
                           </button>
                         )}
-                        {isLead && group.weekStatus === 'submitted' && (
+                        {group.weekStatus === 'submitted' && (isBuHead ? group.leadHours : isLead && !group.leadHours) && (
                           <span className="review-actions">
                             <button
                               type="button"
@@ -738,7 +742,7 @@ export function TimelineLogsPage() {
           <button
             type="button"
             className="button button-primary button-next"
-            onClick={() => navigate(role === 'bu_head' ? '/executive-dashboard' : role === 'engineer' ? '/engineer-performance' : '/wbs-structure')}
+            onClick={() => navigate(isBuHead || isLead ? '/executive-dashboard' : '/engineer-performance-dashboard')}
           >
             NEXT <ArrowRight size={16} />
           </button>
