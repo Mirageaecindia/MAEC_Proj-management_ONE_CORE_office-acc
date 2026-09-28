@@ -352,7 +352,7 @@ describe('Lead review of the weekly-hours submission', () => {
   });
 
   it('shows approve/reject for a submitted week and persists the review', async () => {
-    submissions = [submission('submitted')];
+    submissions = [submission('submitted', { can_review: true, reviewers_done: 0, reviewers_total: 1 })];
     renderPage();
 
     const approve = await screen.findByText('Approve');
@@ -378,29 +378,42 @@ describe('Lead review of the weekly-hours submission', () => {
   });
 });
 
-describe("Who reviews a project lead's week", () => {
-  beforeEach(() => {
-    submissions = [submission('submitted', { lead_hours: true })]; // Ritu leads this project
-    vi.stubGlobal('fetch', vi.fn(fakeApi));
-  });
+describe('Per-task review of a week', () => {
+  beforeEach(() => vi.stubGlobal('fetch', vi.fn(fakeApi)));
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
   });
 
-  it('the BU Head approves or rejects it', async () => {
+  it('shows Approve to whoever the server says has hours to review (e.g. the BU Head for a lead)', async () => {
     currentRole = 'bu_head';
+    submissions = [submission('submitted', { can_review: true, reviewers_done: 0, reviewers_total: 1 })];
     renderPage();
 
     expect(await screen.findByText('Approve')).toBeTruthy();
-    expect(screen.getByText('Reject')).toBeTruthy();
   });
 
-  it('a lead of the project cannot', async () => {
+  it('hides it from a lead of the project who is not this week’s reviewer', async () => {
     currentRole = 'lead';
+    submissions = [submission('submitted', { can_review: false, reviewers_done: 0, reviewers_total: 1 })];
     renderPage();
 
     await screen.findByText('Submitted for Approval');
     expect(screen.queryByText('Approve')).toBeNull();
+  });
+
+  it('shows how many of the week’s reviewers have approved', async () => {
+    currentRole = 'lead';
+    submissions = [
+      submission('submitted', {
+        can_review: false,
+        reviewers_done: 1,
+        reviewers_total: 2,
+        waiting_on: ['Priya Nair'],
+      }),
+    ];
+    renderPage();
+
+    expect(await screen.findByText(/1 of 2 approved · waiting on Priya Nair/)).toBeTruthy();
   });
 });

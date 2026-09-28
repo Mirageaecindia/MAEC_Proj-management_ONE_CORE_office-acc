@@ -387,8 +387,8 @@ export function TimelineLogsPage() {
           days,
           total,
           weekStatus: (submissionByEmployee[String(group.employee_id)] || {}).status || 'not_submitted',
-          // A project lead's hours are reviewed by the BU Head; an engineer's by the project's leads.
-          leadHours: Boolean((submissionByEmployee[String(group.employee_id)] || {}).lead_hours),
+          // Per task: the server says whether this user has hours to review in the week, and who is still pending.
+          review: submissionByEmployee[String(group.employee_id)] || {},
         };
       }),
     [engineerGroups, submissionByEmployee],
@@ -704,7 +704,13 @@ export function TimelineLogsPage() {
                             Submit for Approval
                           </button>
                         )}
-                        {group.weekStatus === 'submitted' && (isBuHead ? group.leadHours : isLead && !group.leadHours) && (
+                        {group.weekStatus === 'submitted' && group.review.reviewers_total > 1 && (
+                          <small className="review-progress">
+                            {group.review.reviewers_done} of {group.review.reviewers_total} approved
+                            {group.review.waiting_on?.length > 0 && ` · waiting on ${group.review.waiting_on.join(', ')}`}
+                          </small>
+                        )}
+                        {group.weekStatus === 'submitted' && group.review.can_review && (
                           <span className="review-actions">
                             <button
                               type="button"

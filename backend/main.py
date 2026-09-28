@@ -44,27 +44,15 @@ from app.services.booking_approval import BOOKING_APPROVAL_LABELS, booking_appro
 from app.services.governance import extension_request_output, find_pending_extension_request
 from app.services.metrics import executive_dashboard_data
 from app.services.governance_monitor import enforce_governance
+from app.services.hours_review import HoursReview, review_summary, sync_week_status, tasks_by_id, week_status
 from app.services.notifications import EXTENSION_REQUESTED, create_bu_head_notification
 
 logger = logging.getLogger(__name__)
 
 STAFF = {"engineer"}  # everyone but the BU Head; leading a project is a role on the project, not an account
 LEAD_ROW = "Lead assignments are set by the BU Head on the project, not here."
-LEAD_HOURS_BU_HEAD = "A project lead's hours are approved by the BU Head."
-ENGINEER_HOURS_LEAD = "An engineer's hours are approved by the project's leads."
-
-
-def require_hours_reviewer(db: Session, user: models.User, project_id: int, employee_id: int) -> None:
-    """Who reviews whose hours: the BU Head reviews the project's leads; a lead of the project reviews
-    the engineers (never themselves)."""
-    lead_hours = employee_id in lead_employee_ids(db, project_id)
-    if user.role == "bu_head":
-        if not lead_hours:
-            raise HTTPException(status_code=403, detail=ENGINEER_HOURS_LEAD)
-    elif project_role(db, user, project_id) != "lead":
-        raise HTTPException(status_code=403, detail=NOT_PROJECT_LEAD)
-    elif lead_hours:
-        raise HTTPException(status_code=403, detail=LEAD_HOURS_BU_HEAD)
+NOT_YOUR_HOURS = "These hours are approved by the task's lead, or by the BU Head when the task has no active lead or they are a project lead's own."
+TIMESHEETS_LOCKED = "Timesheets are soft-locked by the BU Head — approvals are on hold."
 
 
 def refuse_lead_as_resource(db: Session, project_id: int, employee: models.Employee) -> None:
@@ -839,19 +827,21 @@ WEEKLY_HOURS_STATUS_LABELS = {
 }
 
 
+NO_REVIEW = {"can_review": False, "reviewers_total": 0, "reviewers_done": 0, "waiting_on": []}
+
+
 def weekly_submission_output(
-    db: Session, submission: models.WeeklyHoursSubmission, lead_ids: Optional[set] = None
+    db: Session, submission: models.WeeklyHoursSubmission, review: Optional[dict] = None
 ) -> dict:
-    """`lead_hours`: these are a project lead's hours, so the BU Head reviews them, not a lead."""
+    """`review` (from `review_summary`): whether the caller has hours to review in this week, and
+    how many reviewers have finished ("2 of 3 approved") with the names still pending."""
     employee = db.query(models.Employee).filter_by(id=submission.employee_id).first()
-    if lead_ids is None:
-        lead_ids = lead_employee_ids(db, submission.project_id)
     return {
+        **(review or NO_REVIEW),
         "id": submission.id,
         "project_id": submission.project_id,
         "employee_id": submission.employee_id,
         "employee_name": employee.name if employee else "",
-        "lead_hours": submission.employee_id in lead_ids,
         "week_start_date": submission.week_start_date.isoformat(),
         "status": submission.status,
         "status_label": WEEKLY_HOURS_STATUS_LABELS.get(submission.status, submission.status),
@@ -937,7 +927,7 @@ def list_weekly_hours_submissions(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _, role = project_and_role(db, project_id, user)
+    project, role = project_and_role(db, project_id, user)
     week = date.fromisoformat(week_start)
     visible = weekly_hours_visible_employee_ids(db, project_id, week, user, role)
     query = db.query(models.WeeklyHoursSubmission).filter_by(project_id=project_id, week_start_date=week)
@@ -945,11 +935,9 @@ def list_weekly_hours_submissions(
         query = query.filter(
             models.WeeklyHoursSubmission.employee_id.in_(visible) if visible else models.WeeklyHoursSubmission.id < 0
         )
-    lead_ids = lead_employee_ids(db, project_id)  # once for the whole list
-    return [
-        weekly_submission_output(db, submission, lead_ids)
-        for submission in query.order_by(models.WeeklyHoursSubmission.employee_id).all()
-    ]
+    submissions = query.order_by(models.WeeklyHoursSubmission.employee_id).all()
+    reviews = review_summary(db, project, week, {s.employee_id for s in submissions}, user, date.today())
+    return [weekly_submission_output(db, submission, reviews.get(submission.employee_id)) for submission in submissions]
 
 
 @app.post("/api/projects/{project_id}/weekly-hours/submit")
@@ -1001,6 +989,13 @@ def submit_weekly_hours(
         submission.submitted_at = now
         submission.reviewed_by = None
         submission.reviewed_at = None
+        # Resubmitting asks for the rejected hours to be reviewed again (e.g. after a correction).
+        db.query(models.TimeLogEntry).filter_by(
+            project_id=project_id,
+            employee_id=user.employee_id,
+            week_start_date=payload.week_start_date,
+            approval_status="rejected",
+        ).update({"approval_status": "pending_review", "reviewed_by": None, "reviewed_at": None})
     else:
         submission = models.WeeklyHoursSubmission(
             project_id=project_id,
@@ -1010,6 +1005,8 @@ def submit_weekly_hours(
             submitted_at=now,
         )
         db.add(submission)
+    db.flush()
+    sync_week_status(db, project_id, user.employee_id, payload.week_start_date)
     db.commit()
     db.refresh(submission)
     return weekly_submission_output(db, submission)
@@ -1022,13 +1019,21 @@ def lead_review_weekly_hours(
         raise HTTPException(status_code=400, detail="Lead identity is required.")
     project, role = project_and_role(db, project_id, user, allowed={"lead", "bu_head"})
     if project.timesheets_soft_locked:
-        raise HTTPException(
-            status_code=409,
-            detail="Timesheets are soft-locked by the BU Head — approvals are on hold.",
-        )
+        raise HTTPException(status_code=409, detail=TIMESHEETS_LOCKED)
     if payload.employee_id is None:
         raise HTTPException(status_code=400, detail="employee_id is required to review weekly hours.")
-    require_hours_reviewer(db, user, project_id, payload.employee_id)
+    # Per task: the caller reviews only the rows they are responsible for; the others wait
+    # for their own reviewer, and the week is Approved once every row is.
+    rows = (
+        db.query(models.TimeLogEntry)
+        .filter_by(project_id=project_id, employee_id=payload.employee_id, week_start_date=payload.week_start_date)
+        .all()
+    )
+    tasks = tasks_by_id(db, rows)
+    review = HoursReview(db, project, date.today())
+    yours = [row for row in rows if review.may_review(user, tasks.get(row.task_id), row.employee_id)]
+    if not yours:
+        raise HTTPException(status_code=403, detail=NOT_YOUR_HOURS)
     submission = weekly_submission_for(db, project_id, payload.employee_id, payload.week_start_date)
     if not submission:
         raise HTTPException(
@@ -1040,16 +1045,19 @@ def lead_review_weekly_hours(
             status_code=409,
             detail="Only weekly hours that are 'Submitted for Approval' can be approved or rejected.",
         )
-    visible = weekly_hours_visible_employee_ids(db, project_id, payload.week_start_date, user, role)
-    if visible is not None and submission.employee_id not in visible:
-        raise HTTPException(status_code=403, detail="These weekly hours are outside your lead scope.")
-    submission.status = action
-    submission.reviewed_by = user.full_name
-    submission.reviewed_at = datetime.now(timezone.utc)
+    mine = [row for row in yours if row.approval_status == "pending_review"]
+    if not mine:
+        raise HTTPException(status_code=409, detail="None of your hours in this week are waiting for review.")
+    now = datetime.now(timezone.utc)
+    for row in mine:
+        row.approval_status, row.reviewed_by, row.reviewed_at = action, user.full_name, now
+    submission.status = week_status(row.approval_status for row in rows)
+    submission.reviewed_by, submission.reviewed_at = user.full_name, now
     db.commit()
     enforce_governance(db, project_id)  # usage = approved hours: alerts / auto-lock
     db.refresh(submission)
-    return weekly_submission_output(db, submission)
+    summary = review_summary(db, project, submission.week_start_date, [submission.employee_id], user, date.today())
+    return weekly_submission_output(db, submission, summary.get(submission.employee_id))
 
 
 @app.post("/api/projects/{project_id}/weekly-hours/approve")
@@ -1661,19 +1669,19 @@ def lead_review_time_log(db: Session, entry_id: int, user: models.User, status: 
     entry = db.query(models.TimeLogEntry).filter_by(id=entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Time log entry not found.")
-    require_hours_reviewer(db, user, entry.project_id, entry.employee_id)
-    task = db.query(models.WbsNode).filter_by(id=entry.task_id).first()
-    if not task or (user.role != "bu_head" and not node_assigned_to_lead(task, user)):
-        raise HTTPException(status_code=403, detail="This time log is outside your lead scope.")
     project = db.query(models.Project).filter_by(id=entry.project_id).first()
-    if project and project.timesheets_soft_locked:
-        raise HTTPException(
-            status_code=409,
-            detail="Timesheets are soft-locked by the BU Head — approvals are on hold.",
-        )
+    task = db.query(models.WbsNode).filter_by(id=entry.task_id).first()
+    if user.role != "bu_head" and project_role(db, user, entry.project_id) is None:
+        raise HTTPException(status_code=403, detail="You do not have access to this project.")
+    if not HoursReview(db, project, date.today()).may_review(user, task, entry.employee_id):
+        raise HTTPException(status_code=403, detail=NOT_YOUR_HOURS)
+    if project.timesheets_soft_locked:
+        raise HTTPException(status_code=409, detail=TIMESHEETS_LOCKED)
     entry.approval_status = status
     entry.reviewed_by = user.full_name
     entry.reviewed_at = datetime.now(timezone.utc)
+    db.flush()
+    sync_week_status(db, entry.project_id, entry.employee_id, entry.week_start_date)
     db.commit()
     enforce_governance(db, entry.project_id)  # usage = approved hours: alerts / auto-lock
     db.refresh(entry)

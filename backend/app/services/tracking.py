@@ -35,6 +35,7 @@ from app.domain.timesheets import PENDING_REVIEW
 from app.repositories.tracking import ACTIVE, ENDED, TrackingRepository
 from app.services.access import user_can_access_project
 from app.services.governance_monitor import enforce_governance
+from app.services.hours_review import sync_week_status
 
 HEARTBEAT_GRACE = timedelta(minutes=5)  # the browser beats every minute; background tabs can lag
 DAILY_LIMIT_SECONDS = 8 * 3600
@@ -66,6 +67,11 @@ def upsert_subtask_time_log(
         )
         db.add(entry)
     setattr(entry, field, round((getattr(entry, field) or 0) + hours, 2))
+    if entry.approval_status != PENDING_REVIEW:
+        # New hours on a reviewed row need review too: never count them as already approved.
+        entry.approval_status, entry.reviewed_by, entry.reviewed_at = PENDING_REVIEW, None, None
+        db.flush()
+        sync_week_status(db, project_id, employee_id, week_start)
     return entry
 
 

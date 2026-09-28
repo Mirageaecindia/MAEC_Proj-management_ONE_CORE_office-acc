@@ -1,13 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { projectsApi } from '../api/projects';
+import { useAuth } from '../AuthContext';
 import { queryKeys } from './queryKeys';
 
 /** Projects visible to the signed-in user; archived ones only for the BU Head, on request. */
-export function useProjects({ includeArchived = false } = {}) {
+export function useProjects({ includeArchived = false, enabled = true } = {}) {
   return useQuery({
     queryKey: queryKeys.projectList(includeArchived),
     queryFn: () => projectsApi.list({ includeArchived }),
+    enabled,
   });
+}
+
+/**
+ * Whether the signed-in engineer leads any project. Read from the project list (refetched on focus),
+ * so tabs follow a lead assignment made mid-session; the login value is used until the list loads.
+ */
+export function useLeadsProjects() {
+  const { role, leadsProjects } = useAuth();
+  const { data } = useProjects({ enabled: role === 'engineer' });
+  return data ? data.some((project) => project.my_role === 'lead') : leadsProjects;
 }
 
 /** One project by id (the BU Head can read archived ones). */

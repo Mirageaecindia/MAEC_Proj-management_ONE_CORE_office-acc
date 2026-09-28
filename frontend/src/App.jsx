@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import { MaecHeader } from './components/MaecHeader';
+import { useLeadsProjects } from './hooks/useProjects';
 import { useTrackingState } from './hooks/useTracking';
 import { canAccess } from './utils/access';
 import { LoginPage } from './pages/LoginPage';
@@ -53,16 +54,16 @@ function ExecutiveDashboardRouter() {
   return <BuHeadExecutiveDashboardPage />;
 }
 
+/** Everyone but the BU Head starts on their own work (WBS), leads included. */
 function HomeRedirect() {
-  const { role, leadsProjects } = useAuth();
-  if (role === 'engineer')
-    return <Navigate to={leadsProjects ? '/resource-booking' : '/wbs-structure'} replace />;
-  return <Navigate to="/created-projects" replace />;
+  const { role } = useAuth();
+  return <Navigate to={role === 'engineer' ? '/wbs-structure' : '/created-projects'} replace />;
 }
 
 /** `roles`: account roles; 'lead' means an engineer who leads at least one project. */
 function ProtectedRoute({ children, roles }) {
-  const { role, leadsProjects } = useAuth();
+  const { role } = useAuth();
+  const leadsProjects = useLeadsProjects();
   if (!role || !canAccess(roles, { role, leadsProjects })) return <Navigate to="/" replace />;
   return children;
 }

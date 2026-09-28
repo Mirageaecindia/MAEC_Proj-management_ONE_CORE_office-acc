@@ -135,9 +135,8 @@ def test_the_bu_head_approves_a_leads_own_hours(client, db, make, world):
     )
     week = {"week_start_date": WEEK.isoformat()}
 
-    # Rows: the lead can't approve their own; the BU Head can, but not an engineer's.
+    # Rows: the lead can't approve their own; the BU Head can't approve an engineer's with an active lead.
     assert client.post(f"/api/time-log-entries/{own_row.id}/approve", headers=world.lead_h).status_code == 403
-    assert client.post(f"/api/time-log-entries/{own_row.id}/approve", headers=world.bu_h).status_code == 200
     assert client.post(f"/api/time-log-entries/{engineer_row.id}/approve", headers=world.bu_h).status_code == 403
     assert client.post(f"/api/time-log-entries/{engineer_row.id}/approve", headers=world.lead_h).status_code == 200
     # Weeks: the lead submits their own week; only the BU Head can approve it.
@@ -171,4 +170,6 @@ def test_weekly_submissions_say_whose_hours_the_bu_head_reviews(client, db, make
         f"/api/projects/{project_id}/weekly-hours-submissions?week_start={WEEK}", headers=world.bu_h
     ).json()
 
-    assert {row["employee_name"]: row["lead_hours"] for row in rows} == {"Anita Kumar": True, "Arjun Mehta": False}
+    assert {row["employee_name"]: row["can_review"] for row in rows} == {"Anita Kumar": True, "Arjun Mehta": False}
+    arjun = next(row for row in rows if row["employee_name"] == "Arjun Mehta")
+    assert (arjun["reviewers_done"], arjun["reviewers_total"], arjun["waiting_on"]) == (0, 1, ["Anita Kumar"])

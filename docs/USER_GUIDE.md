@@ -189,11 +189,22 @@ once the engineer has submitted it ("Submitted for Approval"). Main-task
 statuses are otherwise driven by the engineer; comments are added by engineers.
 
 ### 4.4 Timeline & Logs (approve hours)
-The Gantt shows phase progress. The **Weekly Hours Logging** table shows each
-engineer's tracked hours for the week (all seven days). When an engineer has
-**submitted** the week, **Approve** or **Reject** it. Only **approved** hours count
-toward the project's usage. Click an engineer to open their weekly log details.
-While timesheets are locked, approvals are refused.
+The weekly sheet lists the engineers who logged hours on your tasks. Hours are
+approved **per task, by that task's lead**: **Approve** or **Reject** on a
+submitted week acts only on the engineer's hours on *your* tasks. If they also
+worked under another lead, the week shows e.g. **"1 of 2 approved · waiting on
+Priya Nair"** and becomes Approved once every lead has approved their part.
+Each approved part counts toward the project's usage straight away.
+
+Who approves what:
+- **An engineer's hours:** the lead of the task they logged them on.
+- **A project lead's own hours** (subtasks they did themselves): the **BU Head**,
+  never the lead.
+- **Hours on a task with no lead, or whose lead's period has ended:** the BU Head,
+  so no hours are left without someone to approve them.
+- Nobody can approve while the project is locked, the BU Head included.
+- New hours logged on already-approved work go back to "waiting for review";
+  they are never counted as approved without a review.
 
 ### 4.5 Executive Dashboard (Lead view)
 The project's governance figures for your projects, the audit log, and the
@@ -223,9 +234,10 @@ to open Task Details.
   - Edge "sleeping tabs" and Chrome "Memory Saver" can freeze a background tab. Add the MAEC address under *Always keep these sites active* in the browser settings.
 
 ### 5.3 Timeline & Logs
-Your tracked hours for the week. **Submit for Approval** sends the week to your
-Lead; the status shows Submitted, Approved or Rejected (after a rejection you can
-submit again).
+Your tracked hours for the week. **Submit for Approval** sends the week to the
+leads of the tasks you worked on (or the BU Head, see §4.4); the status shows
+Submitted, Approved or Rejected. After a rejection you can submit again, which
+asks for the rejected hours to be reviewed again.
 
 ### 5.4 Performance Dashboard
 Your own figures per project: hours consumption, governance status, schedule
@@ -245,7 +257,7 @@ index, task completion and a monthly chart.
 | Lead **creates a task** assigned to an engineer | It in WBS (read-only) | It in WBS | It in their WBS |
 | Engineer **tracks time** (Logout) | Pending hours on the dashboard | Hours in Timeline & Logs | Hours in Timeline & Logs |
 | Engineer **submits the week** | — | Approve / Reject buttons | "Submitted" |
-| Lead **approves the week** | **Usage, budget burn and SPI go up** | Same figures | "Approved"; Performance Dashboard updates |
+| Task lead **approves their part of the week** | **Usage, budget burn and SPI go up** | Same figures | "Approved"; Performance Dashboard updates |
 | Approved hours reach the **alert threshold** | Bell: threshold alert; ALERT on the card | Bell: threshold alert | — |
 | Approved hours reach **100% of the baseline** | Bell: locked; BASELINE REACHED | Bell: locked; approvals refused | Logging and tracking refused |
 | Lead **requests an extension** | Bell + request on the dashboard | "Pending BU Head approval" | — |

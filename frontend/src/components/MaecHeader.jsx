@@ -2,6 +2,7 @@ import { CircleUserRound, LogOut } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
+import { useLeadsProjects } from '../hooks/useProjects';
 import { canAccess } from '../utils/access';
 import maecLogo from '../assets/maec-logo.png';
 import { NotificationBell } from './NotificationBell';
@@ -26,7 +27,8 @@ const ROLE_LABELS = {
 export function MaecHeader({ subtitle }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const location = useLocation();
-  const { user, role, leadsProjects, logout } = useAuth();
+  const { user, role, logout } = useAuth();
+  const leadsProjects = useLeadsProjects();
   const menuRef = useRef(null);
 
   const displaySubtitle = subtitle || (location.pathname.startsWith('/resource-booking') ? 'MEP Enterprise Workspace' : 'Project Management');

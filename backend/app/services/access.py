@@ -113,8 +113,21 @@ def require_project_lead(db: Session, user: models.User, project_id: int) -> Non
 
 
 def lead_employee_ids(db: Session, project_id: int) -> set[int]:
-    """Employee ids of the project's leads (their lead bookings). The BU Head approves these people's hours."""
-    rows = db.query(models.ResourceBooking.employee_id).filter_by(project_id=project_id, role="lead").all()
+    """Employee ids of the project's three leads (from the project's lead slots)."""
+    project = db.get(models.Project, project_id)
+    user_ids = (
+        {
+            project.project_lead_electrical_user_id,
+            project.project_lead_mechanical_user_id,
+            project.project_lead_bim_user_id,
+        }
+        - {None}
+        if project
+        else set()
+    )
+    if not user_ids:
+        return set()
+    rows = db.query(models.User.employee_id).filter(models.User.id.in_(user_ids), models.User.employee_id.is_not(None))
     return {employee_id for (employee_id,) in rows}
 
 
