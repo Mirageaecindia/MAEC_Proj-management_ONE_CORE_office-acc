@@ -42,7 +42,12 @@ def get_project_service(
     db: Session = Depends(get_db), storage: DocumentStorage = Depends(get_document_storage)
 ) -> ProjectService:
     return ProjectService(
-        db, ProjectRepository(db), UserRepository(db), storage, GovernanceMonitor(db, WorkRepository(db))
+        db,
+        ProjectRepository(db),
+        UserRepository(db),
+        BookingRepository(db),
+        storage,
+        GovernanceMonitor(db, WorkRepository(db)),
     )
 
 

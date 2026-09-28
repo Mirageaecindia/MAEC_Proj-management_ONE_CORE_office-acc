@@ -57,8 +57,9 @@ username for 15 minutes.
 
 ### 1.4 Who sees which project
 - **BU Head:** every project. Archived ones only with **Show archived** on the Projects page.
-- **Lead:** projects where they are one of the three project leads, or the lead of any WBS task in it.
-- **Engineer:** only projects where the BU Head has **approved** a resource booking for them. A draft or pending booking, or a WBS task on its own, gives no access.
+- Lead and engineer are roles **on a project**, not account types: the same person can lead one project and work as an engineer on another.
+- **Lead of a project:** they are one of its three project leads, or the lead of any WBS task in it.
+- **Engineer on a project:** only where the BU Head has **approved** a resource booking for them. A draft or pending booking, or a WBS task on its own, gives no access.
 - **Archived projects** disappear for Leads and Engineers entirely.
 
 ---
@@ -80,19 +81,29 @@ username for 15 minutes.
 
 ### 3.1 Create a project (Create Project tab)
 Fill in: project name, **unique** project code, client, target start date, a
-Lead for each discipline the project needs (Electrical, Mechanical, BIM: each is
-optional, but at least one is required; only active Lead accounts of that
-discipline are offered),
-contract currency and value, **target effort hours** (the governance baseline)
-and the **alert threshold** (slider, default 80%). Tick the SharePoint discipline
-folders to create.
+lead for each discipline the project needs (Electrical, Mechanical, BIM: each is
+optional, but at least one is required), contract currency and value, **target
+effort hours** (the governance baseline) and the **alert threshold** (slider,
+default 80%). Tick the SharePoint discipline folders to create.
+
+**Choosing leads.** Any engineer can lead a project: the dropdowns list everyone
+with an employee record, with their designation. For each lead you give a
+**start date, an end date and a utilization %**: the share of their time the
+project takes over that period. It counts toward their 100% like a booking, so
+someone already booked 90% in those months can't be made a lead at 20%; the
+form tells you how much is left. One person can't hold two lead roles on the
+same project, and a person already booked as an engineer on the project must be
+removed from the bookings before becoming its lead.
 
 On **Create**, the project is saved and SharePoint folders are provisioned. The
 Projects page shows the outcome; if SharePoint fails (for example no Azure
 credentials), the project is still created and the error is shown.
 
-**Effect on others:** the three Leads see the project immediately (Resource
-Booking, WBS, Timeline, Executive Dashboard). Engineers see nothing yet.
+**Effect on others:** the leads see the project immediately (Resource Booking,
+WBS, Timeline, Executive Dashboard). Engineers see nothing yet. The leads appear
+on the Resource Booking page as approved rows that only you can change (edit the
+project), and in the subtask assignee list, so a lead can do subtasks and use
+Login/Logout too. **A lead's own hours are approved by you**, not by the leads.
 
 ### 3.2 Projects page
 Each project card shows its baseline. Buttons:

@@ -7,11 +7,12 @@ from create_user import create_user, set_lead_discipline
 PASSWORD = "Longenough1"
 
 
-def test_lead_is_created_with_normalized_discipline_and_appears_in_dropdown(client, db, world):
-    lead = create_user(db, "lead.new", PASSWORD, "New Lead", "lead", None, "mechanical")
+def test_lead_is_created_with_normalized_discipline_and_appears_in_dropdown(client, db, make, world):
+    employee = make.employee("New Lead", discipline="Mechanical Lead")
+    lead = create_user(db, "lead.new", PASSWORD, "New Lead", "lead", employee.id, "mechanical")
 
     assert lead.discipline == "Mechanical"
-    names = {row["name"] for row in client.get("/api/project-leads?discipline=mechanical", headers=world.bu_h).json()}
+    names = {row["name"] for row in client.get("/api/project-leads", headers=world.bu_h).json()}
     assert "New Lead" in names
 
 

@@ -112,6 +112,12 @@ def require_project_lead(db: Session, user: models.User, project_id: int) -> Non
         raise ForbiddenError(NOT_PROJECT_LEAD)
 
 
+def lead_employee_ids(db: Session, project_id: int) -> set[int]:
+    """Employee ids of the project's leads (their lead bookings). The BU Head approves these people's hours."""
+    rows = db.query(models.ResourceBooking.employee_id).filter_by(project_id=project_id, role="lead").all()
+    return {employee_id for (employee_id,) in rows}
+
+
 def leads_any_project(db: Session, user: models.User) -> bool:
     return user.role != Role.BU_HEAD and bool(lead_project_ids(db, user))
 

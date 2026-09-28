@@ -119,7 +119,7 @@ def test_login_is_refused_where_it_does_not_apply(client, make, world, governed,
     _login(client, world, subtask)
     again = client.post(START, json={"subtask_id": subtask.id}, headers=world.eng_h)
     assert again.status_code == 409  # one session at a time
-    assert client.post(HEARTBEAT, headers=world.lead_h).status_code == 403  # engineers only
+    assert client.post(HEARTBEAT, headers=world.bu_h).status_code == 403  # staff only
 
 
 def test_two_tabs_resuming_at_once_bank_the_time_once(client, db, world, subtask):

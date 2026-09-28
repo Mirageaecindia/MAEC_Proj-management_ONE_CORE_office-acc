@@ -407,7 +407,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 **Projects and SharePoint**
 | Method | Path | Roles | Purpose |
 |---|---|---|---|
-| GET | `/api/project-leads?discipline=` | all | Lead accounts for the Create Project dropdowns |
+| GET | `/api/project-leads` | all | Everyone who can lead a project (active accounts with an employee record), for the Create Project dropdowns |
 | POST | `/api/projects` | BU Head | Create a project and provision SharePoint (returns `sharepoint_status`: provisioned/failed/error/not_requested) |
 | GET | `/api/projects[?include_archived=true]` | all (scoped) | Project list; archived projects only for the BU Head, on request |
 | GET | `/api/projects/{id}` | all (scoped) | Project detail |

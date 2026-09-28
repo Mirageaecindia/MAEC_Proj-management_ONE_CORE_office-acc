@@ -4,13 +4,18 @@ import { isSupportedCurrency } from '../../constants/currencies';
 import { SHAREPOINT_DISCIPLINES } from '../../constants/sharepoint';
 import { parseAmount } from '../../utils/format';
 
+/** The three lead slots. Each has a select (`<slot>Lead`) and, once a lead is chosen, the
+ *  period and the share of their time the project takes (`<slot>LeadStart/End/Pct`). */
+export const LEAD_SLOTS = ['electrical', 'mechanical', 'bim'];
+const LEAD_FIELDS = LEAD_SLOTS.map((slot) => `${slot}Lead`);
+
 export const INITIAL_FORM = {
   projectName: '',
   projectCode: '',
   clientCustomer: '',
-  electricalLead: '',
-  mechanicalLead: '',
-  bimLead: '',
+  ...Object.fromEntries(
+    LEAD_SLOTS.flatMap((slot) => ['', 'Start', 'End', 'Pct'].map((f) => [`${slot}Lead${f}`, ''])),
+  ),
   targetStartDate: '',
   contractCurrency: 'USD',
   contractValue: '',
@@ -26,9 +31,6 @@ const REQUIRED_FIELDS = [
   ['targetStartDate', 'Target start date is required.'],
 ];
 
-/** A project needs at least one lead; each discipline's lead is optional. */
-const LEAD_FIELDS = ['electricalLead', 'mechanicalLead', 'bimLead'];
-
 /** "3,840" -> 3840 */
 export function parseHours(raw) {
   return Number(String(raw ?? '').replace(/,/g, ''));
@@ -41,13 +43,18 @@ export function formFromProject(project) {
     projectName: project.project_name ?? '',
     projectCode: project.project_code ?? '',
     clientCustomer: project.client_organization ?? '',
-    electricalLead: project.project_lead_electrical_user_id
-      ? String(project.project_lead_electrical_user_id)
-      : '',
-    mechanicalLead: project.project_lead_mechanical_user_id
-      ? String(project.project_lead_mechanical_user_id)
-      : '',
-    bimLead: project.project_lead_bim_user_id ? String(project.project_lead_bim_user_id) : '',
+    ...Object.fromEntries(
+      LEAD_SLOTS.flatMap((slot) => {
+        const id = project[`project_lead_${slot}_user_id`];
+        const pct = project[`project_lead_${slot}_utilization_pct`];
+        return [
+          [`${slot}Lead`, id ? String(id) : ''],
+          [`${slot}LeadStart`, project[`project_lead_${slot}_start_date`] ?? ''],
+          [`${slot}LeadEnd`, project[`project_lead_${slot}_end_date`] ?? ''],
+          [`${slot}LeadPct`, pct != null ? String(pct) : ''],
+        ];
+      }),
+    ),
     targetStartDate: project.start_date ?? '',
     contractCurrency: project.contract_currency || 'USD',
     contractValue: project.contract_value != null ? String(project.contract_value) : '',
@@ -66,6 +73,17 @@ export function validateProjectForm(form, { requireDisciplines = true } = {}) {
   }
   if (!LEAD_FIELDS.some((field) => String(form[field] ?? '').trim())) {
     errors.leads = 'Choose at least one project lead.';
+  }
+  for (const slot of LEAD_SLOTS) {
+    if (!String(form[`${slot}Lead`] ?? '').trim()) continue;
+    const start = form[`${slot}LeadStart`];
+    const end = form[`${slot}LeadEnd`];
+    const pct = Number(form[`${slot}LeadPct`]);
+    if (!start || !end) errors[`${slot}LeadPeriod`] = 'Give the lead a start and an end date.';
+    else if (end < start) errors[`${slot}LeadPeriod`] = 'The end date is before the start date.';
+    else if (!Number.isInteger(pct) || pct < 1 || pct > 100) {
+      errors[`${slot}LeadPeriod`] = 'Utilization must be a whole number from 1 to 100.';
+    }
   }
   const contractValue = parseAmount(form.contractValue);
   if (!Number.isFinite(contractValue) || contractValue <= 0) {
@@ -87,26 +105,26 @@ export function validateProjectForm(form, { requireDisciplines = true } = {}) {
   return errors;
 }
 
-function leadRef(leadId, allLeads) {
-  const match = allLeads.find((lead) => String(lead.id) === String(leadId));
-  return { id: leadId ? Number(leadId) : null, name: match ? match.name : null };
+/** The API fields of one lead slot: who (id and name), and their period and % when someone is chosen. */
+function leadFields(form, leads, slot) {
+  const chosen = String(form[`${slot}Lead`] ?? '').trim();
+  const match = leads.find((lead) => String(lead.id) === chosen);
+  const id = chosen ? Number(chosen) : null;
+  return {
+    [`project_lead_${slot}`]: match ? match.name : null,
+    [`project_lead_${slot}_user_id`]: id,
+    [`project_lead_${slot}_start_date`]: id ? form[`${slot}LeadStart`] || null : null,
+    [`project_lead_${slot}_end_date`]: id ? form[`${slot}LeadEnd`] || null : null,
+    [`project_lead_${slot}_utilization_pct`]: id ? Number(form[`${slot}LeadPct`]) : null,
+  };
 }
 
 function projectFields(form, leads) {
-  const allLeads = [...leads.electrical, ...leads.mechanical, ...leads.bim];
-  const electrical = leadRef(form.electricalLead, allLeads);
-  const mechanical = leadRef(form.mechanicalLead, allLeads);
-  const bim = leadRef(form.bimLead, allLeads);
   return {
     project_name: form.projectName.trim(),
     project_code: form.projectCode.trim(),
     client_customer: form.clientCustomer.trim(),
-    project_lead_electrical: electrical.name,
-    project_lead_mechanical: mechanical.name,
-    project_lead_bim: bim.name,
-    project_lead_electrical_user_id: electrical.id,
-    project_lead_mechanical_user_id: mechanical.id,
-    project_lead_bim_user_id: bim.id,
+    ...Object.assign({}, ...LEAD_SLOTS.map((slot) => leadFields(form, leads, slot))),
     target_start_date: form.targetStartDate,
     total_contract_value: parseAmount(form.contractValue),
     contract_currency: form.contractCurrency,
@@ -115,7 +133,7 @@ function projectFields(form, leads) {
   };
 }
 
-/** Body for POST /api/projects. `leads` is { electrical: [...], mechanical: [...], bim: [...] }. */
+/** Body for POST /api/projects. `leads` is the list from GET /api/project-leads. */
 export function toCreateProjectPayload(form, leads) {
   return { ...projectFields(form, leads), sharepoint_disciplines: form.selectedDisciplines };
 }

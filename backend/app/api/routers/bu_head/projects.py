@@ -21,12 +21,11 @@ class ProjectCommentRequest(BaseModel):
 
 @router.get("/project-leads", response_model=list[schemas.ProjectLeadOut])
 def list_project_leads(
-    discipline: str | None = None,
     _user: models.User = Depends(require_any_role),
     service: ProjectService = Depends(get_project_service),
 ):
-    """Lead accounts for the Create Project dropdowns, optionally filtered by discipline."""
-    return service.list_leads(discipline)
+    """Everyone the BU Head can choose as a project lead (any active account with an employee record)."""
+    return service.list_leads()
 
 
 @router.post("/projects", response_model=schemas.CreateProjectOut, status_code=201)

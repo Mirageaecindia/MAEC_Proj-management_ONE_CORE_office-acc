@@ -29,11 +29,14 @@ def _submit(client, world, project_id):
 def test_bu_head_sees_bookings_and_summary(client, world, booked_project):
     project_id, booking = booked_project
 
-    bookings = client.get(f"/api/projects/{project_id}/resource-bookings", headers=world.bu_h).json()
+    rows = client.get(f"/api/projects/{project_id}/resource-bookings", headers=world.bu_h).json()
+    bookings = [row for row in rows if row["role"] == "engineer"]  # the leads are listed too, approved
     summary = client.get(f"/api/projects/{project_id}/resource-summary", headers=world.bu_h).json()
 
     assert [b["employee_name"] for b in bookings] == ["Arjun Mehta"]
     assert bookings[0]["approval_status"] == "draft"
+    leads = {r["employee_name"]: (r["approval_status"], r["utilization_rate"]) for r in rows if r["role"] == "lead"}
+    assert leads == {name: ("approved", 20.0) for name in ("Anita Kumar", "Priya Nair", "Mohan Daniel")}
     # Planned hours are derived server-side from the date range: weekdays x 8
     # (1-30 Sep 2026 = 22 weekdays = 176h); the client-sent 80 is ignored.
     # The 50% utilisation is not applied to the figure.
@@ -74,7 +77,8 @@ def test_approval_workflow_draft_to_pending_to_approved(client, world, booked_pr
     assert response.status_code == 200
     assert response.json() == {"status": "approved", "status_label": "Approved"}
 
-    bookings = client.get(f"/api/projects/{project_id}/resource-bookings", headers=world.bu_h).json()
+    rows = client.get(f"/api/projects/{project_id}/resource-bookings", headers=world.bu_h).json()
+    bookings = [row for row in rows if row["role"] == "engineer"]  # the leads are listed too, approved
     assert bookings[0]["approval_status"] == "approved"
     assert bookings[0]["approved_at"] is not None
     assert client.get("/api/notifications", headers=world.bu_h).json()[0]["is_read"] is True
@@ -143,7 +147,8 @@ def test_bu_head_can_reject_pending_submission_back_to_draft(client, db, world, 
     )
     assert "Reason: Arjun is needed on Hotel Tower in September" in notice.message
 
-    bookings = client.get(f"/api/projects/{project_id}/resource-bookings", headers=world.bu_h).json()
+    rows = client.get(f"/api/projects/{project_id}/resource-bookings", headers=world.bu_h).json()
+    bookings = [row for row in rows if row["role"] == "engineer"]  # the leads are listed too, approved
     assert bookings[0]["approval_status"] == "draft"
 
     # the Lead can adjust and re-submit after a rejection
@@ -168,9 +173,8 @@ def test_assignment_gantt_lists_booked_engineers(client, world, booked_project):
 
     body = client.get("/api/resource-bookings/gantt", headers=world.bu_h).json()
 
-    assert body["count"] == 1
-    engineer = body["engineers"][0]
-    assert engineer["name"] == "Arjun Mehta"
+    assert body["count"] == 4  # the three leads hold capacity too
+    engineer = next(row for row in body["engineers"] if row["name"] == "Arjun Mehta")
     assert engineer["total_allocation_pct"] == 50
     assignment = engineer["assignments"][0]
     assert assignment["booking_id"] == booking["id"]

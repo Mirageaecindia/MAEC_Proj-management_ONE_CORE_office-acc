@@ -9,5 +9,5 @@ export const projectsApi = {
   remove: (projectId) => api.delete(`/api/projects/${projectId}`),
   archive: (projectId, comments) => api.post(`/api/projects/${projectId}/archive`, { comments }),
   unarchive: (projectId, comments) => api.post(`/api/projects/${projectId}/unarchive`, { comments }),
-  leads: (discipline) => api.get(`/api/project-leads?discipline=${encodeURIComponent(discipline)}`),
+  leads: () => api.get('/api/project-leads'),
 };

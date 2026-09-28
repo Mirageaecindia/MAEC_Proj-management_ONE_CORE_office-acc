@@ -33,6 +33,7 @@ from app.services.allocation import allocated_pct, over_capacity_message
 from app.services.access import (
     NOT_PROJECT_LEAD,
     engineer_wbs_condition,
+    lead_employee_ids,
     lead_project_ids,
     leads_any_project,
     project_role,
@@ -48,6 +49,31 @@ from app.services.notifications import EXTENSION_REQUESTED, create_bu_head_notif
 logger = logging.getLogger(__name__)
 
 STAFF = {"engineer", "lead"}  # accounts that may hold an employee record (everyone but the BU Head)
+LEAD_ROW = "Lead assignments are set by the BU Head on the project, not here."
+LEAD_HOURS_BU_HEAD = "A project lead's hours are approved by the BU Head."
+ENGINEER_HOURS_LEAD = "An engineer's hours are approved by the project's leads."
+
+
+def require_hours_reviewer(db: Session, user: models.User, project_id: int, employee_id: int) -> None:
+    """Who reviews whose hours: the BU Head reviews the project's leads; a lead of the project reviews
+    the engineers (never themselves)."""
+    lead_hours = employee_id in lead_employee_ids(db, project_id)
+    if user.role == "bu_head":
+        if not lead_hours:
+            raise HTTPException(status_code=403, detail=ENGINEER_HOURS_LEAD)
+    elif project_role(db, user, project_id) != "lead":
+        raise HTTPException(status_code=403, detail=NOT_PROJECT_LEAD)
+    elif lead_hours:
+        raise HTTPException(status_code=403, detail=LEAD_HOURS_BU_HEAD)
+
+
+def refuse_lead_as_resource(db: Session, project_id: int, employee: models.Employee) -> None:
+    """A project's lead can't also be booked on it as an engineer: their lead assignment covers their work there."""
+    if employee.id in lead_employee_ids(db, project_id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{employee.name} leads this project; their lead assignment already covers their work here.",
+        )
 
 # Schema: Alembic migrations in migrations/, applied at startup (app/core/migrations.py).
 migrate(engine)
@@ -314,6 +340,7 @@ def booking_output(db: Session, booking: models.ResourceBooking):
         "employee_code": employee.employee_code if employee else "",
         "discipline": employee.discipline if employee else "",
         "role_title": employee.role_title if employee else "",
+        "role": booking.role,
         "planned_hours": booking.planned_hours,
         "utilization_rate": utilization,
         "start_date": booking.start_date.isoformat() if booking.start_date else None,
@@ -412,6 +439,7 @@ def resource_booking_gantt(
                 "start_date": start.isoformat() if start else None,
                 "end_date": end.isoformat() if end else None,
                 "has_date_range": bool(start and end),
+                "role": booking.role,
                 "utilization_rate": booking.utilization_rate or 0,
                 "planned_hours": booking.planned_hours or 0,
                 "approval_status": booking.approval_status,
@@ -427,7 +455,7 @@ def resource_booking_gantt(
             "employee_code": employee.employee_code,
             "role_title": employee.role_title,
             "discipline": employee.discipline,
-            "total_allocation_pct": allocated_pct(db, employee.id, date.today(), None),  # busiest day ahead
+            "total_allocation_pct": allocated_pct(db, employee.id, None, None),  # their busiest day
             "assignments": assignments,
         })
 
@@ -460,6 +488,7 @@ def create_resource_booking(
     employee = db.query(models.Employee).filter_by(id=payload.get("employee_id")).first()
     if not employee:
         raise HTTPException(status_code=400, detail="Engineer not found.")
+    refuse_lead_as_resource(db, project_id, employee)
     requested = int(payload.get("utilization_rate", 0))
     start_date = _parse_iso_date(payload.get("start_date"))
     end_date = _parse_iso_date(payload.get("end_date"))
@@ -494,10 +523,13 @@ def update_resource_booking(
     booking = db.query(models.ResourceBooking).filter_by(id=booking_id, project_id=project_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Resource booking not found.")
+    if booking.role == "lead":
+        raise HTTPException(status_code=400, detail=LEAD_ROW)
     employee_id = int(payload.get("employee_id", booking.employee_id))
     employee = db.query(models.Employee).filter_by(id=employee_id).first()
     if not employee:
         raise HTTPException(status_code=400, detail="Engineer not found.")
+    refuse_lead_as_resource(db, project_id, employee)
     requested = int(payload.get("utilization_rate", booking.utilization_rate or 0))
     start_date = _parse_iso_date(payload["start_date"]) if payload.get("start_date") is not None else booking.start_date
     end_date = _parse_iso_date(payload["end_date"]) if payload.get("end_date") is not None else booking.end_date
@@ -527,6 +559,8 @@ def delete_resource_booking(
     booking = db.query(models.ResourceBooking).filter_by(id=booking_id, project_id=project_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Resource booking not found.")
+    if booking.role == "lead":
+        raise HTTPException(status_code=400, detail=LEAD_ROW)
     db.delete(booking)
     db.commit()
     return {"ok": True, "deleted_booking_id": booking_id}
@@ -540,7 +574,7 @@ def submit_resource_bookings(
 ):
     # Only a lead of this project may submit its bookings to the BU Head.
     project, _ = project_and_role(db, project_id, user, allowed={"lead"})
-    bookings = db.query(models.ResourceBooking).filter_by(project_id=project_id).all()
+    bookings = db.query(models.ResourceBooking).filter_by(project_id=project_id, role="engineer").all()
     if not bookings:
         raise HTTPException(status_code=400, detail="Assign at least one engineer before submitting for approval.")
     current = booking_approval_status(db, project_id)
@@ -979,7 +1013,7 @@ def lead_review_weekly_hours(
 ):
     if not user.full_name:
         raise HTTPException(status_code=400, detail="Lead identity is required.")
-    project, role = project_and_role(db, project_id, user, allowed={"lead"})
+    project, role = project_and_role(db, project_id, user, allowed={"lead", "bu_head"})
     if project.timesheets_soft_locked:
         raise HTTPException(
             status_code=409,
@@ -987,6 +1021,7 @@ def lead_review_weekly_hours(
         )
     if payload.employee_id is None:
         raise HTTPException(status_code=400, detail="employee_id is required to review weekly hours.")
+    require_hours_reviewer(db, user, project_id, payload.employee_id)
     submission = weekly_submission_for(db, project_id, payload.employee_id, payload.week_start_date)
     if not submission:
         raise HTTPException(
@@ -999,7 +1034,7 @@ def lead_review_weekly_hours(
             detail="Only weekly hours that are 'Submitted for Approval' can be approved or rejected.",
         )
     visible = weekly_hours_visible_employee_ids(db, project_id, payload.week_start_date, user, role)
-    if submission.employee_id not in (visible or set()):
+    if visible is not None and submission.employee_id not in visible:
         raise HTTPException(status_code=403, detail="These weekly hours are outside your lead scope.")
     submission.status = action
     submission.reviewed_by = user.full_name
@@ -1619,10 +1654,9 @@ def lead_review_time_log(db: Session, entry_id: int, user: models.User, status: 
     entry = db.query(models.TimeLogEntry).filter_by(id=entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Time log entry not found.")
-    if project_role(db, user, entry.project_id) != "lead":
-        raise HTTPException(status_code=403, detail=NOT_PROJECT_LEAD)
+    require_hours_reviewer(db, user, entry.project_id, entry.employee_id)
     task = db.query(models.WbsNode).filter_by(id=entry.task_id).first()
-    if not task or task.assigned_lead != user.full_name:
+    if not task or (user.role != "bu_head" and not node_assigned_to_lead(task, user)):
         raise HTTPException(status_code=403, detail="This time log is outside your lead scope.")
     project = db.query(models.Project).filter_by(id=entry.project_id).first()
     if project and project.timesheets_soft_locked:

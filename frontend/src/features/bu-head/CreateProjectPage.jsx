@@ -10,6 +10,7 @@ import { useCreateProject, useProject, useProjectLeads, useUpdateProject } from 
 import { formatAmount } from '../../utils/format';
 import {
   INITIAL_FORM,
+  LEAD_SLOTS,
   creationNotice,
   formFromProject,
   toCreateProjectPayload,
@@ -49,7 +50,7 @@ function LeadSelect({ label, placeholder, leads, value, error, extraError, onCha
           <option value="">{placeholder}</option>
           {leads.map((lead) => (
             <option key={lead.id} value={lead.id}>
-              {lead.name}
+              {lead.title ? `${lead.name} (${lead.title})` : lead.name}
             </option>
           ))}
         </select>
@@ -57,6 +58,61 @@ function LeadSelect({ label, placeholder, leads, value, error, extraError, onCha
       </div>
       {extraError && <span className="field-error">{extraError}</span>}
     </Field>
+  );
+}
+
+const LEAD_LABELS = {
+  electrical: { label: 'Assigned Project Lead | Electrical', placeholder: 'No electrical lead' },
+  mechanical: { label: 'Assigned Project Lead | Mechanical', placeholder: 'No mechanical lead' },
+  bim: { label: 'Assigned Project Lead | BIM', placeholder: 'No BIM lead' },
+};
+
+/** One lead slot: who leads, and once chosen, for which period and what share of their time. */
+function LeadAssignment({ slot, leads, form, errors, extraError, updateField }) {
+  const chosen = form[`${slot}Lead`];
+  const { label, placeholder } = LEAD_LABELS[slot];
+  const field = (suffix) => `${slot}Lead${suffix}`;
+  return (
+    <div className="lead-assignment">
+      <LeadSelect
+        label={label}
+        placeholder={placeholder}
+        leads={leads}
+        value={chosen}
+        error={slot === 'electrical' ? errors.leads : undefined}
+        extraError={extraError}
+        onChange={(value) => updateField(field(''), value)}
+      />
+      {chosen && (
+        <div className="field-grid three-column">
+          <Field label="From" required>
+            <input
+              type="date"
+              value={form[field('Start')]}
+              onChange={(event) => updateField(field('Start'), event.target.value)}
+            />
+          </Field>
+          <Field label="To" required>
+            <input
+              type="date"
+              value={form[field('End')]}
+              onChange={(event) => updateField(field('End'), event.target.value)}
+            />
+          </Field>
+          <Field label="Utilization %" required error={errors[`${slot}LeadPeriod`]}>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              value={form[field('Pct')]}
+              onChange={(event) => updateField(field('Pct'), event.target.value)}
+              placeholder="e.g. 20"
+            />
+          </Field>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -214,15 +270,6 @@ function ProjectFormPage({ project = null }) {
               </Field>
             </div>
             <div className="field-grid two-column">
-              <LeadSelect
-                label="Assigned Project Lead | Electrical"
-                placeholder="No electrical lead"
-                leads={leads.electrical}
-                value={form.electricalLead}
-                error={errors.leads}
-                extraError={leadsError?.message}
-                onChange={(value) => updateField('electricalLead', value)}
-              />
               <Field label="Target Start Date" required error={errors.targetStartDate}>
                 <input
                   type="date"
@@ -231,22 +278,21 @@ function ProjectFormPage({ project = null }) {
                 />
               </Field>
             </div>
-            <div className="field-grid two-column">
-              <LeadSelect
-                label="Assigned Project Lead | Mechanical"
-                placeholder="No mechanical lead"
-                leads={leads.mechanical}
-                value={form.mechanicalLead}
-                onChange={(value) => updateField('mechanicalLead', value)}
+            <p className="section-copy">
+              Any engineer can lead a project. A lead gives the project part of their time for a period; like
+              a booking, it counts toward their 100%.
+            </p>
+            {LEAD_SLOTS.map((slot) => (
+              <LeadAssignment
+                key={slot}
+                slot={slot}
+                leads={leads}
+                form={form}
+                errors={errors}
+                extraError={slot === 'electrical' ? leadsError?.message : undefined}
+                updateField={updateField}
               />
-              <LeadSelect
-                label="Assigned Project Lead | BIM"
-                placeholder="No BIM lead"
-                leads={leads.bim}
-                value={form.bimLead}
-                onChange={(value) => updateField('bimLead', value)}
-              />
-            </div>
+            ))}
           </section>
 
           {!isEdit && (

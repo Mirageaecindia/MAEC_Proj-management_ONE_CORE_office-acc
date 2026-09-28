@@ -8,7 +8,9 @@ export function useCreateProjectForm(initialForm = INITIAL_FORM, { requireDiscip
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
-    setErrors((current) => ({ ...current, [field]: '' }));
+    // A lead's period and % share one error (`<slot>LeadPeriod`); editing any of them clears it.
+    const periodError = field.replace(/Lead(Start|End|Pct)$/, 'LeadPeriod');
+    setErrors((current) => ({ ...current, [field]: '', [periodError]: '' }));
   }
 
   function toggleDiscipline(value) {

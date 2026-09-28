@@ -12,11 +12,14 @@ import models
 import schemas
 from app.core.errors import NO_PROJECT_ACCESS, BadRequestError, ConflictError, ForbiddenError, NotFoundError
 from app.core.roles import Role
+from app.domain.allocation import planned_hours
 from app.integrations.sharepoint import DocumentStorage, SharePointError
+from app.repositories.bookings import ENGINEER, LEAD, BookingRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.users import UserRepository
 from app.services import notifications as notify
 from app.services.access import user_can_access_project, visible_project_ids
+from app.services.allocation import over_capacity_message
 from app.services.archive_guard import ARCHIVED_READ_ONLY, lifecycle_writes
 from app.services.governance_monitor import GovernanceMonitor
 from app.services.tracking import end_session
@@ -54,9 +57,6 @@ _AUDITED_FIELDS = {
 
 EXTENSION_CANCELLED = "cancelled"
 
-# Query-string discipline -> users.discipline value.
-LEAD_DISCIPLINES = {"electrical": "Electrical", "mechanical": "Mechanical", "bim": "BIM"}
-
 
 class ProjectService:
     def __init__(
@@ -64,21 +64,22 @@ class ProjectService:
         db: Session,
         projects: ProjectRepository,
         users: UserRepository,
+        bookings: BookingRepository,
         storage: DocumentStorage,
         monitor: GovernanceMonitor,
     ):
         self.db = db
         self.projects = projects
         self.users = users
+        self.bookings = bookings
         self.storage = storage
         self.monitor = monitor
 
-    def list_leads(self, discipline: str | None) -> list[schemas.ProjectLeadOut]:
-        """Real Lead accounts for the Create Project dropdowns (unknown disciplines are ignored)."""
-        target = LEAD_DISCIPLINES.get(discipline.strip().lower()) if discipline else None
+    def list_leads(self) -> list[schemas.ProjectLeadOut]:
+        """Everyone with an employee record, for the lead dropdowns: any of them can lead a project."""
         return [
-            schemas.ProjectLeadOut(id=lead.id, name=lead.full_name or lead.username, title=lead.discipline)
-            for lead in self.users.list_leads(target)
+            schemas.ProjectLeadOut(id=user.id, name=user.full_name or user.username, title=employee.role_title)
+            for user, employee in self.users.list_staff()
         ]
 
     async def create(self, payload: schemas.ProjectCreatePayload) -> dict:
@@ -112,31 +113,93 @@ class ProjectService:
         )
         try:
             self.projects.add(project)
+            self.db.flush()
+            self._sync_lead_assignments(project, payload)
             self.db.commit()
         except IntegrityError as exc:
             self.db.rollback()
             raise ConflictError(DUPLICATE_CODE) from exc
         self.db.refresh(project)
 
-        data = schemas.ProjectOut.model_validate(project).model_dump()
+        data = self._outs([project])[0]
         data.update(
             await self._provision(project) if payload.sharepoint_disciplines else _sharepoint_result("not_requested")
         )
         return data
 
-    def list_for(self, user: models.User, include_archived: bool = False) -> list[models.Project]:
+    def list_for(self, user: models.User, include_archived: bool = False) -> list[dict]:
         """Archived projects are listed only for the BU Head, and only on request."""
-        return self.projects.list(
+        projects = self.projects.list(
             visible_project_ids(self.db, user), include_archived=include_archived and user.role == Role.BU_HEAD
         )
+        return self._outs(projects)
 
-    def get_for(self, user: models.User, project_id: int) -> models.Project:
+    def get_for(self, user: models.User, project_id: int) -> dict:
         project = self.projects.get(project_id)
         if not project:
             raise NotFoundError(PROJECT_NOT_FOUND)
         if not user_can_access_project(self.db, user, project):
             raise ForbiddenError(NO_PROJECT_ACCESS)
-        return project
+        return self._outs([project])[0]
+
+    def _outs(self, projects: list[models.Project]) -> list[dict]:
+        """ProjectOut data, with each lead slot's dates and % read from the lead bookings (two queries)."""
+        assignments: dict[tuple[int, int], models.ResourceBooking] = {}
+        for booking in self.bookings.lead_assignments([p.id for p in projects]):
+            assignments[(booking.project_id, booking.employee_id)] = booking
+        lead_user_ids = {getattr(p, id_col) for p in projects for _, id_col in _LEAD_SLOTS} - {None}
+        employee_of = self.users.employee_ids(lead_user_ids) if lead_user_ids else {}
+        out = []
+        for project in projects:
+            data = schemas.ProjectOut.model_validate(project).model_dump()
+            for slot, (_, id_col) in zip(schemas.LEAD_SLOTS, _LEAD_SLOTS, strict=True):
+                booking = assignments.get((project.id, employee_of.get(getattr(project, id_col))))
+                if booking is not None:
+                    data[f"project_lead_{slot}_start_date"] = booking.start_date
+                    data[f"project_lead_{slot}_end_date"] = booking.end_date
+                    data[f"project_lead_{slot}_utilization_pct"] = booking.utilization_rate
+            out.append(data)
+        return out
+
+    def _sync_lead_assignments(self, project: models.Project, payload: schemas.ProjectFields) -> None:
+        """The lead bookings mirror the lead slots, rebuilt on every save. Each holds the lead's
+        capacity for the period (same date-aware 100% cap as engineer bookings), is approved from
+        the start, and lists the lead among the project's people for WBS assignment."""
+        self.bookings.delete_lead_assignments(project.id)
+        self.db.flush()
+        now = datetime.now(UTC)
+        seen: set[int] = set()
+        for slot in schemas.LEAD_SLOTS:
+            assignment = payload.lead_assignment(slot)
+            if assignment.user_id is None:
+                continue  # no lead, or a name-only legacy lead without an account
+            employee_id = self.users.get_staff(assignment.user_id).employee_id
+            name = getattr(project, f"project_lead_{slot}")
+            if employee_id in seen:
+                raise BadRequestError(f"{name} can't hold two lead roles on one project.")
+            seen.add(employee_id)
+            if self.bookings.has_booking(project.id, employee_id, ENGINEER):
+                raise ConflictError(
+                    f"{name} is booked as an engineer on this project. Remove that booking before making them a lead."
+                )
+            pct, start, end = assignment.utilization_pct, assignment.start_date, assignment.end_date
+            over = over_capacity_message(self.db, name, employee_id, pct, start, end)
+            if over:
+                raise BadRequestError(over)
+            self.db.add(
+                models.ResourceBooking(
+                    project_id=project.id,
+                    employee_id=employee_id,
+                    role=LEAD,
+                    planned_hours=planned_hours(start, end, pct),
+                    utilization_rate=pct,
+                    start_date=start,
+                    end_date=end,
+                    approval_status="approved",
+                    approved_at=now,
+                )
+            )
+            self.db.flush()  # the next slot's capacity check must see this one
 
     def update(self, user: models.User, project_id: int, payload: schemas.ProjectUpdatePayload) -> dict:
         """Edit a project. Every changed field is audited (before -> after); a replaced
@@ -192,12 +255,13 @@ class ProjectService:
         self.monitor.evaluate(project, baseline_raised_by_bu_head=True)  # target may have moved: lock or unlock
         self._notify_lead_changes(project, set(filter(None, old_lead_ids)), new_lead_ids, actor)
         try:
+            self._sync_lead_assignments(project, payload)
             self.db.commit()
         except IntegrityError as exc:
             self.db.rollback()
             raise ConflictError(DUPLICATE_CODE) from exc
         self.db.refresh(project)
-        return {**schemas.ProjectOut.model_validate(project).model_dump(), "reassigned_nodes": moved}
+        return {**self._outs([project])[0], "reassigned_nodes": moved}
 
     def _notify_lead_changes(self, project: models.Project, old_ids: set[int], new_ids: set[int], actor: str) -> None:
         name = project.project_name
@@ -287,9 +351,9 @@ class ProjectService:
         With an id, the name comes from the real account."""
         if user_id is None:
             return display_name, None
-        lead = self.users.get_lead(user_id)
+        lead = self.users.get_staff(user_id)
         if not lead:
-            raise BadRequestError("Selected Lead is not a valid Lead account.")
+            raise BadRequestError("The selected lead must be an active account with an employee record.")
         return lead.full_name or lead.username, lead.id
 
     async def _provision(self, project: models.Project) -> dict:

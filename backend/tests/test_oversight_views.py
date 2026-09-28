@@ -75,7 +75,7 @@ def test_bu_head_cannot_perform_lead_or_engineer_actions(client, world, tracked,
 
     kwargs = {"headers": world.bu_h}
     if body is not None:
-        kwargs["json"] = body
+        kwargs["json"] = {**body, "employee_id": world.emp1.id} if "employee_id" in body else body
     response = getattr(client, method)(url, **kwargs)
 
     assert response.status_code == 403, response.text

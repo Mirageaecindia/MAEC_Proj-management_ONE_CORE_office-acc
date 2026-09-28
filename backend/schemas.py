@@ -151,10 +151,34 @@ class ProjectOut(ProjectBase):
     project_lead_electrical_user_id: Optional[int] = None
     project_lead_mechanical_user_id: Optional[int] = None
     project_lead_bim_user_id: Optional[int] = None
+    # Filled from the lead bookings by ProjectService (None for a name-only legacy lead).
+    project_lead_electrical_start_date: Optional[date] = None
+    project_lead_electrical_end_date: Optional[date] = None
+    project_lead_electrical_utilization_pct: Optional[int] = None
+    project_lead_mechanical_start_date: Optional[date] = None
+    project_lead_mechanical_end_date: Optional[date] = None
+    project_lead_mechanical_utilization_pct: Optional[int] = None
+    project_lead_bim_start_date: Optional[date] = None
+    project_lead_bim_end_date: Optional[date] = None
+    project_lead_bim_utilization_pct: Optional[int] = None
     sharepoint_disciplines: Optional[str] = None
     target_effort_hours: Optional[float] = None
     sharepoint_site_url: Optional[str] = None
     archived_at: Optional[datetime] = None
+
+
+LEAD_SLOTS = ("electrical", "mechanical", "bim")
+
+
+class LeadAssignment(BaseModel):
+    """One project lead slot as the BU Head filled it in."""
+
+    slot: str
+    name: Optional[str] = None
+    user_id: Optional[int] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    utilization_pct: Optional[int] = None
 
 
 class ProjectFields(BaseModel):
@@ -169,6 +193,16 @@ class ProjectFields(BaseModel):
     project_lead_electrical_user_id: Optional[int] = None
     project_lead_mechanical_user_id: Optional[int] = None
     project_lead_bim_user_id: Optional[int] = None
+    # A lead holds part of their capacity on the project for a period (see LeadAssignment).
+    project_lead_electrical_start_date: Optional[date] = None
+    project_lead_electrical_end_date: Optional[date] = None
+    project_lead_electrical_utilization_pct: Optional[int] = None
+    project_lead_mechanical_start_date: Optional[date] = None
+    project_lead_mechanical_end_date: Optional[date] = None
+    project_lead_mechanical_utilization_pct: Optional[int] = None
+    project_lead_bim_start_date: Optional[date] = None
+    project_lead_bim_end_date: Optional[date] = None
+    project_lead_bim_utilization_pct: Optional[int] = None
     target_start_date: Optional[date] = None
     total_contract_value: float = 0
     contract_currency: str = "USD"
@@ -196,7 +230,32 @@ class ProjectFields(BaseModel):
         )  # fmt: skip
         if not any(leads):
             raise ValueError("Choose at least one project lead")
+        for slot in LEAD_SLOTS:
+            self._check_assignment(slot)
         return self
+
+    def _check_assignment(self, slot: str) -> None:
+        """A lead chosen by account needs a start date, an end date and a utilization %."""
+        assignment = self.lead_assignment(slot)
+        if assignment.user_id is None:
+            return
+        if assignment.start_date is None or assignment.end_date is None or assignment.utilization_pct is None:
+            raise ValueError(f"Give the {slot} lead a start date, an end date and a utilization %")
+        if assignment.end_date < assignment.start_date:
+            raise ValueError(f"The {slot} lead's end date is before their start date")
+        if not 1 <= assignment.utilization_pct <= 100:
+            raise ValueError(f"The {slot} lead's utilization must be between 1 and 100%")
+
+    def lead_assignment(self, slot: str) -> "LeadAssignment":
+        prefix = f"project_lead_{slot}"
+        return LeadAssignment(
+            slot=slot,
+            name=getattr(self, prefix),
+            user_id=getattr(self, f"{prefix}_user_id"),
+            start_date=getattr(self, f"{prefix}_start_date"),
+            end_date=getattr(self, f"{prefix}_end_date"),
+            utilization_pct=getattr(self, f"{prefix}_utilization_pct"),
+        )
 
     @field_validator("alert_override_threshold_pct")
     @classmethod

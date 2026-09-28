@@ -3,7 +3,7 @@ export const queryKeys = {
   projects: ['projects'], // prefix: invalidates every project list and project
   projectList: (includeArchived) => ['projects', 'list', { includeArchived }],
   project: (projectId) => ['projects', 'detail', String(projectId)],
-  projectLeads: (discipline) => ['project-leads', discipline],
+  projectLeads: ['project-leads'],
   executiveDashboard: (projectId) => ['executive-dashboard', projectId],
   workSummary: (projectId) => ['work-summary', projectId],
   notifications: ['notifications'],

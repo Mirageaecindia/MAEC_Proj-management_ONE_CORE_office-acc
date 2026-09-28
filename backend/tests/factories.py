@@ -44,6 +44,11 @@ class Factory:
             )
         )
 
+    def lead(self, username, full_name, discipline):
+        """A lead account with its employee record (everyone the BU Head can pick has one)."""
+        employee = self.employee(full_name, discipline=f"{discipline} Lead")
+        return self.user(username, "lead", full_name, discipline=discipline, employee_id=employee.id)
+
     def employee(self, name, discipline="Mechanical Engineer"):
         n = next(self._seq)
         return self._save(

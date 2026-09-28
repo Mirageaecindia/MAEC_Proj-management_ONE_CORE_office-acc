@@ -29,6 +29,8 @@ def _payload(client, world, project_id, **changes):
     for discipline in ("electrical", "mechanical", "bim"):
         payload[f"project_lead_{discipline}"] = project[f"project_lead_{discipline}"]
         payload[f"project_lead_{discipline}_user_id"] = project[f"project_lead_{discipline}_user_id"]
+        for field in ("start_date", "end_date", "utilization_pct"):
+            payload[f"project_lead_{discipline}_{field}"] = project[f"project_lead_{discipline}_{field}"]
     return {**payload, **changes}
 
 

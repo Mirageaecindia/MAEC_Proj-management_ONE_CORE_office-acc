@@ -48,8 +48,14 @@ class ProjectRepository:
         self.db.add(project)
 
     def has_history(self, project_id: int) -> bool:
+        """Lead bookings don't count: the BU Head wrote them on the project form."""
         return any(
-            self.db.query(model.id).filter_by(project_id=project_id).first() is not None for model in _HISTORY_MODELS
+            self.db.query(model.id).filter_by(project_id=project_id).first() is not None
+            for model in _HISTORY_MODELS
+            if model is not models.ResourceBooking
+        ) or (
+            self.db.query(models.ResourceBooking.id).filter_by(project_id=project_id, role="engineer").first()
+            is not None
         )
 
     def reassign_lead_nodes(self, project_id: int, old_lead_id: int, new_lead_id: int, new_lead_name: str) -> int:

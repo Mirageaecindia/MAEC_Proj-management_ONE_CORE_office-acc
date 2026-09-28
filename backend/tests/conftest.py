@@ -37,6 +37,9 @@ security.PBKDF2_ITERATIONS = 1_000
 
 from factories import Factory
 
+# Every lead holds 20% of their time on a project for a year (see test_lead_assignments.py).
+LEAD_PERIOD = {"start_date": "2026-09-01", "end_date": "2027-08-31", "utilization_pct": 20}
+
 
 def pytest_sessionfinish(session, exitstatus):
     engine.dispose()
@@ -85,10 +88,10 @@ def world(make, client):
     two employees and an engineer account linked to the first employee."""
     w = SimpleNamespace()
     w.bu = make.user("buhead", "bu_head", "Test BU Head")
-    w.lead_e = make.user("lead.e", "lead", "Anita Kumar", discipline="Electrical")
-    w.lead_m = make.user("lead.m", "lead", "Priya Nair", discipline="Mechanical")
-    w.lead_b = make.user("lead.b", "lead", "Mohan Daniel", discipline="BIM")
-    w.other_lead = make.user("lead.x", "lead", "Unassigned Lead", discipline="Electrical")
+    w.lead_e = make.lead("lead.e", "Anita Kumar", "Electrical")
+    w.lead_m = make.lead("lead.m", "Priya Nair", "Mechanical")
+    w.lead_b = make.lead("lead.b", "Mohan Daniel", "BIM")
+    w.other_lead = make.lead("lead.x", "Unassigned Lead", "Electrical")
     w.emp1 = make.employee("Arjun Mehta", discipline="Mechanical Engineer")
     w.emp2 = make.employee("Ravi Kumar", discipline="Electrical Engineer")
     w.engineer = make.user("eng.arjun", "engineer", "Arjun Mehta", employee_id=w.emp1.id)
@@ -110,6 +113,11 @@ def world(make, client):
             "project_lead_electrical_user_id": w.lead_e.id,
             "project_lead_mechanical_user_id": w.lead_m.id,
             "project_lead_bim_user_id": w.lead_b.id,
+            **{
+                f"project_lead_{slot}_{field}": value
+                for slot in ("electrical", "mechanical", "bim")
+                for field, value in LEAD_PERIOD.items()
+            },
             "target_start_date": "2026-09-01",
             "sharepoint_disciplines": [],
             "total_contract_value": 100000,

@@ -3,10 +3,10 @@
 Interactive (prompts for anything not given):
     .venv\\Scripts\\python.exe create_user.py
 
-Leads need a discipline (Electrical, Mechanical or BIM); it decides which
-Create Project dropdown they appear in:
+Leads need a discipline (Electrical, Mechanical or BIM) and, like engineers,
+an employee record (any account with one can be chosen as a project lead):
     .venv\\Scripts\\python.exe create_user.py --username lead.anita --role lead ^
-        --full-name "Anita Kumar" --discipline Electrical
+        --full-name "Anita Kumar" --discipline Electrical --employee-id 7
 
 Engineers are linked to an employee so WBS/timesheet data is scoped to them:
     .venv\\Scripts\\python.exe create_user.py --username eng.arjun --role engineer --employee-id 1
@@ -69,8 +69,8 @@ def create_user(
     if role != "lead" and discipline is not None:
         raise SystemExit("Only lead accounts have a discipline.")
 
-    if role == "engineer" and not employee_id:
-        raise SystemExit("Engineer accounts must be linked to an employee (--employee-id).")
+    if role != "bu_head" and not employee_id:
+        raise SystemExit("Lead and engineer accounts must be linked to an employee (--employee-id).")
     if employee_id is not None and not db.get(models.Employee, employee_id):
         raise SystemExit(f"No employee with id {employee_id} in the employees table.")
 

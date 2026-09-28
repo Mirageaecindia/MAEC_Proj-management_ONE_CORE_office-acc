@@ -9,11 +9,14 @@ import {
   validateProjectForm,
 } from './createProjectForm';
 
-const LEADS = {
-  electrical: [{ id: 1, name: 'Anita Kumar' }],
-  mechanical: [{ id: 2, name: 'Priya Nair' }],
-  bim: [{ id: 3, name: 'Mohan Daniel' }],
-};
+const LEADS = [
+  { id: 1, name: 'Anita Kumar', title: 'Electrical Lead' },
+  { id: 2, name: 'Priya Nair', title: 'Mechanical Lead' },
+  { id: 3, name: 'Mohan Daniel', title: 'BIM Lead' },
+];
+const PERIOD = { Start: '2026-09-01', End: '2027-03-31', Pct: '20' };
+const leadPeriods = (...slots) =>
+  Object.fromEntries(slots.flatMap((slot) => Object.entries(PERIOD).map(([f, v]) => [`${slot}Lead${f}`, v])));
 
 const VALID_FORM = {
   ...INITIAL_FORM,
@@ -23,6 +26,7 @@ const VALID_FORM = {
   electricalLead: '1',
   mechanicalLead: '2',
   bimLead: '3',
+  ...leadPeriods('electrical', 'mechanical', 'bim'),
   targetStartDate: '2026-09-01',
   contractValue: '480000.50',
   effortHours: '3,840',
@@ -60,6 +64,16 @@ describe('validateProjectForm', () => {
     });
   });
 
+  it('a chosen lead needs a period and a whole percentage of their time', () => {
+    const period = (changes) => validateProjectForm({ ...VALID_FORM, ...changes }).bimLeadPeriod;
+    expect(period({ bimLeadStart: '' })).toBe('Give the lead a start and an end date.');
+    expect(period({ bimLeadEnd: '2026-08-31' })).toBe('The end date is before the start date.');
+    expect(period({ bimLeadPct: '0' })).toBeTruthy();
+    expect(period({ bimLeadPct: '12.5' })).toBeTruthy();
+    expect(period({ bimLeadPct: '100' })).toBeUndefined();
+    expect(period({ bimLead: '', bimLeadStart: '' })).toBeUndefined(); // no lead: nothing to check
+  });
+
   it('rejects no disciplines, unknown currency and out-of-range threshold', () => {
     const errors = validateProjectForm({
       ...VALID_FORM,
@@ -82,6 +96,9 @@ describe('toCreateProjectPayload', () => {
       client_customer: 'Acme',
       project_lead_electrical: 'Anita Kumar',
       project_lead_electrical_user_id: 1,
+      project_lead_electrical_start_date: '2026-09-01',
+      project_lead_electrical_end_date: '2027-03-31',
+      project_lead_electrical_utilization_pct: 20,
       project_lead_mechanical_user_id: 2,
       project_lead_bim_user_id: 3,
       total_contract_value: 480000.5,
@@ -124,8 +141,17 @@ describe('editing a project', () => {
     project_code: 'MAEC-001',
     client_organization: 'Acme',
     project_lead_electrical_user_id: 1,
+    project_lead_electrical_start_date: '2026-09-01',
+    project_lead_electrical_end_date: '2027-03-31',
+    project_lead_electrical_utilization_pct: 20,
     project_lead_mechanical_user_id: 2,
+    project_lead_mechanical_start_date: '2026-09-01',
+    project_lead_mechanical_end_date: '2027-03-31',
+    project_lead_mechanical_utilization_pct: 40,
     project_lead_bim_user_id: 3,
+    project_lead_bim_start_date: '2026-09-01',
+    project_lead_bim_end_date: '2027-03-31',
+    project_lead_bim_utilization_pct: 10,
     start_date: '2026-09-01',
     contract_value: 480000.5,
     contract_currency: 'USD',
@@ -142,6 +168,8 @@ describe('editing a project', () => {
       project_name: 'Hotel Tower',
       project_lead_electrical_user_id: 1,
       project_lead_electrical: 'Anita Kumar',
+      project_lead_mechanical_utilization_pct: 40,
+      project_lead_bim_end_date: '2027-03-31',
       total_contract_value: 480000.5,
       target_effort_hours: 3840,
       alert_override_threshold_pct: 75,

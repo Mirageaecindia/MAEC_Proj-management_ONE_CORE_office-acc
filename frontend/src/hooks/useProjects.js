@@ -1,8 +1,6 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { projectsApi } from '../api/projects';
 import { queryKeys } from './queryKeys';
-
-export const LEAD_DISCIPLINES = ['electrical', 'mechanical', 'bim'];
 
 /** Projects visible to the signed-in user; archived ones only for the BU Head, on request. */
 export function useProjects({ includeArchived = false } = {}) {
@@ -22,20 +20,14 @@ export function useProject(projectId, { enabled = true } = {}) {
   });
 }
 
-/** Lead accounts per discipline for the Create Project dropdowns: { electrical: [...], ... }. */
+/** Everyone who can lead a project (any account with an employee record), for the lead dropdowns. */
 export function useProjectLeads() {
-  return useQueries({
-    queries: LEAD_DISCIPLINES.map((discipline) => ({
-      queryKey: queryKeys.projectLeads(discipline),
-      queryFn: () => projectsApi.leads(discipline),
-      staleTime: 5 * 60_000,
-    })),
-    combine: (results) => ({
-      leads: Object.fromEntries(LEAD_DISCIPLINES.map((discipline, i) => [discipline, results[i].data ?? []])),
-      error: results.find((result) => result.error)?.error ?? null,
-      isLoading: results.some((result) => result.isLoading),
-    }),
+  const { data, error, isLoading } = useQuery({
+    queryKey: queryKeys.projectLeads,
+    queryFn: projectsApi.leads,
+    staleTime: 5 * 60_000,
   });
+  return { leads: data ?? [], error, isLoading };
 }
 
 function useProjectMutation(mutationFn) {

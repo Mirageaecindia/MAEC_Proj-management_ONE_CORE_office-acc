@@ -146,8 +146,11 @@ const EDITABLE = {
   ...PROJECT,
   id: 5,
   project_lead_electrical_user_id: 2,
-  project_lead_mechanical_user_id: 2,
-  project_lead_bim_user_id: 2,
+  project_lead_electrical_start_date: '2026-09-01',
+  project_lead_electrical_end_date: '2027-08-31',
+  project_lead_electrical_utilization_pct: 20,
+  project_lead_mechanical_user_id: null,
+  project_lead_bim_user_id: null,
 };
 
 const ROUTES = [
@@ -166,7 +169,7 @@ const ROUTES = [
   [/\/api\/projects\/1\/executive-dashboard$/, () => dashboard],
   [/\/api\/projects\/1\/work-summary$/, WORK_SUMMARY],
   [/\/api\/projects\/1\/sharepoint-mirror$/, MIRROR],
-  [/\/api\/project-leads/, [{ id: 2, name: 'Anita Kumar', title: 'Electrical' }]],
+  [/\/api\/project-leads/, [{ id: 2, name: 'Anita Kumar', title: 'Electrical Lead' }]],
   [/\/api\/projects$/, [PROJECT]],
 ];
 
@@ -249,7 +252,7 @@ describe('BU Head pages render with API data', () => {
   it('Edit Project asks before changing the currency, then sends the confirmation', async () => {
     renderAt(<EditProjectPage />, '/edit-project?projectId=5');
     await screen.findByDisplayValue('Hotel Tower');
-    await screen.findAllByRole('option', { name: 'Anita Kumar' }); // leads loaded
+    await screen.findAllByRole('option', { name: /Anita Kumar/ }); // leads loaded
 
     fireEvent.change(screen.getByLabelText('Contract currency'), { target: { value: 'USD' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
@@ -268,7 +271,7 @@ describe('BU Head pages render with API data', () => {
 
   it('Create Project shows validation errors on an empty submit', async () => {
     renderAt(<CreateProjectPage />, '/create-project');
-    expect(await screen.findAllByRole('option', { name: 'Anita Kumar' })).toHaveLength(3); // one per discipline dropdown
+    expect(await screen.findAllByRole('option', { name: 'Anita Kumar (Electrical Lead)' })).toHaveLength(3); // one per lead slot
     fireEvent.click(screen.getByRole('button', { name: /Create Project & Build SharePoint Directory/ }));
     expect(screen.getByText('Project name is required.')).toBeTruthy();
     expect(screen.getByText('Enter a contract value greater than 0.')).toBeTruthy();

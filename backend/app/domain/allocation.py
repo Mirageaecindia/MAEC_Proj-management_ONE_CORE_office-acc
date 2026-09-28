@@ -31,3 +31,11 @@ def peak_allocation(bookings: Iterable[Span], start: date | None = None, end: da
         running += changes[day]
         peak = max(peak, running)
     return peak
+
+
+def planned_hours(start: date | None, end: date | None, pct: int) -> int:
+    """Working hours a booking represents: weekdays in the period x 8 h x the percentage."""
+    if start is None or end is None or end < start:
+        return 0
+    weekdays = sum(1 for offset in range((end - start).days + 1) if (start + timedelta(days=offset)).weekday() < 5)
+    return round(weekdays * 8 * pct / 100)

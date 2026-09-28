@@ -30,6 +30,7 @@ def _make_new_accounts(db, make):
             full_name=full_name,
             role="lead",
             discipline=discipline,
+            employee_id=make.employee(full_name, discipline=f"{discipline} Lead").id,
         )
     for username, password, full_name in NEW_ENGINEERS:
         employee = make.employee(full_name)
@@ -118,29 +119,13 @@ def test_new_leads_and_engineers_can_log_in(client, db, make):
     assert _login(client, "kiran", "wrong-password").status_code == 401
 
 
-def test_new_leads_appear_in_discipline_dropdowns(client, db, make, world):
+def test_new_accounts_appear_in_the_lead_dropdown(client, db, make, world):
     _make_new_accounts(db, make)
 
-    electrical = {
-        lead["name"]
-        for lead in client.get("/api/project-leads", params={"discipline": "electrical"}, headers=world.bu_h).json()
-    }
-    mechanical = {
-        lead["name"]
-        for lead in client.get("/api/project-leads", params={"discipline": "mechanical"}, headers=world.bu_h).json()
-    }
-    bim = {
-        lead["name"]
-        for lead in client.get("/api/project-leads", params={"discipline": "bim"}, headers=world.bu_h).json()
-    }
+    names = {lead["name"] for lead in client.get("/api/project-leads", headers=world.bu_h).json()}
 
-    assert "Kiran" in electrical and {"Anita Kumar", "Unassigned Lead"} <= electrical
-    assert "Naveen" in mechanical and {"Priya Nair"} <= mechanical
-    assert "Pallavi" in bim and {"Mohan Daniel"} <= bim
-    # each new lead appears only in their own discipline dropdown
-    assert "Kiran" not in mechanical and "Kiran" not in bim
-    assert "Naveen" not in electrical and "Naveen" not in bim
-    assert "Pallavi" not in electrical and "Pallavi" not in mechanical
+    # Anyone with an employee record can lead a project, whatever their account role.
+    assert {"Kiran", "Naveen", "Pallavi", "Sanjana", "Vivek", "Ritu", "Anita Kumar", "Arjun Mehta"} <= names
 
 
 def test_new_engineers_appear_in_employee_dropdowns(client, db, make, world):

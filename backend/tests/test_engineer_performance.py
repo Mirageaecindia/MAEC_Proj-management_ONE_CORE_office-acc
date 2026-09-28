@@ -220,9 +220,9 @@ def test_hours_from_a_project_the_engineer_is_not_approved_for_are_hidden(client
     assert body.json()["monthly_breakdown"] == []
 
 
-def test_dashboard_is_engineer_only(client, world, dash):
+def test_dashboard_needs_an_employee_record(client, world, dash):
     project_id, _ = dash
 
-    assert client.get(DASH, headers=world.lead_h).status_code == 403
+    assert client.get(DASH, headers=world.lead_h).status_code == 200  # a lead is staff with an employee record
     assert client.get(DASH, headers=world.bu_h).status_code == 403
     assert client.get(DASH).status_code == 401

@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from datetime import date
 
 from sqlalchemy import or_
@@ -6,17 +7,41 @@ from sqlalchemy.orm import Session
 import models
 from app.domain.allocation import Span
 
+ENGINEER, LEAD = "engineer", "lead"  # ResourceBooking.role
+
 
 class BookingRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def for_project(self, project_id: int) -> list[models.ResourceBooking]:
-        return self.db.query(models.ResourceBooking).filter_by(project_id=project_id).all()
+    def for_project(self, project_id: int, role: str = ENGINEER) -> list[models.ResourceBooking]:
+        """A project's bookings of one role. The approval workflow concerns engineer bookings only."""
+        return self.db.query(models.ResourceBooking).filter_by(project_id=project_id, role=role).all()
 
     def approval_statuses(self, project_id: int) -> list[str]:
-        rows = self.db.query(models.ResourceBooking.approval_status).filter_by(project_id=project_id).all()
+        rows = (
+            self.db.query(models.ResourceBooking.approval_status).filter_by(project_id=project_id, role=ENGINEER).all()
+        )
         return [status for (status,) in rows]
+
+    def lead_assignments(self, project_ids: Collection[int]) -> list[models.ResourceBooking]:
+        return (
+            self.db.query(models.ResourceBooking)
+            .filter(models.ResourceBooking.project_id.in_(project_ids), models.ResourceBooking.role == LEAD)
+            .all()
+        )
+
+    def delete_lead_assignments(self, project_id: int) -> None:
+        for booking in self.for_project(project_id, LEAD):
+            self.db.delete(booking)
+
+    def has_booking(self, project_id: int, employee_id: int, role: str) -> bool:
+        return (
+            self.db.query(models.ResourceBooking.id)
+            .filter_by(project_id=project_id, employee_id=employee_id, role=role)
+            .first()
+            is not None
+        )
 
     def spans_for(
         self, employee_id: int, start: date | None, end: date | None, exclude_booking_id: int | None = None

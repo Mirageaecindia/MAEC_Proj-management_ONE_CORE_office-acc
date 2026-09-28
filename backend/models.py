@@ -139,6 +139,10 @@ class ResourceBooking(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, nullable=False, index=True)
     employee_id = Column(Integer, nullable=False, index=True)
+    # "engineer": booked by a lead of the project, approved by the BU Head.
+    # "lead": the BU Head's own assignment of a project lead (Create/Edit
+    # Project), approved from the start. Both hold the person's capacity.
+    role = Column(String(20), nullable=False, default="engineer", server_default="engineer", index=True)
     planned_hours = Column(Integer, nullable=False, default=0)
     utilization_rate = Column(Integer, nullable=False, default=0)
     start_date = Column(Date, nullable=True)

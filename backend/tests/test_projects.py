@@ -14,24 +14,19 @@ from app.integrations.sharepoint import SharePointError
 # --- Lead dropdowns ------------------------------------------------------------
 
 
-def test_project_leads_filters_by_discipline(client, world):
-    response = client.get("/api/project-leads", params={"discipline": "electrical"}, headers=world.bu_h)
+def test_project_leads_are_everyone_with_an_employee_record(client, make, world):
+    make.user("no.employee", "engineer", "No Employee")  # nothing to book: can't lead
+
+    response = client.get("/api/project-leads", headers=world.bu_h)
 
     assert response.status_code == 200
-    assert {lead["name"] for lead in response.json()} == {"Anita Kumar", "Unassigned Lead"}
-    assert all(lead["title"] == "Electrical" for lead in response.json())
-
-
-def test_project_leads_without_discipline_are_hidden_from_filtered_dropdowns(client, make, world):
-    # By design: a lead without a discipline appears only in the unfiltered list.
-    # create_user.py now requires a discipline for new leads (roadmap 4.1).
-    make.user("lead.nodisc", "lead", "No Discipline Lead")
-
-    filtered = client.get("/api/project-leads", params={"discipline": "electrical"}, headers=world.bu_h).json()
-    unfiltered = client.get("/api/project-leads", headers=world.bu_h).json()
-
-    assert "No Discipline Lead" not in {lead["name"] for lead in filtered}
-    assert "No Discipline Lead" in {lead["name"] for lead in unfiltered}
+    assert {lead["name"]: lead["title"] for lead in response.json()} == {
+        "Anita Kumar": "Electrical Lead",
+        "Priya Nair": "Mechanical Lead",
+        "Mohan Daniel": "BIM Lead",
+        "Unassigned Lead": "Electrical Lead",
+        "Arjun Mehta": "Mechanical Engineer",  # any engineer can lead a project
+    }
 
 
 # --- Create ----------------------------------------------------------------------
@@ -76,12 +71,12 @@ def test_create_project_accepts_legacy_name_only_leads(client, db, world):
     assert project.project_lead_electrical_user_id is None
 
 
-def test_create_project_rejects_non_lead_account_as_lead(client, world):
-    payload = world.project_payload(project_lead_bim_user_id=world.engineer.id)
+def test_create_project_rejects_an_account_without_employee_record_as_lead(client, make, world):
+    nobody = make.user("no.employee", "engineer", "No Employee")
 
-    response = client.post("/api/projects", json=payload, headers=world.bu_h)
-
-    assert response.status_code == 400
+    for user_id in (nobody.id, world.bu.id):
+        payload = world.project_payload(project_lead_bim_user_id=user_id)
+        assert client.post("/api/projects", json=payload, headers=world.bu_h).status_code == 400
 
 
 def test_create_project_rejects_duplicate_code(client, world):

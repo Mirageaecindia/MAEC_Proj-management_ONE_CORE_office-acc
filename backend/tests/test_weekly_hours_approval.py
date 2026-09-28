@@ -136,7 +136,7 @@ def test_lead_cannot_review_unsubmitted_or_approved_weeks(client, world, approve
 
 def test_role_gates_on_submission_endpoints(client, world, approved):
     project_id, *_ = approved
-    assert _submit(client, world.lead_h, project_id).status_code == 403
+    assert _submit(client, world.lead_h, project_id).status_code == 409  # a lead submits only their own (empty) week
     assert _submit(client, world.bu_h, project_id).status_code == 403
     assert _review(client, world.eng_h, project_id, "approve", world.emp1.id, week=WEEK2).status_code == 403
     assert _review(client, world.eng_h, project_id, "reject", world.emp1.id, week=WEEK2).status_code == 403
