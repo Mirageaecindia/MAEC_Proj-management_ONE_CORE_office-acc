@@ -29,6 +29,7 @@ from app.domain.calendar import distribute_hours_over_months as _distribute_hour
 from app.domain.calendar import month_key as _get_month_key
 from app.domain.timesheets import entry_total as time_entry_total
 from app.domain.wbs import TO_DO, is_finished
+from app.services.allocation import allocated_pct, over_capacity_message
 from app.services.access import (
     engineer_approved_project_ids,
     engineer_wbs_condition,
@@ -278,32 +279,6 @@ def _parse_iso_date(value) -> Optional[date]:
         return None
 
 
-def engineer_total_allocation(db: Session, employee_id: int, exclude_booking_id: Optional[int] = None) -> int:
-    """Sum an engineer's real booking percentage across all ACTIVE projects
-    (archived projects no longer hold anyone's capacity).
-
-    Optionally excludes one booking from the total (used when validating an
-    edit so the booking's own old value does not count against the cap).
-    """
-    query = (
-        db.query(models.ResourceBooking)
-        .join(models.Project, models.Project.id == models.ResourceBooking.project_id)
-        .filter(models.ResourceBooking.employee_id == employee_id, models.Project.archived_at.is_(None))
-    )
-    if exclude_booking_id is not None:
-        query = query.filter(models.ResourceBooking.id != exclude_booking_id)
-    return sum(booking.utilization_rate or 0 for booking in query.all())
-
-
-def allocation_cap_error(employee_name: str, current: int, requested: int) -> str:
-    """Human-readable rejection message with the real numbers for the UI."""
-    remaining = max(0, 100 - current)
-    return (
-        f"{employee_name} is already allocated {current}% across other projects — "
-        f"only {remaining}% remaining, cannot book at {requested}%."
-    )
-
-
 def booking_effective_dates(db: Session, booking: models.ResourceBooking):
     """Return (start, end) for a booking, preferring the stored allocation
     date range and backfilling from the engineer's WBS node dates on the same
@@ -352,7 +327,9 @@ def booking_output(db: Session, booking: models.ResourceBooking):
         "utilization_rate": utilization,
         "start_date": booking.start_date.isoformat() if booking.start_date else None,
         "end_date": booking.end_date.isoformat() if booking.end_date else None,
-        "total_allocation_pct": float(engineer_total_allocation(db, booking.employee_id)),
+        "total_allocation_pct": float(
+            allocated_pct(db, booking.employee_id, booking.start_date, booking.end_date)
+        ),  # busiest day during this booking
         "cost_per_hour": 0,
         "total_cost": 0,
         "bench_status": "Fully Booked" if utilization >= 100 else "Near Capacity" if utilization >= 80 else "Available Bench",
@@ -466,7 +443,7 @@ def resource_booking_gantt(
             "employee_code": employee.employee_code,
             "role_title": employee.role_title,
             "discipline": employee.discipline,
-            "total_allocation_pct": engineer_total_allocation(db, employee.id),
+            "total_allocation_pct": allocated_pct(db, employee.id, date.today(), None),  # busiest day ahead
             "assignments": assignments,
         })
 
@@ -505,15 +482,11 @@ def create_resource_booking(
     if not employee:
         raise HTTPException(status_code=400, detail="Engineer not found.")
     requested = int(payload.get("utilization_rate", 0))
-    current_allocation = engineer_total_allocation(db, employee.id)
-    if current_allocation + requested > 100:
-        raise HTTPException(
-            status_code=400,
-            detail=allocation_cap_error(employee.name, current_allocation, requested),
-            headers={"X-Error-Code": "ALLOCATION_LIMIT"},
-        )
     start_date = _parse_iso_date(payload.get("start_date"))
     end_date = _parse_iso_date(payload.get("end_date"))
+    over = over_capacity_message(db, employee.name, employee.id, requested, start_date, end_date)
+    if over:
+        raise HTTPException(status_code=400, detail=over, headers={"X-Error-Code": "ALLOCATION_LIMIT"})
     derived_hours = estimated_hours_from_dates(start_date, end_date)
     booking = models.ResourceBooking(
         project_id=project_id,
@@ -552,18 +525,15 @@ def update_resource_booking(
     if not employee:
         raise HTTPException(status_code=400, detail="Engineer not found.")
     requested = int(payload.get("utilization_rate", booking.utilization_rate or 0))
-    current_allocation = engineer_total_allocation(db, employee.id, exclude_booking_id=booking.id)
-    if current_allocation + requested > 100:
-        raise HTTPException(
-            status_code=400,
-            detail=allocation_cap_error(employee.name, current_allocation, requested),
-            headers={"X-Error-Code": "ALLOCATION_LIMIT"},
-        )
+    start_date = _parse_iso_date(payload["start_date"]) if payload.get("start_date") is not None else booking.start_date
+    end_date = _parse_iso_date(payload["end_date"]) if payload.get("end_date") is not None else booking.end_date
+    over = over_capacity_message(
+        db, employee.name, employee.id, requested, start_date, end_date, exclude_booking_id=booking.id
+    )
+    if over:
+        raise HTTPException(status_code=400, detail=over, headers={"X-Error-Code": "ALLOCATION_LIMIT"})
     booking.employee_id = employee.id
-    if payload.get("start_date") is not None:
-        booking.start_date = _parse_iso_date(payload.get("start_date"))
-    if payload.get("end_date") is not None:
-        booking.end_date = _parse_iso_date(payload.get("end_date"))
+    booking.start_date, booking.end_date = start_date, end_date
     derived_hours = estimated_hours_from_dates(booking.start_date, booking.end_date)
     booking.planned_hours = derived_hours if derived_hours is not None else int(payload.get("planned_hours", booking.planned_hours or 0))
     booking.utilization_rate = requested
