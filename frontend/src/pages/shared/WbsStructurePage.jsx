@@ -164,39 +164,6 @@ export function WbsStructurePage() {
     return { days, hours: plannedHoursForRange(nodeForm.start_date, nodeForm.end_date) };
   }, [nodeForm.start_date, nodeForm.end_date]);
 
-  async function saveTask(task) {
-    setSavingId(task.id);
-    setError('');
-    try {
-      const resp = await fetch(`${API_BASE_URL}/api/wbs-nodes/${task.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({
-          wbs_code: task.wbs_code ? String(task.wbs_code).trim() : null,
-          task_name: task.task_name,
-          parent_id: task.parent_id,
-          assigned_lead: task.assigned_lead || user.full_name || null,
-          assigned_lead_user_id: task.assigned_lead_user_id ?? user.id ?? null,
-          assigned_engineer_id: task.assigned_engineer_id || null,
-          estimated_hours: task.estimated_hours === '' || task.estimated_hours === null ? null : Number(task.estimated_hours || 0),
-          deliverable_status: task.deliverable_status,
-          start_date: task.start_date || null,
-          target_due_date: task.target_due_date || null,
-          end_date: task.end_date || null,
-          phase: task.phase || null,
-        }),
-      });
-      if (!resp.ok) throw new Error((await resp.json()).detail || 'Could not save WBS task.');
-      await loadTasks();
-      setToast({ type: 'success', message: 'Task saved successfully.' });
-    } catch (err) {
-      setError(err.message);
-      setToast({ type: 'error', message: err.message });
-    } finally {
-      setSavingId(null);
-    }
-  }
-
   async function addNode(event) {
     event.preventDefault();
     setError('');
@@ -494,7 +461,6 @@ export function WbsStructurePage() {
               ) : (
                 <span className="wbs-subtask-slot" role="presentation">+ Subtask</span>
               )}
-              <button className="button button-primary" type="button" disabled={savingId === task.id} onClick={(e) => { e.stopPropagation(); saveTask(task); }}>{savingId === task.id ? 'Saving...' : 'Save'}</button>
               <button className="wbs-icon-btn wbs-icon-edit" type="button" title="Edit task" aria-label={`Edit ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openEditForm(task); }}><Pencil size={14} /></button>
               <button className="wbs-icon-btn wbs-icon-delete" type="button" title="Delete task" aria-label={`Delete ${task.task_name}`} disabled={savingId === task.id} onClick={(e) => { e.stopPropagation(); deleteNode(task); }}><Trash2 size={14} /></button>
             </div>
@@ -700,7 +666,7 @@ export function WbsStructurePage() {
                     <th>ESTIMATED HOURS</th>
                     <th>DELIVERABLE STATUS</th>
                     <th>TARGET DUE DATE</th>
-                    <th>ACTIONS</th>
+                    <th aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -739,7 +705,7 @@ export function WbsStructurePage() {
                   <th>ESTIMATED HOURS</th>
                   <th>DELIVERABLE STATUS</th>
                   <th>TARGET DUE DATE</th>
-                  <th>ACTIONS</th>
+                  <th aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
@@ -779,7 +745,7 @@ export function WbsStructurePage() {
                         <th>EST. HOURS</th>
                         <th>DELIVERABLE STATUS</th>
                         <th>TARGET DUE DATE</th>
-                        <th>ACTIONS</th>
+                        <th aria-label="Actions" />
                       </tr>
                     </thead>
                   <tbody>
