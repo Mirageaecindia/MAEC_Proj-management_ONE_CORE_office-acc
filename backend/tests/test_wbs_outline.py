@@ -120,3 +120,31 @@ def test_the_header_based_csv_still_works(client, db, world):
         ("STR Coordination", "10.", "Load estimate", None),
         ("STR Coordination", "10.1", "Substations", "Load estimate"),
     ]
+
+
+def test_unnamed_merged_blocks_take_the_phase_by_position(client, db, world):
+    """The company's breakdown sheet names only the last three blocks."""
+    project_id = world.create_project()["id"]
+    workbook = write_template(
+        {
+            "_1": [("Load estimate", True), ("Substations", False)],
+            "_2": [("Plinths", True)],
+            "ID Coordination": [("LV strategy", True)],
+            "BOH Area RCP Coordination": [("Ceilings", True)],
+            "Submission": [("Package", True)],
+        }
+    )
+
+    response = _upload(client, world, project_id, workbook)
+
+    assert response.status_code == 200, response.text
+    assert [(phase, name) for phase, _, name, parent in _tree(db, project_id) if parent is None] == [
+        ("Space Planning", "Load estimate"),
+        ("STR Coordination", "Plinths"),
+        ("ID Coordination", "LV strategy"),
+        ("BoH Area RCP Coordination", "Ceilings"),
+        ("Submission", "Package"),
+    ]
+    # Fewer than five blocks: an unnamed one can't be placed.
+    two = write_template({"_1": [("Task", True)], "Submission": [("Package", True)]})
+    assert "put the phase in column A" in _upload(client, world, project_id, two).json()["detail"]

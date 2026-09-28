@@ -1,7 +1,10 @@
 """The WBS outline workbook: the Excel layout leads fill in to upload a project's tasks.
 
 Column A: the phase (one of the five fixed phases), written once at the top of
-its block or on every row; the rest of the block is blank. Column B: the
+its block or on every row; the rest of the block is blank. When the blocks are
+merged cells and a block has no name (the company's breakdown sheet leaves the
+first two blank), the block takes the phase by its position, the five phases
+in order. Column B: the
 tasks and subtasks of that phase, one per row: a **bold** row is a task, a
 normal row is a subtask of the task above it. Nothing else is needed: codes,
 dates and hours are set in the app afterwards.
@@ -109,23 +112,48 @@ def read_cells(content: bytes) -> list[tuple[int, dict[str, tuple[str, bool]]]]:
     return rows
 
 
+def merged_blocks(content: bytes) -> list[tuple[int, int]]:
+    """The merged ranges of column A, as (first row, last row), top to bottom."""
+    with zipfile.ZipFile(io.BytesIO(content)) as workbook:
+        sheet = ElementTree.fromstring(workbook.read("xl/worksheets/sheet1.xml"))
+    blocks = []
+    for merge in sheet.findall(".//m:mergeCell", NS):
+        match = re.fullmatch(r"A(\d+):A(\d+)", merge.get("ref") or "")
+        if match:
+            blocks.append((int(match.group(1)), int(match.group(2))))
+    return sorted(blocks)
+
+
+def _phase_by_block(content: bytes) -> dict[int, str]:
+    """First row of each merged block -> the phase it stands for, when the sheet has the five blocks
+    in order (a named block must agree with its position)."""
+    blocks = merged_blocks(content)
+    if len(blocks) != len(PHASES):
+        return {}
+    return {first: phase for (first, _), phase in zip(blocks, PHASES, strict=True)}
+
+
 def parse_outline(content: bytes) -> list[OutlineRow]:
     """The outline rows of a workbook, or a BadRequestError naming the first bad row."""
     rows: list[OutlineRow] = []
+    by_block = _phase_by_block(content)
     phase = None
     have_task = False
     for number, cells in read_cells(content):
         phase_text, _ = cells.get("A", ("", False))
         name, is_bold = cells.get("B", ("", False))
         name = name.strip()
+        new_phase = None
         if phase_text.strip():
             new_phase = phase_from(phase_text)
             if new_phase is None:
                 raise BadRequestError(
                     f"Row {number}: '{phase_text.strip()}' is not one of the five phases ({', '.join(PHASES)})."
                 )
-            if new_phase != phase:
-                phase, have_task = new_phase, False
+        elif number in by_block:
+            new_phase = by_block[number]  # an unnamed block: the phase by its position
+        if new_phase is not None and new_phase != phase:
+            phase, have_task = new_phase, False
         if not name:
             continue
         if phase is None:
@@ -234,7 +262,7 @@ def write_template(rows_by_phase: dict[str, list[tuple[str, bool]]] = TEMPLATE_R
         for name, is_task in phase_rows:
             number += 1
             cells = []
-            if number == first:
+            if number == first and not phase.startswith("_"):  # "_n" keys: an unnamed merged block
                 cells.append(f'<c r="A{number}" s="3" t="s"><v>{shared(phase)}</v></c>')
             cells.append(f'<c r="B{number}" s="{1 if is_task else 2}" t="s"><v>{shared(name)}</v></c>')
             sheet_rows.append(f'<row r="{number}">{"".join(cells)}</row>')
