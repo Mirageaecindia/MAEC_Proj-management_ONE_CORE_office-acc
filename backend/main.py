@@ -45,6 +45,7 @@ from app.services.governance import extension_request_output, find_pending_exten
 from app.services.metrics import executive_dashboard_data
 from app.services.governance_monitor import enforce_governance
 from app.services.hours_review import NOT_YOUR_HOURS, HoursReview, tasks_by_id
+from app.services.wbs_outline import import_outline, looks_like_outline
 from app.services.notifications import EXTENSION_REQUESTED, create_bu_head_notification
 
 logger = logging.getLogger(__name__)
@@ -1834,7 +1835,13 @@ async def upload_wbs(
     requested_phase = phase.strip() if phase and phase.strip() else None
     if requested_phase and requested_phase not in schemas.WBS_PHASES:
         raise HTTPException(status_code=422, detail=f"Phase '{requested_phase}' is not one of the five fixed phases.")
-    rows = parse_wbs_upload(file, await file.read())
+    content = await file.read()
+    if (file.filename or "").lower().endswith(".xlsx") and looks_like_outline(content):
+        # The outline workbook (the template): column A phase, column B bold task / normal subtask.
+        result = import_outline(db, project, user, content, requested_phase)
+        db.commit()
+        return result
+    rows = parse_wbs_upload(file, content)
     if not rows:
         raise HTTPException(status_code=400, detail="The WBS file contains no rows.")
     created = updated = 0

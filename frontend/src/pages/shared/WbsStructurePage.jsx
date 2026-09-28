@@ -337,16 +337,6 @@ export function WbsStructurePage() {
     setShowNodeForm(true);
   }
 
-  function downloadTemplate(event) {
-    event.preventDefault();
-    const url = URL.createObjectURL(new Blob([`WBS Code,Task Name,Parent WBS Code,Assigned Lead,Estimated Hours,Deliverable Status,Target Due Date,Phase\n`], { type: 'text/csv' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'wbs-upload-template.csv';
-    link.click();
-    URL.revokeObjectURL(url);
-  }
-
   const children = useMemo(() => tasks.reduce((map, task) => {
     (map[task.parent_id || 0] ||= []).push(task);
     return map;
@@ -639,9 +629,9 @@ export function WbsStructurePage() {
               ))}
             </div>
             <div className="wbs-upload-tools">
-              <button className="button button-secondary" type="button" onClick={() => { setUploadPhase(''); fileInputRef.current?.click(); }} disabled={showUpload}>{showUpload ? 'Uploading...' : 'Upload CSV'}</button>
+              <button className="button button-secondary" type="button" onClick={() => { setUploadPhase(''); fileInputRef.current?.click(); }} disabled={showUpload}>{showUpload ? 'Uploading...' : 'Upload WBS (Excel)'}</button>
               <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" hidden onChange={handleUpload} />
-              <a href="/wbs-upload-template.csv" onClick={downloadTemplate}>Click Here to Download Template</a>
+              <a href="/wbs-upload-template.xlsx" download title="Column A: the phase. Column B: tasks in bold, subtasks in normal text.">Download the Excel template</a>
             </div>
           </div>
 

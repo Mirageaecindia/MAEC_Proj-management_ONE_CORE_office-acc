@@ -444,7 +444,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | POST | `/api/wbs-nodes/{id}/subtasks` | Lead, Engineer (own task) | Create a subtask (1–4 h, single day) |
 | PUT | `/api/wbs-nodes/{id}` | Lead | Update a node (phase cascades to subtasks) |
 | DELETE | `/api/wbs-nodes/{id}` | Lead | Delete a node, its subtasks, history and time logs |
-| POST | `/api/projects/{id}/wbs-upload` (multipart `file`, optional `phase`) | Lead | CSV/XLSX import |
+| POST | `/api/projects/{id}/wbs-upload` (multipart `file`, optional `phase`) | Lead | Import the outline workbook (`app/services/wbs_outline.py`: column A phase, column B bold task / normal subtask; the template is `frontend/public/wbs-upload-template.xlsx`, written by `make_wbs_template.py`) or the header-based CSV/XLSX |
 | GET | `/api/wbs-nodes/{id}` | all (scoped) | Task details, children, history |
 | POST | `/api/wbs-nodes/{id}/advance-status` | Engineer (assigned), Lead (subtasks) | Move to the next status |
 | POST | `/api/wbs-nodes/{id}/approve` | Lead (assigned) | Approve a submitted task |
