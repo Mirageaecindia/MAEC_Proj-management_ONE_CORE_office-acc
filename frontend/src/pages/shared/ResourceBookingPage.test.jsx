@@ -9,9 +9,10 @@ import { ResourceBookingPage } from './ResourceBookingPage';
 // The page loads several endpoints on mount; allow for a busy machine running the whole suite.
 const WAIT = { timeout: 5000 };
 
-vi.mock('../../AuthContext', () => ({
-  useAuth: () => ({ role: 'bu_head', authHeaders: () => ({}), logout: vi.fn() }),
-}));
+vi.mock('../../AuthContext', () => {
+  const auth = { role: 'bu_head', authHeaders: () => ({}), logout: vi.fn() }; // stable, like the real context
+  return { useAuth: () => auth };
+});
 
 let bookingStatus = 'pending_approval';
 

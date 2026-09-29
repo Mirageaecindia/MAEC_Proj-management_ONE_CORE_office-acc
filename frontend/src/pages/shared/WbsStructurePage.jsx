@@ -177,12 +177,12 @@ export function WbsStructurePage() {
       if (nodeMode === 'subtask' || (nodeMode === 'edit' && nodeForm.parent_id)) {
         const rawHours = String(nodeForm.estimated_hours === null || nodeForm.estimated_hours === '' ? '' : nodeForm.estimated_hours).trim();
         if (rawHours === '') {
-          setError('Subtask planned hours must be between 1 and 4 hours.');
+          setError('Subtask planned hours must be between 1 and 8 hours.');
           return;
         }
         hours = Number(rawHours);
         if (!Number.isInteger(hours) || hours < 1 || hours > 4) {
-          setError('Subtask planned hours must be between 1 and 4 hours.');
+          setError('Subtask planned hours must be between 1 and 8 hours.');
           return;
         }
         if (nodeForm.start_date || nodeForm.end_date) {
@@ -566,9 +566,9 @@ export function WbsStructurePage() {
                   <input
                     type="number"
                     min="1"
-                    max="4"
+                    max="8"
                     step="1"
-                    placeholder="1-4"
+                    placeholder="1-8"
                     value={nodeForm.estimated_hours === null || nodeForm.estimated_hours === '' ? '' : nodeForm.estimated_hours}
                     onChange={(e) => setNodeForm({ ...nodeForm, estimated_hours: e.target.value })}
                   />

@@ -102,7 +102,7 @@ export function EngineerPerformanceDashboardPage() {
   }, [fetchDashboard]);
 
   const summary = data?.summary;
-  const monthlyBreakdown = data?.monthly_breakdown || [];
+  const monthlyBreakdown = useMemo(() => data?.monthly_breakdown || [], [data]);
   const hasData = Boolean(data);
 
   const maxChartValue = useMemo(() => {

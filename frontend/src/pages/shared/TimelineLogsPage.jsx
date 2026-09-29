@@ -1,9 +1,10 @@
 import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { DAY_KEYS, HOURS_STATUS_LABELS, HOURS_STATUS_PILL, groupByEngineer, summarizeWeek } from '../../utils/hours';
+import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 
 const WBS_PHASES = ['Space Planning', 'STR Coordination', 'ID Coordination', 'BoH Area RCP Coordination'];
 const INITIAL_VIEWPORT_START = new Date(2026, 8, 1);
@@ -13,45 +14,6 @@ const INITIAL_VIEWPORT_MONTH_COUNT =
   INITIAL_VIEWPORT_END.getMonth() -
   INITIAL_VIEWPORT_START.getMonth() +
   1;
-
-export function getMonday(d) {
-  const date = new Date(d);
-  const day = date.getDay();
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(date.setDate(diff));
-  monday.setHours(0, 0, 0, 0);
-  return monday;
-}
-
-export function formatDateStr(dateObj) {
-  const y = dateObj.getFullYear();
-  const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const d = String(dateObj.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-export function getWeekInfo(monday) {
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-
-  const target = new Date(monday.valueOf());
-  const dayNr = (monday.getDay() + 6) % 7;
-  target.setDate(target.getDate() - dayNr + 3);
-  const firstThursday = target.valueOf();
-  target.setMonth(0, 1);
-  if (target.getDay() !== 4) {
-    target.setMonth(0, 1 + ((4 - target.getDay() + 7) % 7));
-  }
-  const weekNum = 1 + Math.round((firstThursday - target.valueOf()) / 604800000);
-
-  const startMonth = monday.toLocaleString('en-US', { month: 'short' });
-  const endMonth = sunday.toLocaleString('en-US', { month: 'short' });
-  const rangeStr = startMonth === endMonth
-    ? `${startMonth} ${monday.getDate()} - ${sunday.getDate()}, ${monday.getFullYear()}`
-    : `${startMonth} ${monday.getDate()} - ${endMonth} ${sunday.getDate()}, ${monday.getFullYear()}`;
-
-  return { weekNum, rangeStr };
-}
 
 function formatMonthHeader(dateObj) {
   return dateObj.toLocaleString('en-US', { month: 'short', year: 'numeric' }).toUpperCase();
@@ -84,11 +46,11 @@ export function TimelineLogsPage() {
   const [serverDate, setServerDate] = useState(null);
 
   const [error, setError] = useState('');
-  const [tick, setTick] = useState(0);
+  const [now, setNow] = useState(() => new Date()); // the "today" marker moves once a minute
   const weekRequestRef = useRef('');
 
   useEffect(() => {
-    const timer = setInterval(() => setTick((t) => t + 1), 60000);
+    const timer = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(timer);
   }, []);
 
@@ -142,7 +104,7 @@ export function TimelineLogsPage() {
   const weekStartRef = useRef(weekStartStr);
   weekStartRef.current = weekStartStr;
 
-  const loadProjectData = async (id, weekStr) => {
+  const loadProjectData = useCallback(async (id, weekStr) => {
     const requestKey = `${id}:${weekStr}`;
     weekRequestRef.current = requestKey;
     setError('');
@@ -191,13 +153,13 @@ export function TimelineLogsPage() {
         setError(err.message);
       }
     }
-  };
+  }, [authHeaders, isEngineer, isLead]);
 
   useEffect(() => {
     if (projectId) {
       loadProjectData(projectId, weekStartStr);
     }
-  }, [projectId, weekStartStr]);
+  }, [projectId, weekStartStr, loadProjectData]);
 
   useEffect(() => {
     const onFocus = () => {
@@ -209,7 +171,7 @@ export function TimelineLogsPage() {
     };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-  }, [projectId]);
+  }, [projectId, loadProjectData]);
 
   const phaseRows = useMemo(() => {
     const phaseMap = {};
@@ -242,7 +204,7 @@ export function TimelineLogsPage() {
       });
     }
     return Object.values(phaseMap).map((p) => ({ ...p, isRealData: p.count > 0 }));
-  }, [nodes, timelineTasks, isEngineer]);
+  }, [nodes, timelineTasks, isEngineer, isLead]);
 
   const { quarterTitle } = useMemo(() => {
     let minDate = null;
@@ -304,12 +266,12 @@ export function TimelineLogsPage() {
   );
 
   const todayPct = useMemo(() => {
-    const today = serverDate || new Date();
+    const today = serverDate || now;
     const total = INITIAL_VIEWPORT_END.getTime() - INITIAL_VIEWPORT_START.getTime();
     if (today < INITIAL_VIEWPORT_START || today > INITIAL_VIEWPORT_END || total <= 0) return null;
     const elapsed = today.getTime() - INITIAL_VIEWPORT_START.getTime();
     return Math.min(100, Math.max(0, (elapsed / total) * 100));
-  }, [tick, serverDate]);
+  }, [now, serverDate]);
 
   const weekInfo = useMemo(() => getWeekInfo(currentMonday), [currentMonday]);
 

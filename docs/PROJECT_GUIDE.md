@@ -98,7 +98,7 @@ Step by step:
    - The Lead creates tasks inside the five fixed phases, by hand or by uploading a CSV/XLSX.
    - Only engineers booked on the project can be assigned.
    - A task's estimated hours are weekdays between its start and end dates × 8.
-   - Subtasks are single-day units of 1–4 hours. Leads can create them, and engineers can create them under their own tasks.
+   - Subtasks are single-day units of 1–8 hours. Leads can create them, and engineers can create them under their own tasks.
 4. **Execution (Engineer).**
    - The engineer opens a subtask in Task Details and presses **Login**; **Logout** ends the work. Worked time is Logout − Login (idle time included), paused while the laptop is off, capped at 8 hours per day. This is the only source of hours: there is no manual timesheet.
    - On Logout, the hours are added to the day's row for the subtask (one row per subtask, engineer and day).
@@ -323,7 +323,7 @@ Shared helpers that the Lead/Engineer code in `main.py` needs (access rules, das
 | Item | Rule |
 |---|---|
 | Main task estimated hours | Weekdays (Mon–Fri, inclusive) between start and end date × 8. Calculated by the server. Planned-hours maths moves to the person's office calendar in TODO N3. |
-| Subtask planned hours | Whole number from **1 to 4**. Start date must equal end date (a single-day unit). |
+| Subtask planned hours | Whole number from **1 to 8** (a working day). Start date must equal end date (a single-day unit). |
 | Resource booking planned hours | Weekdays in the booking range × 8. Calculated by the server (the booking % is not applied). |
 | Allocation cap | Sum of an engineer's `utilization_rate` across all projects must be ≤ 100%. Otherwise the API returns 400 with `X-Error-Code: ALLOCATION_LIMIT`. |
 | Weekly timesheet total | The sum of the week's daily rows, **all seven days** (offices work different weeks: KSA Sun–Thu, Indian offices often Saturday). Each day's approval decides whether it counts. `total_hours` in `app/domain/timesheets.py` is the one totals function. |
@@ -441,7 +441,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 |---|---|---|---|
 | GET | `/api/projects/{id}/wbs-structure[?include_ancestors=true]` | all (scoped) | Flat node list with level (engineers see their nodes plus parents) |
 | POST | `/api/projects/{id}/wbs-nodes` | Lead | Create a task (optionally with one subtask) |
-| POST | `/api/wbs-nodes/{id}/subtasks` | Lead, Engineer (own task) | Create a subtask (1–4 h, single day) |
+| POST | `/api/wbs-nodes/{id}/subtasks` | Lead, Engineer (own task) | Create a subtask (1–8 h, single day) |
 | PUT | `/api/wbs-nodes/{id}` | Lead | Update a node (phase cascades to subtasks) |
 | DELETE | `/api/wbs-nodes/{id}` | Lead | Delete a node, its subtasks, history and time logs |
 | POST | `/api/projects/{id}/wbs-upload` (multipart `file`, optional `phase`) | Lead | Import the outline workbook (`app/services/wbs_outline.py`: column A phase, column B bold task / normal subtask; the template is `frontend/public/wbs-upload-template.xlsx`, written by `make_wbs_template.py`) or the header-based CSV/XLSX |

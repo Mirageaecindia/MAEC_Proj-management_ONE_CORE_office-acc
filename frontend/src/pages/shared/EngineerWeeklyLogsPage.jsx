@@ -1,10 +1,10 @@
 import { ArrowLeft } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { HOURS_STATUS_LABELS, HOURS_STATUS_PILL } from '../../utils/hours';
-import { getMonday, formatDateStr, getWeekInfo } from './TimelineLogsPage';
+import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 
 export function EngineerWeeklyLogsPage() {
   const [searchParams] = useSearchParams();
@@ -81,46 +81,49 @@ export function EngineerWeeklyLogsPage() {
     [detailsRows],
   );
 
-  const loadDetails = async (projectIdNum, weekStr) => {
-    try {
-      setError('');
-      setLoaded(false);
-      const requests = [
-        fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/wbs-structure`, { headers: authHeaders() }),
-        fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timesheet?week_start=${weekStr}`, {
-          headers: authHeaders(),
-        }),
-      ];
-      if (isEngineer || isLead) {
-        requests.push(
-          fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timeline-logs`, { headers: authHeaders() }),
-        );
+  const loadDetails = useCallback(
+    async (projectIdNum, weekStr) => {
+      try {
+        setError('');
+        setLoaded(false);
+        const requests = [
+          fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/wbs-structure`, { headers: authHeaders() }),
+          fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timesheet?week_start=${weekStr}`, {
+            headers: authHeaders(),
+          }),
+        ];
+        if (isEngineer || isLead) {
+          requests.push(
+            fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timeline-logs`, { headers: authHeaders() }),
+          );
+        }
+        const [nodesRes, timesheetRes, timelineRes] = await Promise.all(requests);
+        if (!nodesRes.ok || !timesheetRes.ok) {
+          throw new Error('Failed to load the engineer weekly log data.');
+        }
+        const nodesData = await nodesRes.json();
+        const timesheetData = await timesheetRes.json();
+        setNodes(nodesData);
+        setEntries(Array.isArray(timesheetData) ? timesheetData : []);
+        if (timelineRes) {
+          const timelineData = await timelineRes.json();
+          setTimelineEngineers(Array.isArray(timelineData.engineers) ? timelineData.engineers : []);
+          setScopeEngineerName(timelineData.scope?.engineer_name || '');
+        }
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoaded(true);
       }
-      const [nodesRes, timesheetRes, timelineRes] = await Promise.all(requests);
-      if (!nodesRes.ok || !timesheetRes.ok) {
-        throw new Error('Failed to load the engineer weekly log data.');
-      }
-      const nodesData = await nodesRes.json();
-      const timesheetData = await timesheetRes.json();
-      setNodes(nodesData);
-      setEntries(Array.isArray(timesheetData) ? timesheetData : []);
-      if (timelineRes) {
-        const timelineData = await timelineRes.json();
-        setTimelineEngineers(Array.isArray(timelineData.engineers) ? timelineData.engineers : []);
-        setScopeEngineerName(timelineData.scope?.engineer_name || '');
-      }
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoaded(true);
-    }
-  };
+    },
+    [authHeaders, isEngineer, isLead],
+  );
 
   useEffect(() => {
     if (projectId) {
       loadDetails(projectId, weekStartStr);
     }
-  }, [projectId, weekStartStr]);
+  }, [projectId, weekStartStr, loadDetails]);
 
   const dayLabel = (isoDate) =>
     new Date(`${isoDate}T00:00:00`).toLocaleDateString('en-US', {

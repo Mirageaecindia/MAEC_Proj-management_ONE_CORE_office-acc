@@ -77,7 +77,7 @@ export function ResourceBookingPage() {
   const [notifications, setNotifications] = useState([]);
   const [ganttData, setGanttData] = useState(EMPTY_GANTT);
   const [serverDate, setServerDate] = useState(null);
-  const [tick, setTick] = useState(0);
+  const [now, setNow] = useState(() => new Date()); // the "today" marker moves once a minute
   const [hoveredBarId, setHoveredBarId] = useState(null);
   const [pinnedBarId, setPinnedBarId] = useState(null);
   const ganttTrackElRef = useRef(null);
@@ -96,7 +96,7 @@ export function ResourceBookingPage() {
   }, []);
 
   useEffect(() => {
-    const timer = setInterval(() => setTick((t) => t + 1), 60000);
+    const timer = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(timer);
   }, []);
 
@@ -152,7 +152,7 @@ export function ResourceBookingPage() {
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, []);
+  }, [authHeaders]);
 
   // The timeline shows the selected project's engineers (with their other commitments).
   const loadGantt = useCallback(async () => {
@@ -185,7 +185,7 @@ export function ResourceBookingPage() {
         }
       })
       .catch((loadError) => setError(loadError.message));
-  }, [targetProjectId]);
+  }, [targetProjectId, authHeaders]);
 
   useEffect(() => {
     if (targetProjectId && projects.length > 0) {
@@ -209,7 +209,7 @@ export function ResourceBookingPage() {
       })
       .then((data) => setEmployees(data))
       .catch(() => {});
-  }, []);
+  }, [authHeaders]);
 
   const intervalRef = useRef(null);
   useEffect(() => {
@@ -422,7 +422,7 @@ export function ResourceBookingPage() {
     } catch { /* ignore */ }
   }
 
-  const ganttEngineers = ganttData?.engineers || [];
+  const ganttEngineers = useMemo(() => ganttData?.engineers || [], [ganttData]);
   const dateRange = ganttData?.date_range || { start: null, end: null };
 
   const projectColors = useMemo(() => {
@@ -454,11 +454,11 @@ export function ResourceBookingPage() {
 
   const todayPct = useMemo(() => {
     if (!timelineStart || !timelineEnd || totalSpan <= 0) return null;
-    const today = serverDate || new Date();
+    const today = serverDate || now;
     const t = today.getTime();
     if (t < timelineStart.getTime() || t > timelineEnd.getTime()) return null;
     return Math.min(100, Math.max(0, ((t - timelineStart.getTime()) / totalSpan) * 100));
-  }, [serverDate, tick, timelineStart, timelineEnd, totalSpan]);
+  }, [serverDate, now, timelineStart, timelineEnd, totalSpan]);
 
   const ganttRows = useMemo(() => ganttEngineers.map((engineer) => {
     const withDates = (engineer.assignments || []).filter((a) => a.has_date_range);
@@ -479,7 +479,7 @@ export function ResourceBookingPage() {
       return { ...assignment, lane, start, end, leftPct, widthPct, labelOverflow };
     });
     return { ...engineer, assignments: placed, noDates, laneCount: Math.max(1, lanes.length) };
-  }), [ganttEngineers, ganttTrackWidth, timelineStart, timelineEnd, totalSpan]);
+  }), [ganttEngineers, ganttTrackWidth, timelineStart, totalSpan]);
 
   return (
     <main className="resource-page">
@@ -579,7 +579,7 @@ export function ResourceBookingPage() {
                 </button>
               )}
               <button
-                className="button button-primary"
+                className={`button button-primary${approvalStatus === 'approved' ? ' is-done' : ''}`}
                 type="button"
                 style={{ background: approvalStatus === 'approved' ? '#277551' : '#b8860b', borderColor: approvalStatus === 'approved' ? '#277551' : '#b8860b' }}
                 disabled={approvalStatus !== 'pending_approval'}

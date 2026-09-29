@@ -145,7 +145,8 @@ input[type='date'] { color: #52687c; }
 .action-row { display: flex; justify-content: flex-end; gap: 11px; margin-top: 22px; padding-top: 17px; border-top: 1px solid #e1e7ec; }
 .button { min-height: 39px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 16px; border-radius: 5px; font-size: 11px; font-weight: 700; transition: background .15s, border-color .15s, transform .15s; }
 .button:active { transform: translateY(1px); }
-.button:disabled { cursor: wait; opacity: .65; }
+.button:disabled { cursor: not-allowed; opacity: .65; }
+.button.is-done:disabled { cursor: default; opacity: 1; } /* a finished state, not a blocked action */
 .button-secondary { color: #506577; background: #fff; border: 1px solid #cbd6df; }
 .button-secondary:hover { background: #f7fafc; }
 .button-primary { color: #fff; background: var(--navy); border: 1px solid var(--navy); }
@@ -1091,7 +1092,7 @@ table.wbs-lead-table:has(> thead > tr > th:nth-child(6)) th:last-child { width: 
   white-space: nowrap;
 }
 .wbs-icon-btn { width: 27px; height: 27px; flex: 0 0 27px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; cursor: pointer; vertical-align: middle; }
-.wbs-icon-btn:disabled { cursor: wait; opacity: .6; }
+.wbs-icon-btn:disabled { cursor: not-allowed; opacity: .6; }
 .wbs-icon-edit { color: #2d5f86; background: #eef5fb; border: 1px solid #cfe3f2; }
 .wbs-icon-edit:hover { background: #dcecf7; }
 .wbs-icon-delete { color: #a34d4a; background: #fff3f3; border: 1px solid #f3d2d0; }

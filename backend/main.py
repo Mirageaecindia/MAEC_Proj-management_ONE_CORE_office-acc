@@ -1432,12 +1432,12 @@ def reject_time_log(
 # --- Automatic subtask working-time tracking ---------------------------------
 
 SUBTASK_MIN_HOURS = 1
-SUBTASK_MAX_HOURS = 4
+SUBTASK_MAX_HOURS = 8  # a whole working day (raised from 4 on 2026-09-29)
 
 
 def validate_subtask_rules(estimated_hours, start_date, end_date):
     """Enforce the subtask working-time rules that underpin automatic
-    tracking: planned hours are required and must be 1-4 whole hours, and a
+    tracking: planned hours are required and must be 1-8 whole hours, and a
     subtask is a single-day unit whose Start and End dates must be identical.
 
     Only values explicitly present on the payload are checked, so subtasks

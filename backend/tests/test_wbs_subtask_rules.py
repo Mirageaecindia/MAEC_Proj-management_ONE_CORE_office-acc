@@ -1,4 +1,4 @@
-"""Subtask working-time rules: manual planned hours (1-4 only) and a
+"""Subtask working-time rules: manual planned hours (1-8 only) and a
 single-day Start/End pair. The Add WBS Subtask popup and the backend share
 these rules; hours are never derived from dates for subtasks."""
 
@@ -117,16 +117,16 @@ def test_subtask_rejects_zero_hours(client, world, subtask_parent):
     response = _create_subtask(client, world.lead_h, node.id, estimated_hours=0)
 
     assert response.status_code == 400, response.text
-    assert "Subtask planned hours must be between 1 and 4 hours." in response.json()["detail"]
+    assert "Subtask planned hours must be between 1 and 8 hours." in response.json()["detail"]
 
 
-def test_subtask_rejects_hours_over_four(client, world, subtask_parent):
+def test_subtask_rejects_hours_over_eight(client, world, subtask_parent):
     _, node = subtask_parent
 
-    response = _create_subtask(client, world.lead_h, node.id, estimated_hours=5)
+    response = _create_subtask(client, world.lead_h, node.id, estimated_hours=9)
 
     assert response.status_code == 400, response.text
-    assert response.json()["detail"] == "Subtask planned hours must be between 1 and 4 hours."
+    assert response.json()["detail"] == "Subtask planned hours must be between 1 and 8 hours."
 
 
 def test_subtask_rejects_negative_hours(client, world, subtask_parent):
@@ -135,7 +135,7 @@ def test_subtask_rejects_negative_hours(client, world, subtask_parent):
     response = _create_subtask(client, world.lead_h, node.id, estimated_hours=-1)
 
     assert response.status_code == 400, response.text
-    assert "Subtask planned hours must be between 1 and 4 hours." in response.json()["detail"]
+    assert "Subtask planned hours must be between 1 and 8 hours." in response.json()["detail"]
 
 
 def test_subtask_rejects_missing_hours(client, world, subtask_parent):
@@ -144,7 +144,7 @@ def test_subtask_rejects_missing_hours(client, world, subtask_parent):
     response = _create_subtask(client, world.lead_h, node.id, estimated_hours=None)
 
     assert response.status_code == 400, response.text
-    assert "Subtask planned hours must be between 1 and 4 hours." in response.json()["detail"]
+    assert "Subtask planned hours must be between 1 and 8 hours." in response.json()["detail"]
 
 
 def test_subtask_rejects_fractional_hours(client, world, subtask_parent):
