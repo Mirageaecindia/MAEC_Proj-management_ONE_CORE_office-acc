@@ -35,6 +35,20 @@ class BookingRepository:
         for booking in self.for_project(project_id, LEAD):
             self.db.delete(booking)
 
+    def spans_by_employee(self, employee_ids: Collection[int]) -> dict[int, list[Span]]:
+        """employee id -> (start, end, %) of every booking on an active project, in one query."""
+        booking = models.ResourceBooking
+        rows = (
+            self.db.query(booking.employee_id, booking.start_date, booking.end_date, booking.utilization_rate)
+            .join(models.Project, models.Project.id == booking.project_id)
+            .filter(booking.employee_id.in_(employee_ids), models.Project.archived_at.is_(None))
+            .all()
+        )
+        spans: dict[int, list[Span]] = {employee_id: [] for employee_id in employee_ids}
+        for employee_id, first, last, pct in rows:
+            spans[employee_id].append((first, last, pct or 0))
+        return spans
+
     def has_booking(self, project_id: int, employee_id: int, role: str) -> bool:
         return (
             self.db.query(models.ResourceBooking.id)

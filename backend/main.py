@@ -29,7 +29,9 @@ from app.domain.calendar import distribute_hours_over_months as _distribute_hour
 from app.domain.calendar import month_key as _get_month_key
 from app.domain.timesheets import APPROVED, PENDING_REVIEW, total_hours
 from app.domain.wbs import TO_DO, is_finished
-from app.services.allocation import allocated_pct, over_capacity_message
+from app.domain.allocation import peak_allocation
+from app.repositories.bookings import BookingRepository
+from app.services.allocation import over_capacity_message
 from app.services.access import (
     NOT_PROJECT_LEAD,
     engineer_wbs_condition,
@@ -284,33 +286,36 @@ def _parse_iso_date(value) -> Optional[date]:
         return None
 
 
-def booking_effective_dates(db: Session, booking: models.ResourceBooking):
-    """Return (start, end) for a booking, preferring the stored allocation
-    date range and backfilling from the engineer's WBS node dates on the same
-    project where determinable. Never fabricates a range."""
-    start = booking.start_date
-    end = booking.end_date
+def effective_dates(booking: models.ResourceBooking, nodes: list) -> tuple:
+    """(start, end) of a booking: the stored range, each side backfilled from the engineer's WBS
+    nodes on that project (`nodes`) where determinable. Never fabricates a range."""
+    start, end = booking.start_date, booking.end_date
     if start and end:
         return start, end
-
-    node_start = None
-    node_end = None
-    nodes = (
-        db.query(models.WbsNode)
-        .filter(
-            models.WbsNode.project_id == booking.project_id,
-            models.WbsNode.assigned_engineer_id == booking.employee_id,
-        )
-        .all()
-    )
+    node_start = node_end = None
     for node in nodes:
         if node.start_date and (node_start is None or node.start_date < node_start):
             node_start = node.start_date
         bound = node.end_date or node.target_due_date
         if bound and (node_end is None or bound > node_end):
             node_end = bound
-
     return start or node_start, end or node_end
+
+
+def nodes_by_project_and_engineer(db: Session, bookings: list) -> dict:
+    """(project_id, employee_id) -> WBS nodes, for the bookings that need their dates backfilled."""
+    pairs = {(b.project_id, b.employee_id) for b in bookings if not (b.start_date and b.end_date)}
+    grouped = {pair: [] for pair in pairs}
+    if pairs:
+        rows = db.query(models.WbsNode).filter(
+            models.WbsNode.project_id.in_({p for p, _ in pairs}),
+            models.WbsNode.assigned_engineer_id.in_({e for _, e in pairs}),
+        )
+        for node in rows:
+            key = (node.project_id, node.assigned_engineer_id)
+            if key in grouped:
+                grouped[key].append(node)
+    return grouped
 
 
 def last_day_of_month(value: date) -> date:
@@ -318,31 +323,45 @@ def last_day_of_month(value: date) -> date:
     return date(value.year, value.month, calendar.monthrange(value.year, value.month)[1])
 
 
-def booking_output(db: Session, booking: models.ResourceBooking):
-    employee = db.query(models.Employee).filter_by(id=booking.employee_id).first()
-    utilization = float(booking.utilization_rate or 0)
-    return {
-        "id": booking.id,
-        "employee_id": booking.employee_id,
-        "employee_name": employee.name if employee else "Unknown",
-        "employee_code": employee.employee_code if employee else "",
-        "discipline": employee.discipline if employee else "",
-        "role_title": employee.role_title if employee else "",
-        "role": booking.role,
-        "planned_hours": booking.planned_hours,
-        "utilization_rate": utilization,
-        "start_date": booking.start_date.isoformat() if booking.start_date else None,
-        "end_date": booking.end_date.isoformat() if booking.end_date else None,
-        "total_allocation_pct": float(
-            allocated_pct(db, booking.employee_id, booking.start_date, booking.end_date)
-        ),  # busiest day during this booking
-        "cost_per_hour": 0,
-        "total_cost": 0,
-        "bench_status": "Fully Booked" if utilization >= 100 else "Near Capacity" if utilization >= 80 else "Available Bench",
-        "approval_status": booking.approval_status,
-        "submitted_at": booking.submitted_at.isoformat() if booking.submitted_at else None,
-        "approved_at": booking.approved_at.isoformat() if booking.approved_at else None,
-    }
+def bookings_output(db: Session, bookings: list) -> list[dict]:
+    """Booking rows with the person's details and their busiest day during the booking:
+    two lookups for any number of bookings."""
+    employee_ids = {b.employee_id for b in bookings}
+    employees = (
+        {e.id: e for e in db.query(models.Employee).filter(models.Employee.id.in_(employee_ids))} if employee_ids else {}
+    )
+    spans = BookingRepository(db).spans_by_employee(employee_ids) if employee_ids else {}
+    out = []
+    for booking in bookings:
+        employee = employees.get(booking.employee_id)
+        utilization = float(booking.utilization_rate or 0)
+        out.append({
+            "id": booking.id,
+            "employee_id": booking.employee_id,
+            "employee_name": employee.name if employee else "Unknown",
+            "employee_code": employee.employee_code if employee else "",
+            "discipline": employee.discipline if employee else "",
+            "role_title": employee.role_title if employee else "",
+            "role": booking.role,
+            "planned_hours": booking.planned_hours,
+            "utilization_rate": utilization,
+            "start_date": booking.start_date.isoformat() if booking.start_date else None,
+            "end_date": booking.end_date.isoformat() if booking.end_date else None,
+            "total_allocation_pct": float(
+                peak_allocation(spans.get(booking.employee_id, []), booking.start_date, booking.end_date)
+            ),  # busiest day during this booking
+            "cost_per_hour": 0,
+            "total_cost": 0,
+            "bench_status": "Fully Booked" if utilization >= 100 else "Near Capacity" if utilization >= 80 else "Available Bench",
+            "approval_status": booking.approval_status,
+            "submitted_at": booking.submitted_at.isoformat() if booking.submitted_at else None,
+            "approved_at": booking.approved_at.isoformat() if booking.approved_at else None,
+        })
+    return out
+
+
+def booking_output(db: Session, booking: models.ResourceBooking) -> dict:
+    return bookings_output(db, [booking])[0]
 
 
 @app.get("/api/projects/{project_id}/resource-bookings")
@@ -353,8 +372,7 @@ def list_resource_bookings(project_id: int, user: models.User = Depends(get_curr
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
         query = query.filter_by(employee_id=user.employee_id)
-    bookings = query.all()
-    return [booking_output(db, booking) for booking in bookings]
+    return bookings_output(db, query.all())
 
 
 @app.get("/api/resource-bookings/gantt")
@@ -409,6 +427,8 @@ def resource_booking_gantt(
         for project in db.query(models.Project).filter(models.Project.id.in_(project_ids or {-1})).all()
     }
 
+    node_dates = nodes_by_project_and_engineer(db, all_bookings)
+    spans = BookingRepository(db).spans_by_employee(employee_ids)
     engineers_out = []
     earliest = None
     latest = None
@@ -418,7 +438,7 @@ def resource_booking_gantt(
             continue
         assignments = []
         for booking in (booking for booking in all_bookings if booking.employee_id == employee_id):
-            start, end = booking_effective_dates(db, booking)
+            start, end = effective_dates(booking, node_dates.get((booking.project_id, booking.employee_id), []))
             project = projects.get(booking.project_id)
             assignments.append({
                 "booking_id": booking.id,
@@ -443,7 +463,7 @@ def resource_booking_gantt(
             "employee_code": employee.employee_code,
             "role_title": employee.role_title,
             "discipline": employee.discipline,
-            "total_allocation_pct": allocated_pct(db, employee.id, None, None),  # their busiest day
+            "total_allocation_pct": peak_allocation(spans.get(employee.id, [])),  # their busiest day
             "assignments": assignments,
         })
 
@@ -468,18 +488,17 @@ def resource_booking_gantt(
 @app.post("/api/projects/{project_id}/resource-bookings")
 def create_resource_booking(
     project_id: int,
-    payload: dict,
+    payload: schemas.ResourceBookingIn,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     project, _ = project_and_role(db, project_id, user, allowed={"lead"})
-    employee = db.query(models.Employee).filter_by(id=payload.get("employee_id")).first()
+    employee = db.query(models.Employee).filter_by(id=payload.employee_id).first()
     if not employee:
         raise HTTPException(status_code=400, detail="Engineer not found.")
     refuse_lead_as_resource(db, project_id, employee)
-    requested = int(payload.get("utilization_rate", 0))
-    start_date = _parse_iso_date(payload.get("start_date"))
-    end_date = _parse_iso_date(payload.get("end_date"))
+    requested = payload.utilization_rate
+    start_date, end_date = payload.start_date, payload.end_date
     over = over_capacity_message(db, employee.name, employee.id, requested, start_date, end_date)
     if over:
         raise HTTPException(status_code=400, detail=over, headers={"X-Error-Code": "ALLOCATION_LIMIT"})
@@ -487,7 +506,7 @@ def create_resource_booking(
     booking = models.ResourceBooking(
         project_id=project_id,
         employee_id=employee.id,
-        planned_hours=derived_hours if derived_hours is not None else int(payload.get("planned_hours", 0)),
+        planned_hours=derived_hours if derived_hours is not None else payload.planned_hours,
         utilization_rate=requested,
         start_date=start_date,
         end_date=end_date,
@@ -503,7 +522,7 @@ def create_resource_booking(
 def update_resource_booking(
     project_id: int,
     booking_id: int,
-    payload: dict,
+    payload: schemas.ResourceBookingUpdate,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -513,14 +532,16 @@ def update_resource_booking(
         raise HTTPException(status_code=404, detail="Resource booking not found.")
     if booking.role == "lead":
         raise HTTPException(status_code=400, detail=LEAD_ROW)
-    employee_id = int(payload.get("employee_id", booking.employee_id))
+    employee_id = payload.employee_id if payload.employee_id is not None else booking.employee_id
     employee = db.query(models.Employee).filter_by(id=employee_id).first()
     if not employee:
         raise HTTPException(status_code=400, detail="Engineer not found.")
     refuse_lead_as_resource(db, project_id, employee)
-    requested = int(payload.get("utilization_rate", booking.utilization_rate or 0))
-    start_date = _parse_iso_date(payload["start_date"]) if payload.get("start_date") is not None else booking.start_date
-    end_date = _parse_iso_date(payload["end_date"]) if payload.get("end_date") is not None else booking.end_date
+    requested = payload.utilization_rate if payload.utilization_rate is not None else (booking.utilization_rate or 0)
+    start_date = payload.start_date if payload.start_date is not None else booking.start_date
+    end_date = payload.end_date if payload.end_date is not None else booking.end_date
+    if start_date and end_date and end_date < start_date:
+        raise HTTPException(status_code=422, detail="The end date is before the start date.")
     over = over_capacity_message(
         db, employee.name, employee.id, requested, start_date, end_date, exclude_booking_id=booking.id
     )
@@ -529,7 +550,11 @@ def update_resource_booking(
     booking.employee_id = employee.id
     booking.start_date, booking.end_date = start_date, end_date
     derived_hours = estimated_hours_from_dates(booking.start_date, booking.end_date)
-    booking.planned_hours = derived_hours if derived_hours is not None else int(payload.get("planned_hours", booking.planned_hours or 0))
+    booking.planned_hours = (
+        derived_hours
+        if derived_hours is not None
+        else (payload.planned_hours if payload.planned_hours is not None else booking.planned_hours or 0)
+    )
     booking.utilization_rate = requested
     db.commit()
     db.refresh(booking)
@@ -590,41 +615,54 @@ def submit_resource_bookings(
     }
 
 
-def node_level(db: Session, node: models.WbsNode) -> int:
-    level = 1
-    parent_id = node.parent_id
-    while parent_id:
-        parent = db.query(models.WbsNode).filter_by(id=parent_id).first()
-        if not parent:
-            break
-        level += 1
-        parent_id = parent.parent_id
-    return level
+def nodes_output(db: Session, nodes: list) -> list:
+    """WBS rows with the engineer's name and the level: two lookups for any number of nodes."""
+    engineer_ids = {node.assigned_engineer_id for node in nodes if node.assigned_engineer_id}
+    engineers = (
+        {e.id: e for e in db.query(models.Employee).filter(models.Employee.id.in_(engineer_ids))} if engineer_ids else {}
+    )
+    by_id = {node.id: node for node in nodes}
+    missing_parents = {node.parent_id for node in nodes if node.parent_id and node.parent_id not in by_id}
+    if missing_parents:
+        by_id.update({n.id: n for n in db.query(models.WbsNode).filter(models.WbsNode.id.in_(missing_parents))})
+
+    def level(node):
+        depth, parent_id = 1, node.parent_id
+        while parent_id in by_id:
+            depth, parent_id = depth + 1, by_id[parent_id].parent_id
+        return depth
+
+    return [
+        schemas.WbsNodeOut(
+            id=node.id,
+            project_id=node.project_id,
+            parent_id=node.parent_id,
+            wbs_code=node.wbs_code,
+            task_name=node.task_name,
+            assigned_lead=node.assigned_lead,
+            assigned_lead_user_id=node.assigned_lead_user_id,
+            assigned_engineer_id=node.assigned_engineer_id,
+            assigned_engineer_name=engineers[node.assigned_engineer_id].name
+            if node.assigned_engineer_id in engineers
+            else None,
+            estimated_hours=node.estimated_hours,
+            deliverable_status=node.deliverable_status,
+            start_date=node.start_date,
+            target_due_date=node.target_due_date,
+            end_date=node.end_date,
+            phase=node.phase,
+            level=level(node),
+        )
+        for node in nodes
+    ]
 
 
 def node_output(db: Session, node: models.WbsNode):
-    engineer = db.query(models.Employee).filter_by(id=node.assigned_engineer_id).first() if node.assigned_engineer_id else None
-    parent_node = None
-    if node.parent_id:
-        parent_node = db.query(models.WbsNode).filter_by(id=node.parent_id).first()
-    return schemas.WbsNodeOut(
-        id=node.id,
-        project_id=node.project_id,
-        parent_id=node.parent_id,
-        wbs_code=node.wbs_code,
-        task_name=node.task_name,
-        assigned_lead=node.assigned_lead,
-        assigned_lead_user_id=node.assigned_lead_user_id,
-        assigned_engineer_id=node.assigned_engineer_id,
-        assigned_engineer_name=engineer.name if engineer else None,
-        estimated_hours=node.estimated_hours,
-        deliverable_status=node.deliverable_status,
-        start_date=node.start_date,
-        target_due_date=node.target_due_date,
-        end_date=node.end_date,
-        phase=node.phase,
-        level=node_level(db, node),
-    )
+    return nodes_output(db, [node])[0]
+
+
+def node_level(db: Session, node: models.WbsNode) -> int:
+    return nodes_output(db, [node])[0].level
 
 
 def node_type(node: models.WbsNode) -> str:
@@ -684,7 +722,7 @@ def list_wbs_structure(
             engineer_wbs_condition(user.employee_id)
         ).all()
         if not include_ancestors:
-            return [node_output(db, node) for node in assigned_nodes]
+            return nodes_output(db, assigned_nodes)
 
         nodes_by_id = {node.id: node for node in assigned_nodes}
         pending_nodes = list(assigned_nodes)
@@ -702,7 +740,7 @@ def list_wbs_structure(
         scoped_nodes = list(nodes_by_id.values())
     else:
         scoped_nodes = query.order_by(models.WbsNode.wbs_code).all()
-    return [node_output(db, node) for node in scoped_nodes]
+    return nodes_output(db, scoped_nodes)
 
 
 def time_entries_output(db: Session, entries: list, project: models.Project, user: models.User) -> list[dict]:
@@ -867,6 +905,7 @@ def project_timeline_logs(
     engineers = []
     if engineer_ids:
         engineers = db.query(models.Employee).filter(models.Employee.id.in_(engineer_ids)).order_by(models.Employee.name).all()
+    engineer_by_id = {engineer.id: engineer for engineer in engineers}
 
     task_actual = defaultdict(float)
     for entry in entries:
@@ -884,7 +923,7 @@ def project_timeline_logs(
             percent = min(100.0, round((actual / estimated) * 100, 1))
         else:
             percent = 0.0
-        engineer = db.query(models.Employee).filter_by(id=task.assigned_engineer_id).first() if task.assigned_engineer_id else None
+        engineer = engineer_by_id.get(task.assigned_engineer_id)
         tasks_out.append({
             "id": task.id,
             "project_id": task.project_id,

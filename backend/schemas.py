@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal, List, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import Field, BaseModel, ConfigDict, field_validator, model_validator
 
 PROJECT_TYPES = {
     "MEP Design",
@@ -357,6 +357,32 @@ class WbsNodeOut(WbsNodeBase):
 
 class WbsNodeUpdate(WbsNodeBase):
     pass
+
+
+class ResourceBookingIn(BaseModel):
+    """A Lead's booking of an engineer on a project (dates optional: the WBS dates fill in)."""
+
+    employee_id: int
+    utilization_rate: int = Field(default=0, ge=0, le=100)
+    planned_hours: int = Field(default=0, ge=0)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+    @model_validator(mode="after")
+    def end_after_start(self):
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            raise ValueError("The end date is before the start date")
+        return self
+
+
+class ResourceBookingUpdate(BaseModel):
+    """Fields a Lead may change on a booking; anything omitted stays as it is."""
+
+    employee_id: Optional[int] = None
+    utilization_rate: Optional[int] = Field(default=None, ge=0, le=100)
+    planned_hours: Optional[int] = Field(default=None, ge=0)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
 
 
 class HoursReviewIn(BaseModel):
