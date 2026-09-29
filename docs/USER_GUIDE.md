@@ -240,11 +240,12 @@ subtask are kept and still count.
 ### 5.2 Task Details (work and track time)
 - **Status**: move a task To Do → In-Progress → Submitted for Approval (only once **all its subtasks are Done**); a subtask To Do → In-Progress → Done. The Lead approves the task.
 - **Comments** on your tasks.
-- **Login / Logout** (subtasks only) records your working time: the time from **Login** to **Logout** counts, including idle time and time spent in Revit, AutoCAD or other programs. Nothing logs you out automatically. There is no screen to type hours.
+- **Login / Logout** (subtasks only) records your working time: the time from **Login** to **Logout** counts, including idle time and time spent in Revit, AutoCAD or other programs. Before 8 hours in a day nothing logs you out automatically. There is no screen to type hours.
   - **Log in** when you start a subtask and **log out** when you stop. If a subtask takes longer than planned, keep working; when it's done, create the next subtask and log in there.
   - **Keep MAEC open in a browser tab** while you work (minimised or behind other windows is fine). The tab tells the server once a minute that your laptop is on.
   - **Laptop switched off, asleep or offline** for more than 5 minutes: the time stops at the last signal and that gap is not counted. When you open MAEC again, it carries on by itself on the same subtask; you don't need to log in again. Closing every MAEC tab has the same effect as switching off.
-  - **Forgot to log out** with the laptop on: the time keeps counting, up to **8 hours per day**. Your Lead sees the hours and can reject them.
+  - **More than 8 hours in a day** (all your subtasks and projects together): every hour still counts and your Lead reviews the day. Past the 8-hour mark, **visit MAEC at least every 30 minutes**: switch to its tab, click or press a key there. Task Details shows an "Over 8 hours today" note. If 30 minutes pass without a visit, you are logged out at your last visit, the time up to then is saved, and MAEC does not log you in again by itself. Task Details tells you when it happened; log in again if you are still working.
+  - **Forgot to log out** with the laptop on: before the 8-hour mark the time keeps counting until you log out; after it, the rule above stops the clock within 30 minutes of your last visit.
   - One subtask at a time. **Logout** adds the time to that day's row for the subtask (the day you logged in).
   - Edge "sleeping tabs" and Chrome "Memory Saver" can freeze a background tab. Add the MAEC address under *Always keep these sites active* in the browser settings.
 

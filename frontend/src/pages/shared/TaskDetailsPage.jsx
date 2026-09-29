@@ -54,6 +54,8 @@ export function TaskDetailsPage() {
     const startTracking = useStartTracking();
     const logoutTracking = useLogoutTracking();
     const activeSession = tracking.data?.active_session ?? null;
+    const overMark = Boolean(tracking.data?.over_mark);
+    const systemLogout = tracking.data?.system_logout ?? null;
     const loggedInHere = activeSession?.subtask_id === nodeId;
     const loggedInElsewhere = Boolean(activeSession) && !loggedInHere;
     const trackingBusy = startTracking.isPending || logoutTracking.isPending;
@@ -219,8 +221,8 @@ export function TaskDetailsPage() {
         const onError = (err) => showToast('error', err.message);
         if (loggedInHere) {
             logoutTracking.mutate(undefined, {
-                onSuccess: ({ limit_reached }) => showToast('success', limit_reached
-                    ? 'Logged out. Time beyond the 8-hour daily limit was not counted.'
+                onSuccess: ({ over_mark }) => showToast('success', over_mark
+                    ? 'Logged out. Your working time is saved; today is over 8 hours, so your lead reviews the day.'
                     : 'Logged out. Your working time is saved.'),
                 onError,
             });
@@ -267,6 +269,21 @@ export function TaskDetailsPage() {
             )}
 
             {error && <div className="resource-error">{error}</div>}
+
+            {isStaff && activeSession && overMark && (
+                <div className="tracking-notice" role="status">
+                    <strong>Over 8 hours today.</strong> Every hour still counts, but keep visiting this app at least
+                    every 30 minutes (a click or a key press here is enough). If you don&apos;t, you are logged out at
+                    your last visit.
+                </div>
+            )}
+            {isStaff && !activeSession && systemLogout && (
+                <div className="tracking-notice is-logout" role="status">
+                    <strong>You were logged out at {new Date(systemLogout.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong>,
+                    your last visit, after 30 minutes away past the 8-hour mark. Today&apos;s time so far is{' '}
+                    {systemLogout.day_hours} h and it is saved. Log in again if you are still working.
+                </div>
+            )}
 
             {loading && (
                 <div className="resource-error">Loading task details...</div>

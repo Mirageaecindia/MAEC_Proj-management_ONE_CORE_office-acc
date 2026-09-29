@@ -21,7 +21,7 @@ import models
 from app.core.errors import BadRequestError, ForbiddenError, NotFoundError
 from app.repositories.tracking import ACTIVE
 from app.services.access import ENGINEER, LEAD
-from app.services.tracking import end_session
+from app.services.tracking import SUBTASK_DELETED, end_session
 
 LEAD_ONLY = "only the project's lead deletes tasks"
 NOT_YOURS = "you can only delete subtasks under tasks assigned to you"
@@ -84,7 +84,7 @@ def delete_nodes(
     session = models.TimeSession
     on_doomed = session.subtask_id.in_(doomed_ids) | session.task_id.in_(doomed_ids)
     for open_session in db.query(session).filter(on_doomed, session.status == ACTIVE):
-        end_session(db, open_session, now)  # the time worked until now is banked, not lost
+        end_session(db, open_session, now, SUBTASK_DELETED)  # the time worked until now is banked, not lost
     db.flush()
 
     entry = models.TimeLogEntry

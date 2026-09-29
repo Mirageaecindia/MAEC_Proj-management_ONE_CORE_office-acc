@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupByEngineer, rowsStatus, summarizeWeek, weekdayIndex } from './hours';
+import { groupByEngineer, rowsStatus, summarizeWeek, weekdayIndex, isOverMark } from './hours';
 
 const row = (overrides) => ({
   employee_id: 3,
@@ -45,6 +45,17 @@ describe('daily hours helpers', () => {
     expect(groups.map((group) => [group.employee_name, group.rows.length])).toEqual([
       ['Ritu', 2],
       ['Vivek', 1],
+    ]);
+  });
+});
+
+describe('isOverMark', () => {
+  it('flags only days beyond 8 hours', () => {
+    expect([isOverMark(8), isOverMark(8.01), isOverMark('9'), isOverMark(0)]).toEqual([
+      false,
+      true,
+      true,
+      false,
     ]);
   });
 });

@@ -327,6 +327,7 @@ Shared helpers that the Lead/Engineer code in `main.py` needs (access rules, das
 | Subtask planned hours | Whole number from **1 to 8** (a working day). Start date must equal end date (a single-day unit). |
 | Resource booking planned hours | Weekdays in the booking range × 8. Calculated by the server (the booking % is not applied). |
 | Allocation cap | Sum of an engineer's `utilization_rate` across all projects must be ≤ 100%. Otherwise the API returns 400 with `X-Error-Code: ALLOCATION_LIMIT`. |
+| Hours over 8 a day | Banked in full and flagged "over 8 h" for the reviewer; the visit rule (§7.4) stops a forgotten Logout within 30 minutes of the last visit |
 | Weekly timesheet total | The sum of the week's daily rows, **all seven days** (offices work different weeks: KSA Sun–Thu, Indian offices often Saturday). Each day's approval decides whether it counts. `total_hours` in `app/domain/timesheets.py` is the one totals function. |
 
 ### 7.3 Status workflows
@@ -359,7 +360,8 @@ router `app/api/routers/engineer/tracking.py`, tests `tests/test_tracking.py`.
 - **Worked time = Logout − Login.** Nothing is measured in the browser: idle time and other programs count, and nothing logs the engineer out.
 - **Heartbeat:** while the engineer is signed in to MAEC, every open tab posts `/heartbeat` once a minute (`hooks/useTracking.js`, mounted in `App.jsx`), including background tabs. The server stores `last_seen_at`.
 - **Laptop off:** when the next heartbeat comes more than **5 minutes** after the last one, the session is closed at `last_seen_at` (the gap is not counted), and a new session opens on the same subtask if Login is still allowed. A Logout after such a gap also ends at `last_seen_at`.
-- **Logout** banks the time into the login day's row for the subtask (weekends included), at most **8 hours per engineer per day**. The day's approval decides whether it counts toward usage.
+- **Logout** banks the time into the login day's row for the subtask (weekends included), all of it. The day's approval decides whether it counts toward usage.
+- **The daily mark and the visit rule** (decided 2026-09-30): the day's work time is everything the engineer banked that day on any subtask of any project plus the running session, checked on every heartbeat. Before **8 h** only the engineer's Logout (or the laptop-off rule) ends a session. Past 8 h every hour is still banked (overtime shows as "over 8 h" in the logs; the day's approval decides), but the engineer must **visit** the app at least every **30 minutes**: the browser records the last click, key press or switch to the app's tab and sends it with each heartbeat (`last_active_at`). Thirty minutes without a visit closes the session **at the last visit** (`ended_by = no_visit`); it does not resume by itself and the heartbeat reports it (`system_logout`) until the engineer logs in again. Login is never refused for hours already worked.
 - **Two tabs at once:** `time_sessions.version_id` (optimistic locking) makes sure only one of two simultaneous heartbeats closes and resumes a session, so time is banked once.
 - The engineer sees only the Login/Logout state, never a timer or hours.
 

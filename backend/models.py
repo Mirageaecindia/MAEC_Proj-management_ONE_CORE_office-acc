@@ -290,9 +290,11 @@ class TimeSession(Base):
     """
     One Login → Logout period of an engineer on a subtask (app/services/tracking.py).
 
-    Worked time is logout_at − login_at, set on Logout (capped at the daily
-    limit). `last_seen_at` is the browser's last heartbeat: a long silence
+    Worked time is logout_at − login_at, set when the session ends; all of it
+    is banked. `last_seen_at` is the browser's last heartbeat: a long silence
     (laptop off or asleep) closes the session there and a new one resumes.
+    `last_active_at` is the engineer's last visit to the app; past 8 h in a
+    day, 30 minutes without one closes the session there (`ended_by`).
     `version_id` makes concurrent heartbeats from two tabs safe.
     """
     __tablename__ = "time_sessions"
@@ -304,9 +306,11 @@ class TimeSession(Base):
     employee_id = Column(Integer, nullable=False, index=True)
     login_at = Column(DateTime(timezone=True), nullable=False, index=True)
     last_seen_at = Column(DateTime(timezone=True), nullable=False)
+    last_active_at = Column(DateTime(timezone=True), nullable=True)  # last click, key press or tab switch
     logout_at = Column(DateTime(timezone=True), nullable=True)
     active_seconds = Column(Integer, nullable=False, default=0)
     status = Column(String(20), nullable=False, default="active", index=True)
+    ended_by = Column(String(20), nullable=True)  # engineer | laptop_off | no_visit | subtask_deleted
     version_id = Column(Integer, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

@@ -33,6 +33,15 @@ class TrackingRepository:
         )
         return int(total or 0)
 
+    def last_session(self, employee_id: int) -> models.TimeSession | None:
+        """The engineer's most recent session, open or ended."""
+        return (
+            self.db.query(models.TimeSession)
+            .filter_by(employee_id=employee_id)
+            .order_by(models.TimeSession.login_at.desc(), models.TimeSession.id.desc())
+            .first()
+        )
+
     def node(self, node_id: int) -> models.WbsNode | None:
         return self.db.get(models.WbsNode, node_id)
 

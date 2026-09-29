@@ -5,6 +5,11 @@
 
 export const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
+/** Hours in a day past which the time is overtime: banked in full, flagged for the reviewer. */
+export const DAILY_MARK_HOURS = 8;
+
+export const isOverMark = (hours) => Number(hours) > DAILY_MARK_HOURS;
+
 export const HOURS_STATUS_LABELS = {
   pending_review: 'Pending review',
   approved: 'Approved',

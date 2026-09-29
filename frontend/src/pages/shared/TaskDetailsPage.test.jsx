@@ -26,6 +26,7 @@ const SUBTASK = {
   children: [],
 };
 
+let heartbeatExtra = {};
 let activeSession;
 const session = (subtaskId) => ({
   id: 7,
@@ -45,8 +46,9 @@ function fakeApi(url, options = {}) {
     body = { active_session: activeSession };
   } else if (/\/subtask-tracking\/logout$/.test(url)) {
     activeSession = null;
-    body = { active_session: null, limit_reached: false };
-  } else if (/\/subtask-tracking\/heartbeat$/.test(url)) body = { active_session: activeSession };
+    body = { active_session: null, over_mark: false };
+  } else if (/\/subtask-tracking\/heartbeat$/.test(url))
+    body = { active_session: activeSession, ...heartbeatExtra };
   else
     return Promise.resolve(
       new Response(JSON.stringify({ detail: `No fixture for ${url}` }), { status: 404 }),
@@ -71,6 +73,7 @@ function renderPage() {
 describe('Task Details: subtask Login/Logout', () => {
   beforeEach(() => {
     activeSession = null;
+    heartbeatExtra = {};
     vi.stubGlobal('fetch', vi.fn(fakeApi));
   });
   afterEach(() => {
@@ -114,6 +117,26 @@ describe('Task Details: subtask Login/Logout', () => {
 
     expect(await screen.findByRole('button', { name: 'Logout' }, WAIT)).toBeTruthy();
     expect(posts('/subtask-tracking/heartbeat').length).toBeGreaterThan(0);
+  });
+
+  it('reports the last visit with each heartbeat and shows the mark and a system logout', async () => {
+    activeSession = session(5);
+    heartbeatExtra = { over_mark: true };
+    renderPage();
+    fireEvent(window, new Event('pointerdown'));
+
+    expect(await screen.findByText(/Over 8 hours today/, {}, WAIT)).toBeTruthy();
+    const [, options] = posts('/subtask-tracking/heartbeat')[0];
+    expect(JSON.parse(options.body)).toHaveProperty('last_active_at');
+    cleanup();
+
+    activeSession = null;
+    heartbeatExtra = { system_logout: { at: '2026-09-30T11:35:00Z', subtask_id: 5, day_hours: 8.6 } };
+    renderPage();
+
+    expect(await screen.findByText(/You were logged out at/, {}, WAIT)).toBeTruthy();
+    expect(screen.getByText(/8\.6 h and it is saved/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Login' })).toBeTruthy();
   });
 
   it('blocks Login while the engineer is logged in to another subtask', async () => {

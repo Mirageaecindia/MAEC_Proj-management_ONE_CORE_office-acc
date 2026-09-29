@@ -22,7 +22,7 @@ from app.services.access import project_roles, user_can_access_project, visible_
 from app.services.allocation import over_capacity_message
 from app.services.archive_guard import ARCHIVED_READ_ONLY, lifecycle_writes
 from app.services.governance_monitor import GovernanceMonitor
-from app.services.tracking import end_session
+from app.services.tracking import PROJECT_ARCHIVED, end_session
 
 logger = logging.getLogger(__name__)
 
@@ -302,7 +302,7 @@ class ProjectService:
         with lifecycle_writes(self.db, project.id):
             project.archived_at = now
             for session in self.projects.active_sessions(project_id):
-                end_session(self.db, session, now)
+                end_session(self.db, session, now, PROJECT_ARCHIVED)
             for request in self.projects.pending_extension_requests(project_id):
                 request.status = project.extension_status = EXTENSION_CANCELLED
                 request.decided_by, request.decided_at = actor, now

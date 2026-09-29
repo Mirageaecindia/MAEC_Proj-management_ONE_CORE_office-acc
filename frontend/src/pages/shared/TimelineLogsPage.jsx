@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
-import { DAY_KEYS, HOURS_STATUS_LABELS, HOURS_STATUS_PILL, groupByEngineer, summarizeWeek } from '../../utils/hours';
+import { DAY_KEYS, HOURS_STATUS_LABELS, HOURS_STATUS_PILL, groupByEngineer, isOverMark, summarizeWeek } from '../../utils/hours';
 import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 
 const WBS_PHASES = ['Space Planning', 'STR Coordination', 'ID Coordination', 'BoH Area RCP Coordination'];
@@ -551,11 +551,11 @@ export function TimelineLogsPage() {
                       <td key={DAY_KEYS[index]} className="col-day">
                         <input
                           type="number"
-                          className={`day-hour-input ${HOURS_STATUS_PILL[day.status] || ''}`}
+                          className={`day-hour-input ${HOURS_STATUS_PILL[day.status] || ''}${isOverMark(day.hours) ? ' is-over-mark' : ''}`}
                           value={day.hours === 0 ? '' : day.hours}
                           placeholder="0"
                           readOnly
-                          title={day.status === 'none' ? group.employee_name : `${group.employee_name}: ${HOURS_STATUS_LABELS[day.status] || 'partly rejected'}`}
+                          title={day.status === 'none' ? group.employee_name : `${group.employee_name}: ${HOURS_STATUS_LABELS[day.status] || 'partly rejected'}${isOverMark(day.hours) ? ' (over 8 h)' : ''}`}
                         />
                       </td>
                     ))}

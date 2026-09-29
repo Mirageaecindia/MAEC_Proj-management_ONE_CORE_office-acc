@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
-import { HOURS_STATUS_LABELS, HOURS_STATUS_PILL } from '../../utils/hours';
+import { HOURS_STATUS_LABELS, HOURS_STATUS_PILL, isOverMark } from '../../utils/hours';
 import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 
 export function EngineerWeeklyLogsPage() {
@@ -247,6 +247,11 @@ export function EngineerWeeklyLogsPage() {
                       <td>{node?.deliverable_status || '—'}</td>
                       <td>
                         <strong className="total-hours-blue">{entry.hours.toFixed(2)} hrs</strong>
+                        {isOverMark(entry.hours) && (
+                          <span className="over-mark-flag" title="More than 8 hours on this day">
+                            over 8 h
+                          </span>
+                        )}
                       </td>
                       <td className="col-approval">
                         <span

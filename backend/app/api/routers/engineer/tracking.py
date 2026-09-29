@@ -1,5 +1,7 @@
 """Subtask Login/Logout: the only source of an engineer's working hours."""
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -15,13 +17,19 @@ class TrackingStart(BaseModel):
     subtask_id: int
 
 
+class Heartbeat(BaseModel):
+    last_active_at: datetime | None = None  # the engineer's last click, key press or switch to the app's tab
+
+
 @router.post("/heartbeat")
 def heartbeat(
+    payload: Heartbeat | None = None,
     user: models.User = Depends(require_staff),
     service: TrackingService = Depends(get_tracking_service),
 ):
-    """Sent every minute by each open tab. Returns the subtask the engineer is logged in to, if any."""
-    return service.heartbeat(user)
+    """Sent every minute by each open tab. Returns the subtask the engineer is logged in to, if any,
+    whether the day is past the 8-hour mark, and a logout the system did for want of a visit."""
+    return service.heartbeat(user, payload.last_active_at if payload else None)
 
 
 @router.post("/start", status_code=201)
