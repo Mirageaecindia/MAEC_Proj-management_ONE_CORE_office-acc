@@ -15,13 +15,23 @@ APPROVED = "approved"
 PENDING_REVIEW = "pending_review"
 REJECTED = "rejected"
 
+# Hours in a day past which the rest is overtime (decided 2026-09-30): banked in full,
+# flagged for the reviewer, and never approved in bulk.
+DAILY_MARK_HOURS = 8
+
 REASON_REQUIRED = "Give a reason for rejecting hours that were already approved."
+OVER_MARK_ONLY = "Only days over 8 hours are waiting for you; overtime is approved day by day, not in bulk."
 NEVER_RE_APPROVED = "Rejected hours can't be approved again. The engineer corrects them instead."
 
 
 def total_hours(entries: Iterable[models.TimeLogEntry], status: str | None = None) -> float:
     """The one totals function: the entries' hours (all, or only those in `status`)."""
     return round(sum(entry.hours or 0 for entry in entries if status is None or entry.approval_status == status), 2)
+
+
+def over_mark(entry: models.TimeLogEntry) -> bool:
+    """More than a working day's hours on one day: the reviewer looks at it individually."""
+    return (entry.hours or 0) > DAILY_MARK_HOURS
 
 
 def week_start(day: date) -> date:

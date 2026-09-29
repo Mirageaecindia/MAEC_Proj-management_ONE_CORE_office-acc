@@ -33,6 +33,11 @@ class TrackingRepository:
         )
         return int(total or 0)
 
+    def silent_sessions(self, before: datetime) -> list[models.TimeSession]:
+        """Open sessions whose last heartbeat is older than `before`."""
+        session = models.TimeSession
+        return self.db.query(session).filter(session.status == ACTIVE, session.last_seen_at < before).all()
+
     def last_session(self, employee_id: int) -> models.TimeSession | None:
         """The engineer's most recent session, open or ended."""
         return (

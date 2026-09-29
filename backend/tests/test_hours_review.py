@@ -61,7 +61,7 @@ def test_each_lead_approves_the_days_on_their_own_tasks(client, db, world, split
     first = _bulk(client, world.lead_h, project_id, employee_id=world.emp1.id)
 
     assert first.status_code == 200, first.text
-    assert first.json() == {"reviewed": 1, "action": "approved"}
+    assert first.json() == {"reviewed": 1, "skipped_over_mark": 0, "action": "approved"}
     assert (_status(db, row_e), _status(db, row_m)) == ("approved", "pending_review")
     assert WorkRepository(db).approved_hours(project_id) == 8.0  # usage counts each day as it is approved
     assert _bulk(client, world.lead_h, project_id).status_code == 409  # nothing of hers left
@@ -176,3 +176,33 @@ def test_the_bu_head_approves_a_task_its_lead_worked_on(client, db, make, world)
     url = f"/api/wbs-nodes/{untouched.id}/approve"
     assert client.post(url, json={"new_status": "Approved"}, headers=world.bu_h).status_code == 403
     assert client.post(url, json={"new_status": "Approved"}, headers=world.lead_h).status_code == 200
+
+
+def test_bulk_approval_skips_days_over_eight_hours(client, db, make, world, split):
+    project_id, row_e, _ = split
+    row_e.hours = 9.5  # overtime: pay-relevant, decided one day at a time
+    db.commit()
+    anita = _headers(client, "lead.e")
+
+    response = _bulk(client, anita, project_id)
+
+    assert response.status_code == 409 and "day by day" in response.json()["detail"]
+    db.refresh(row_e)
+    assert row_e.approval_status == "pending_review"
+    assert client.post(f"/api/time-log-entries/{row_e.id}/approve", headers=anita).status_code == 200
+
+
+def test_bulk_approval_reports_the_over_eight_days_it_left_alone(client, db, make, world, split):
+    project_id, row_e, _ = split
+    task = db.get(models.WbsNode, row_e.task_id)
+    normal = make.time_entry(project_id, task, world.emp1, 6, day=DAY + timedelta(days=1))
+    row_e.hours = 9.5
+    db.commit()
+
+    response = _bulk(client, _headers(client, "lead.e"), project_id)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"reviewed": 1, "skipped_over_mark": 1, "action": "approved"}
+    db.refresh(normal)
+    db.refresh(row_e)
+    assert (normal.approval_status, row_e.approval_status) == ("approved", "pending_review")

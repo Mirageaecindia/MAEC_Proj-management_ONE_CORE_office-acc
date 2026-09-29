@@ -46,6 +46,7 @@ export function TimelineLogsPage() {
   const [serverDate, setServerDate] = useState(null);
 
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [now, setNow] = useState(() => new Date()); // the "today" marker moves once a minute
   const weekRequestRef = useRef('');
 
@@ -304,10 +305,14 @@ export function TimelineLogsPage() {
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'approved', week_start_date: weekStartStr, employee_id: employeeId }),
       });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.detail || 'Could not approve these hours.');
-      }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || 'Could not approve these hours.');
+      const left = data.skipped_over_mark || 0;
+      setNotice(
+        left
+          ? `Approved ${data.reviewed} day${data.reviewed === 1 ? '' : 's'}. ${left} day${left === 1 ? ' is' : 's are'} over 8 hours and left for you to approve one by one (open the weekly log).`
+          : '',
+      );
       await loadProjectData(projectId, weekStartStr);
     } catch (err) {
       setError(err.message);
@@ -348,6 +353,7 @@ export function TimelineLogsPage() {
       </div>
 
       {error && <div className="resource-error">{error}</div>}
+      {notice && <div className="tracking-notice" role="status">{notice}</div>}
 
       <section className="allocation-card gantt-card">
         <div className="allocation-header">

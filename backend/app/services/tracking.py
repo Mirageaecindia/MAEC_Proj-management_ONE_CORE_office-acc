@@ -14,13 +14,19 @@ laptop was off is not counted and the engineer doesn't have to log in again.
 
 The day's work time (decided 2026-09-30) is everything the engineer banked that
 day on any subtask of any project, plus the running session. Before it reaches
-DAILY_MARK nothing but the engineer's own Logout ends a session. Past the mark
-every hour still counts (overtime is banked, the day's approval decides), but
-the engineer must visit the app at least every VISIT_GRACE; otherwise the
-session is closed at their last visit and does not resume by itself. A
-forgotten Logout therefore costs at most the grace, never the day.
+the daily mark nothing but the engineer's own Logout ends a session. Past the
+mark every hour still counts (overtime is banked, the day's approval decides),
+but the engineer must visit the app at least every VISIT_GRACE; otherwise the
+session is closed at their last visit (or at the mark, if that came later) and
+does not resume by itself. A forgotten Logout costs at most the grace.
+
+One rule (`settle`) decides all of this, applied by the heartbeat when the
+engineer is back and by a server-side sweep every few minutes when they are
+not, so a closed browser never leaves a session open for long.
 """
 
+import asyncio
+import logging
 from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.orm import Session
@@ -36,18 +42,21 @@ from app.core.errors import (
     NotFoundError,
 )
 from app.core.security import as_utc
-from app.domain.timesheets import PENDING_REVIEW
+from app.domain.timesheets import DAILY_MARK_HOURS, PENDING_REVIEW
 from app.repositories.tracking import ACTIVE, ENDED, TrackingRepository
 from app.services.access import user_can_access_project
 from app.services.governance_monitor import enforce_governance
 
+log = logging.getLogger(__name__)
+
 HEARTBEAT_GRACE = timedelta(minutes=5)  # the browser beats every minute; background tabs can lag
-DAILY_MARK_SECONDS = 8 * 3600  # past this, the visit rule applies
+DAILY_MARK_SECONDS = DAILY_MARK_HOURS * 3600  # past this, the visit rule applies
 VISIT_GRACE = timedelta(minutes=30)
+SWEEP_INTERVAL = timedelta(minutes=5)
 
 # TimeSession.ended_by
 BY_ENGINEER = "engineer"  # pressed Logout
-LAPTOP_OFF = "laptop_off"  # heartbeats stopped; closed at the last one and resumed
+LAPTOP_OFF = "laptop_off"  # heartbeats stopped; closed at the last one and resumed on the next
 NO_VISIT = "no_visit"  # past the daily mark without a visit for VISIT_GRACE; closed at the last visit
 SUBTASK_DELETED = "subtask_deleted"  # the subtask was deleted while the engineer was logged in
 PROJECT_ARCHIVED = "project_archived"  # the BU Head archived the project while the engineer was logged in
@@ -86,9 +95,9 @@ def upsert_subtask_time_log(
 def end_session(
     db: Session, session: models.TimeSession, now: datetime, ended_by: str, at: datetime | None = None
 ) -> int:
-    """Close a session and bank its worked time, all of it. It ends at `at` when given,
-    otherwise now, or at the last heartbeat when the browser has been silent too long
-    (laptop off). Returns the seconds banked. The caller commits."""
+    """Close a session and bank its worked time, all of it, on the day it started. It ends
+    at `at` when given, otherwise now, or at the last heartbeat when the browser has been
+    silent too long (laptop off). Returns the seconds banked. The caller commits."""
     login_at, last_seen = as_utc(session.login_at), as_utc(session.last_seen_at)
     if at is None:
         at = now if now - last_seen <= HEARTBEAT_GRACE else last_seen
@@ -121,37 +130,34 @@ class TrackingService:
         self.db = db
         self.sessions = sessions
 
+    # -- the engineer's calls -------------------------------------------------------------
+
     def heartbeat(self, user: models.User, last_active_at: datetime | None = None) -> dict:
         """The app is open: keep the session alive, resume it after the laptop was off, or
         end it when the engineer is past the daily mark and hasn't visited for VISIT_GRACE."""
         employee_id = _employee_id(user)
-        session = self.sessions.active_session(employee_id)
-        if session is None:
-            return _state(None, system_logout=self._system_logout(employee_id))
         now = datetime.now(UTC)
+        session = self.sessions.active_session(employee_id)
         try:
-            if now - as_utc(session.last_seen_at) > HEARTBEAT_GRACE:
-                end_session(self.db, session, now, LAPTOP_OFF)  # at the last heartbeat
-                self.db.flush()
-                node = self.sessions.node(session.subtask_id)
-                session = self._open(user, node, now) if node and self._refusal(user, node) is None else None
+            if session is None:
+                resumed = self._resume_after_pause(user, now)
                 self.db.commit()
-                enforce_governance(self.db, session.project_id if session else node.project_id)
-                return _state(session)
-            session.last_seen_at = now
+                return self._state_for(resumed, employee_id, now)
             if last_active_at is not None:  # the browser's clock may run ahead: never later than now
                 session.last_active_at = max(last_visit(session), min(as_utc(last_active_at), now))
-            over_mark = self._day_seconds(session, now) >= DAILY_MARK_SECONDS
-            if over_mark and now - last_visit(session) > VISIT_GRACE:
-                end_session(self.db, session, now, NO_VISIT, at=last_visit(session))
+            ended = self.settle(session, now, engineer_back=True)
+            if ended is None:
+                session.last_seen_at = now
                 self.db.commit()
-                enforce_governance(self.db, session.project_id)
-                return _state(None, system_logout=self._system_logout(employee_id))
+                return self._state_for(session, employee_id, now)
+            self.db.flush()
+            resumed = self._resume(user, session, now) if ended == LAPTOP_OFF else None
             self.db.commit()
-            return _state(session, over_mark=over_mark)
         except StaleDataError:  # another tab's heartbeat got there first; its result stands
             self.db.rollback()
-            return _state(self.sessions.active_session(employee_id))
+            return self._state_for(self.sessions.active_session(employee_id), employee_id, now)
+        enforce_governance(self.db, session.project_id)
+        return self._state_for(resumed, employee_id, now)
 
     def start(self, user: models.User, subtask_id: int) -> dict:
         _employee_id(user)
@@ -169,30 +175,86 @@ class TrackingService:
         session = self.sessions.active_session(_employee_id(user))
         if session is None:  # already logged out, e.g. from another tab
             return _state(None, over_mark=False)
+        now = datetime.now(UTC)
         try:
-            end_session(self.db, session, datetime.now(UTC), BY_ENGINEER)
-            self.db.flush()
-            over_mark = self.sessions.banked_seconds(session.employee_id, as_utc(session.login_at).date())
+            mark_at = self._mark_at(session)
+            end_session(self.db, session, now, BY_ENGINEER)
             self.db.commit()
         except StaleDataError:
             self.db.rollback()
             return self.logout(user)  # retry on the fresh state (the session may have resumed)
         enforce_governance(self.db, session.project_id)  # hours on an approved day count at once
-        return _state(None, over_mark=over_mark >= DAILY_MARK_SECONDS)
+        return _state(None, over_mark=mark_at <= as_utc(session.logout_at))
 
-    def _day_seconds(self, session: models.TimeSession, now: datetime) -> int:
-        """The engineer's work time on the session's day: banked on any subtask, plus this session."""
+    # -- the rule ---------------------------------------------------------------------------
+
+    def settle(self, session: models.TimeSession, now: datetime, *, engineer_back: bool) -> str | None:
+        """Apply the rules to one open session and return how it ended, or None when it
+        stays open. `engineer_back`: a heartbeat just arrived (a silent session then pauses
+        and resumes at once); the sweep passes False and leaves a short break alone."""
+        last_seen = as_utc(session.last_seen_at)
+        silent = now - last_seen > HEARTBEAT_GRACE
+        mark_at = self._mark_at(session)
+        if mark_at <= (last_seen if silent else now):  # past the daily mark
+            since = max(last_visit(session), mark_at)  # time before the mark is never questioned
+            if now - since > VISIT_GRACE:
+                end_session(self.db, session, now, NO_VISIT, at=since)
+                return NO_VISIT
+            if silent and not engineer_back:
+                return None  # a short break: the engineer may be back within the grace
+        if silent:
+            end_session(self.db, session, now, LAPTOP_OFF)  # at the last heartbeat
+            return LAPTOP_OFF
+        return None
+
+    def sweep(self, now: datetime | None = None) -> int:
+        """Settle every session whose browser has gone quiet, so a closed laptop never
+        leaves hours unbanked. Runs every SWEEP_INTERVAL (see `sweep_forever`).
+        Returns how many sessions it closed."""
+        now = now or datetime.now(UTC)
+        closed, projects = 0, set()
+        for session in self.sessions.silent_sessions(now - HEARTBEAT_GRACE):
+            if self.settle(session, now, engineer_back=False) is not None:
+                closed += 1
+                projects.add(session.project_id)
+        self.db.commit()
+        for project_id in projects:
+            enforce_governance(self.db, project_id)
+        return closed
+
+    def _mark_at(self, session: models.TimeSession) -> datetime:
+        """When this session takes the engineer's day past the mark (its login, if the
+        day was already there)."""
         login_at = as_utc(session.login_at)
         banked = self.sessions.banked_seconds(session.employee_id, login_at.date())
-        return banked + int((now - login_at).total_seconds())
+        return login_at + timedelta(seconds=max(0, DAILY_MARK_SECONDS - banked))
 
-    def _system_logout(self, employee_id: int) -> dict | None:
+    # -- state and resuming ---------------------------------------------------------------
+
+    def _state_for(self, session: models.TimeSession | None, employee_id: int, now: datetime) -> dict:
+        if session is not None:
+            return _state(session, over_mark=self._mark_at(session) <= now)
+        return _state(None, system_logout=self._system_logout(employee_id, now))
+
+    def _system_logout(self, employee_id: int, now: datetime) -> dict | None:
         """The engineer's last session today, when the system ended it for want of a visit."""
         last = self.sessions.last_session(employee_id)
-        if last is None or last.ended_by != NO_VISIT or as_utc(last.logout_at).date() != datetime.now(UTC).date():
+        if last is None or last.ended_by != NO_VISIT or as_utc(last.logout_at).date() != now.date():
             return None
         day_seconds = self.sessions.banked_seconds(employee_id, as_utc(last.login_at).date())
         return {"at": as_utc(last.logout_at), "subtask_id": last.subtask_id, "day_hours": round(day_seconds / 3600, 2)}
+
+    def _resume_after_pause(self, user: models.User, now: datetime) -> models.TimeSession | None:
+        """The sweep paused the session while the laptop was off: carry on where it left off."""
+        last = self.sessions.last_session(user.employee_id)
+        return self._resume(user, last, now) if last is not None and last.ended_by == LAPTOP_OFF else None
+
+    def _resume(self, user: models.User, paused: models.TimeSession, now: datetime) -> models.TimeSession | None:
+        node = self.sessions.node(paused.subtask_id)
+        if node is None or self._refusal(user, node) is not None:
+            paused.ended_by = BY_ENGINEER  # nothing to come back to: the pause is final
+            return None
+        return self._open(user, node, now)
 
     def _refusal(self, user: models.User, node: models.WbsNode) -> DomainError | None:
         """Why the engineer can't log in to this subtask now, or None."""
@@ -222,6 +284,20 @@ class TrackingService:
         )
         self.db.add(session)
         return session
+
+
+async def sweep_forever(session_factory, interval: timedelta = SWEEP_INTERVAL) -> None:
+    """Background task started with the app: settle silent sessions every `interval`."""
+    while True:
+        await asyncio.sleep(interval.total_seconds())
+        db = session_factory()
+        try:
+            TrackingService(db, TrackingRepository(db)).sweep()
+        except Exception:  # the next tick tries again; never let the loop die
+            log.exception("tracking sweep failed")
+            db.rollback()
+        finally:
+            db.close()
 
 
 def _employee_id(user: models.User) -> int:

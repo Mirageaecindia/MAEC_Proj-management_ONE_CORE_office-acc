@@ -20,7 +20,14 @@ from sqlalchemy.orm import Session
 import models
 from app.core.errors import BadRequestError, ConflictError, ForbiddenError
 from app.core.roles import Role
-from app.domain.timesheets import APPROVED, PENDING_REVIEW, REASON_REQUIRED, review_transition, reviewable
+from app.domain.timesheets import (
+    APPROVED,
+    PENDING_REVIEW,
+    REASON_REQUIRED,
+    over_mark,
+    review_transition,
+    reviewable,
+)
 
 BU_HEAD = None  # reviewer id meaning "the BU Head"
 NOT_YOUR_HOURS = (
@@ -114,9 +121,10 @@ class HoursReview:
         tasks: dict[int, models.WbsNode],
         action: str,
         now: datetime,
-    ) -> int:
-        """Bulk: every pending, finished day among `entries` that `user` is responsible for.
-        Returns how many were decided."""
+    ) -> tuple[int, int]:
+        """Bulk: every pending, finished day among `entries` that `user` is responsible for,
+        except days over the mark, which are decided one by one (overtime is pay-relevant).
+        Returns (decided, skipped as over the mark)."""
         mine = [
             entry
             for entry in entries
@@ -124,6 +132,7 @@ class HoursReview:
             and reviewable(entry.work_date, self.today)
             and self.may_review(user, tasks.get(entry.task_id), entry.employee_id)
         ]
-        for entry in mine:
+        decided = [entry for entry in mine if not over_mark(entry)]
+        for entry in decided:
             self.review(user, entry, tasks.get(entry.task_id), action, None, now)
-        return len(mine)
+        return len(decided), len(mine) - len(decided)

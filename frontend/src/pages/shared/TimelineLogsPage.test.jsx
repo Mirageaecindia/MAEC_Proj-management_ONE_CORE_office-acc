@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { TimelineLogsPage } from './TimelineLogsPage';
 
 let currentRole = 'engineer';
+let reviewBody = { reviewed: 0, skipped_over_mark: 0, action: 'approved' };
 let timesheetData;
 
 const authHeaders = () => ({}); // stable, like the real context
@@ -169,14 +170,18 @@ function fakeApi(url, options = {}) {
 
   if (method === 'POST' && /\/hours\/review$/.test(url)) {
     const body = JSON.parse(options.body);
+    const mine = (entry) =>
+      entry.can_review && (body.employee_id == null || entry.employee_id === body.employee_id);
+    const overMark = timesheetData.filter((entry) => mine(entry) && entry.hours > 8).length;
     timesheetData = timesheetData.map((entry) =>
-      entry.can_review && (body.employee_id == null || entry.employee_id === body.employee_id)
-        ? { ...entry, approval_status: body.action, can_review: false }
-        : entry,
+      mine(entry) && entry.hours <= 8 ? { ...entry, approval_status: body.action, can_review: false } : entry,
     );
-    return Promise.resolve(
-      new Response(JSON.stringify({ reviewed: 1, action: body.action }), { status: 200 }),
-    );
+    reviewBody = {
+      reviewed: timesheetData.length - overMark,
+      skipped_over_mark: overMark,
+      action: body.action,
+    };
+    return Promise.resolve(new Response(JSON.stringify(reviewBody), { status: 200 }));
   }
 
   if (/\/api\/projects\/1\/timesheet\?/.test(url)) {

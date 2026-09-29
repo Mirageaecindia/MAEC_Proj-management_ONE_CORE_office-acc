@@ -13,7 +13,7 @@ import models
 from app.core.database import SessionLocal
 from app.domain.timesheets import total_hours
 from app.repositories.tracking import TrackingRepository
-from app.services.tracking import LAPTOP_OFF, NO_VISIT, TrackingService, upsert_subtask_time_log
+from app.services.tracking import BY_ENGINEER, LAPTOP_OFF, NO_VISIT, TrackingService, upsert_subtask_time_log
 
 START, HEARTBEAT, LOGOUT = (f"/api/subtask-tracking/{step}" for step in ("start", "heartbeat", "logout"))
 
@@ -153,7 +153,7 @@ def test_past_the_mark_thirty_minutes_without_a_visit_logs_out_at_the_last_visit
     _rewind(
         db,
         session_id,
-        logged_in=timedelta(hours=2, minutes=10),
+        logged_in=timedelta(hours=2, minutes=40),  # the mark was passed 40 minutes ago
         last_seen=timedelta(0),
         last_visit=timedelta(minutes=31),
     )
@@ -162,12 +162,12 @@ def test_past_the_mark_thirty_minutes_without_a_visit_logs_out_at_the_last_visit
 
     assert response.json()["active_session"] is None
     logout = response.json()["system_logout"]
-    assert (logout["subtask_id"], logout["day_hours"]) == (subtask.id, 6 + round(99 / 60, 2))  # 2 h 10 min - 31 min
+    assert (logout["subtask_id"], logout["day_hours"]) == (subtask.id, 6 + round(129 / 60, 2))  # 2 h 40 min - 31 min
     db.expire_all()
     closed = db.get(models.TimeSession, session_id)
     assert (closed.status, closed.ended_by) == ("ended", NO_VISIT)
     assert closed.logout_at == closed.last_active_at
-    assert _banked_hours(db, subtask) == 6 + round(99 / 60, 2)
+    assert _banked_hours(db, subtask) == 6 + round(129 / 60, 2)
     again = client.post(HEARTBEAT, headers=world.eng_h)  # nothing resumes by itself
     assert again.json()["active_session"] is None and again.json()["system_logout"] == logout
     assert client.post(START, json={"subtask_id": subtask.id}, headers=world.eng_h).status_code == 201  # by hand
@@ -201,15 +201,109 @@ def test_a_reported_visit_is_never_in_the_future_nor_before_the_last_one(client,
     assert db.get(models.TimeSession, session_id).last_active_at.replace(tzinfo=UTC) == clamped
 
 
-def test_laptop_off_past_the_mark_still_pauses_and_resumes(client, db, world, subtask):
+def test_past_the_mark_a_short_laptop_off_break_pauses_and_resumes(client, db, world, subtask):
     session_id = _login(client, world, subtask)
-    _rewind(db, session_id, logged_in=timedelta(hours=9), last_seen=timedelta(hours=1), last_visit=timedelta(hours=2))
+    _rewind(
+        db, session_id, logged_in=timedelta(hours=9), last_seen=timedelta(minutes=10), last_visit=timedelta(minutes=20)
+    )
 
-    response = client.post(HEARTBEAT, headers=world.eng_h)
+    response = client.post(HEARTBEAT, headers=world.eng_h)  # back after ten minutes
 
     resumed = response.json()["active_session"]
     assert resumed and resumed["id"] != session_id
-    assert _banked_hours(db, subtask) == 8.0  # nine hours minus the hour off; nothing cut at 8
+    db.expire_all()
+    assert db.get(models.TimeSession, session_id).ended_by == LAPTOP_OFF
+    assert _banked_hours(db, subtask) == round((9 * 60 - 10) / 60, 2)  # up to the last heartbeat
+
+
+def test_past_the_mark_a_long_laptop_off_gap_closes_at_the_last_visit_without_resuming(client, db, world, subtask):
+    session_id = _login(client, world, subtask)
+    _rewind(
+        db,
+        session_id,
+        logged_in=timedelta(hours=11),  # nine hours counted by the time the laptop went off
+        last_seen=timedelta(hours=2),
+        last_visit=timedelta(hours=2, minutes=10),
+    )
+
+    response = client.post(HEARTBEAT, headers=world.eng_h)  # back after two hours
+
+    assert response.json()["active_session"] is None
+    assert response.json()["system_logout"]["subtask_id"] == subtask.id
+    db.expire_all()
+    closed = db.get(models.TimeSession, session_id)
+    assert closed.ended_by == NO_VISIT and closed.logout_at == closed.last_active_at
+    assert _banked_hours(db, subtask) == round((11 * 60 - 130) / 60, 2)  # up to the last visit
+
+
+def _sweep(db):
+    return TrackingService(db, TrackingRepository(db)).sweep()
+
+
+def test_the_sweep_pauses_a_silent_session_before_the_mark_and_the_next_heartbeat_resumes_it(
+    client, db, world, subtask
+):
+    session_id = _login(client, world, subtask)
+    _rewind(db, session_id, logged_in=timedelta(hours=3), last_seen=timedelta(minutes=6))
+
+    assert _sweep(db) == 1
+    paused = db.get(models.TimeSession, session_id)
+    assert (paused.status, paused.ended_by) == ("ended", LAPTOP_OFF)
+    assert _banked_hours(db, subtask) == round((3 * 60 - 6) / 60, 2)
+
+    resumed = client.post(HEARTBEAT, headers=world.eng_h).json()["active_session"]
+    assert resumed and resumed["subtask_id"] == subtask.id and resumed["id"] != session_id
+
+
+def test_the_sweep_closes_a_session_past_the_mark_whose_browser_never_came_back(client, db, world, subtask):
+    session_id = _login(client, world, subtask)
+    _rewind(
+        db, session_id, logged_in=timedelta(hours=9), last_seen=timedelta(minutes=10), last_visit=timedelta(minutes=20)
+    )
+    assert _sweep(db) == 0  # a short break so far: nothing to do
+
+    _rewind(
+        db, session_id, logged_in=timedelta(hours=9), last_seen=timedelta(minutes=40), last_visit=timedelta(minutes=50)
+    )
+    assert _sweep(db) == 1
+
+    closed = db.get(models.TimeSession, session_id)
+    assert closed.ended_by == NO_VISIT and closed.logout_at == closed.last_active_at
+    assert _banked_hours(db, subtask) == round((9 * 60 - 50) / 60, 2)
+    assert client.post(HEARTBEAT, headers=world.eng_h).json()["active_session"] is None  # no resume
+    row = db.query(models.TimeLogEntry).filter_by(task_id=subtask.id).one()
+    assert row.approval_status == "pending_review"  # banked: the lead can review it once the day is over
+
+
+def test_a_session_left_running_overnight_ends_at_the_mark(client, db, world, subtask):
+    """Login 20:00, last visit 22:00, laptop on all night: idle time before 8 h counts (the
+    presence model), so the session ends at the mark, 04:00, on the login day's row."""
+    session_id = _login(client, world, subtask)
+    login_at = _rewind(
+        db, session_id, logged_in=timedelta(hours=13), last_seen=timedelta(0), last_visit=timedelta(hours=11)
+    )
+
+    response = client.post(HEARTBEAT, headers=world.eng_h)
+
+    assert response.json()["active_session"] is None
+    db.expire_all()
+    closed = db.get(models.TimeSession, session_id)
+    assert closed.ended_by == NO_VISIT and closed.logout_at == login_at + timedelta(hours=8)
+    rows = db.query(models.TimeLogEntry).filter_by(task_id=subtask.id).all()
+    assert [(r.work_date, r.hours) for r in rows] == [(login_at.date(), 8.0)]
+
+
+def test_a_pause_with_nothing_to_come_back_to_is_final(client, db, make, world, subtask):
+    session_id = _login(client, world, subtask)
+    _rewind(db, session_id, logged_in=timedelta(hours=1), last_seen=timedelta(minutes=6))
+    _sweep(db)
+    node = db.get(models.WbsNode, subtask.id)
+    node.assigned_engineer_id = world.emp2.id  # reassigned meanwhile
+    db.commit()
+
+    assert client.post(HEARTBEAT, headers=world.eng_h).json()["active_session"] is None
+    db.expire_all()
+    assert db.get(models.TimeSession, session_id).ended_by == BY_ENGINEER
 
 
 def test_login_is_refused_where_it_does_not_apply(client, make, world, governed, subtask):

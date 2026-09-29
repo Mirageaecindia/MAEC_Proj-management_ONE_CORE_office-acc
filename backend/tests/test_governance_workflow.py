@@ -149,8 +149,10 @@ def test_rejected_hours_do_not_count(client, db, world, governed):
 
 def test_approving_a_whole_week_counts_its_hours(client, db, world, governed):
     project_id, node_a, *_ = governed
-    _log(client, world, node_a, "2026-09-14", 30)
-    _log(client, world, node_a, "2026-09-15", 40)
+    for day in range(14, 21):  # 7 x 8 h = 56 h, taking the 30 h approved to 86 h; target 86 h
+        _log(client, world, node_a, f"2026-09-{day}", 8)
+    _project(db, project_id).target_effort_hours = 86
+    db.commit()
     assert _project(db, project_id).timesheets_soft_locked is False
 
     approved = client.post(

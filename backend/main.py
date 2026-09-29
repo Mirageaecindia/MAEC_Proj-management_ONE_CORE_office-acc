@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 import os
 import csv
 import io
@@ -27,7 +29,7 @@ from app.core.migrations import migrate
 from app.core.security import require_role
 from app.domain.calendar import distribute_hours_over_months as _distribute_hours_over_months
 from app.domain.calendar import month_key as _get_month_key
-from app.domain.timesheets import APPROVED, PENDING_REVIEW, total_hours
+from app.domain.timesheets import APPROVED, OVER_MARK_ONLY, PENDING_REVIEW, total_hours
 from app.domain.wbs import TO_DO, is_finished
 from app.domain.allocation import peak_allocation
 from app.repositories.bookings import BookingRepository
@@ -49,6 +51,7 @@ from app.services.governance_monitor import enforce_governance
 from app.services.hours_review import NOT_YOUR_HOURS, HoursReview, tasks_by_id
 from app.services.wbs_outline import import_outline, looks_like_outline
 from app.services.wbs_delete import delete_nodes
+from app.services.tracking import sweep_forever
 from app.services.notifications import EXTENSION_REQUESTED, create_bu_head_notification
 
 logger = logging.getLogger(__name__)
@@ -69,7 +72,16 @@ def refuse_lead_as_resource(db: Session, project_id: int, employee: models.Emplo
 # Schema: Alembic migrations in migrations/, applied at startup (app/core/migrations.py).
 migrate(engine)
 
-app = FastAPI(title="ProManage API", version="1.0.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """While the app runs, settle Login/Logout sessions whose browser went quiet, every few
+    minutes (app/services/tracking.py), so a closed laptop never leaves hours unbanked."""
+    sweep = asyncio.create_task(sweep_forever(SessionLocal))
+    yield
+    sweep.cancel()
+
+
+app = FastAPI(title="ProManage API", version="1.0.0", lifespan=lifespan)
 
 # Allow the React dev servers to call this API. The app pins two dev ports
 # (5173 = BU Head, 5174 = Lead) and is opened via localhost or 127.0.0.1.
@@ -872,12 +884,13 @@ def review_hours_in_bulk(
     review = HoursReview(db, project, date.today())
     if not any(review.may_review(user, tasks.get(e.task_id), e.employee_id) for e in entries):
         raise HTTPException(status_code=403, detail=NOT_YOUR_HOURS)
-    reviewed = review.review_pending(user, entries, tasks, payload.action, datetime.now(timezone.utc))
+    reviewed, over_mark = review.review_pending(user, entries, tasks, payload.action, datetime.now(timezone.utc))
     if not reviewed:
-        raise HTTPException(status_code=409, detail="No finished days are waiting for your review in this week.")
+        detail = OVER_MARK_ONLY if over_mark else "No finished days are waiting for your review in this week."
+        raise HTTPException(status_code=409, detail=detail)
     db.commit()
     enforce_governance(db, project_id)  # usage = approved hours: alerts / auto-lock
-    return {"reviewed": reviewed, "action": payload.action}
+    return {"reviewed": reviewed, "skipped_over_mark": over_mark, "action": payload.action}
 
 
 @app.get("/api/projects/{project_id}/timeline-logs")
