@@ -315,6 +315,7 @@ Shared helpers that the Lead/Engineer code in `main.py` needs (access rules, das
 ### 7.1 WBS structure
 - **Five fixed phases**, in order: Space Planning, STR Coordination, ID Coordination, BoH Area RCP Coordination, Submission. Every task belongs to one; subtasks inherit their parent's phase, and changing a task's phase cascades to its subtasks.
 - **Two levels only:** a main task and its subtasks. A subtask cannot have subtasks.
+- **Deleting** (`app/services/wbs_delete.py`, decided 2026-09-29): the project's lead deletes any task or subtask; an engineer only subtasks under tasks assigned to them. Deleting a task deletes its subtasks. A selection is deleted as a whole or not at all (one refused item → 403 naming it, nothing changes). **Hours are never deleted:** an open Login session is logged out and banked first, and the day rows keep the subtask's name (`time_log_entries.task_name`, migration 0009), still count toward usage and the engineer's dashboards, and fall to the BU Head for review (a task without a lead).
 - **WBS codes** are unique per project. Subtask codes are generated as `<parent code>.<n>`. Rows uploaded without a code get the next free numeric root (`7.`, `8.` …).
 - **Assignable engineers** are those booked on the project (`/booked-engineers`). Removing a booking does not unassign existing tasks.
 - **CSV/XLSX upload** (Lead) accepts many header spellings (for example "WBS No", "Activity", "Responsible Engineer"). It skips title rows, repeated headers and "Total" rows. Engineers are matched by name, and rows are created or updated by WBS code.
@@ -443,7 +444,8 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | POST | `/api/projects/{id}/wbs-nodes` | Lead | Create a task (optionally with one subtask) |
 | POST | `/api/wbs-nodes/{id}/subtasks` | Lead, Engineer (own task) | Create a subtask (1–8 h, single day) |
 | PUT | `/api/wbs-nodes/{id}` | Lead | Update a node (phase cascades to subtasks) |
-| DELETE | `/api/wbs-nodes/{id}` | Lead | Delete a node, its subtasks, history and time logs |
+| DELETE | `/api/wbs-nodes/{id}` | Lead; Engineer (subtask under own task) | Delete a node and its subtasks; worked hours are kept (`app/services/wbs_delete.py`) |
+| POST | `/api/projects/{id}/wbs-nodes/delete` | Lead; Engineer (own subtasks) | Delete many at once, all or none; body `{node_ids}` |
 | POST | `/api/projects/{id}/wbs-upload` (multipart `file`, optional `phase`) | Lead | Import the outline workbook (`app/services/wbs_outline.py`: column A phase, column B bold task / normal subtask; the template is `frontend/public/wbs-upload-template.xlsx`, written by `make_wbs_template.py`) or the header-based CSV/XLSX |
 | GET | `/api/wbs-nodes/{id}` | all (scoped) | Task details, children, history |
 | POST | `/api/wbs-nodes/{id}/advance-status` | Engineer (assigned), Lead (subtasks) | Move to the next status |

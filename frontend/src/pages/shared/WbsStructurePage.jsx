@@ -3,7 +3,9 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { countWorkingDays, plannedHoursForRange } from '../../lib/hours';
+import { canDelete, describeCount, impliedSelection, summarizeSelection } from '../../utils/wbsSelection';
 
 
 const PHASES = ['Space Planning', 'STR Coordination', 'ID Coordination', 'BoH Area RCP Coordination', 'Submission'];
@@ -22,6 +24,26 @@ const EMPTY_NODE = {
   phase: '',
 };
 
+/** A checkbox that can show a partial selection; clicks never open the row underneath. */
+function SelectBox({ checked, indeterminate = false, disabled = false, label, onChange }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate && !checked;
+  }, [indeterminate, checked]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      className="wbs-check"
+      aria-label={label}
+      checked={checked}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.checked)}
+      onClick={(e) => e.stopPropagation()}
+    />
+  );
+}
+
 export function WbsStructurePage() {
   const navigate = useNavigate();
   const { user, role, authHeaders } = useAuth();
@@ -34,7 +56,6 @@ export function WbsStructurePage() {
   const [tasks, setTasks] = useState([]);
   const [engineers, setEngineers] = useState([]);
   const [error, setError] = useState('');
-  const [savingId, setSavingId] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [expanded, setExpanded] = useState({});
   const [phaseFilters, setPhaseFilters] = useState({});
@@ -45,6 +66,10 @@ export function WbsStructurePage() {
   const [showUpload, setShowUpload] = useState(false);
   const [toast, setToast] = useState(null);
   const [uploadPhase, setUploadPhase] = useState('');
+  const [selected, setSelected] = useState([]); // ids ticked for deletion
+  const [pendingDelete, setPendingDelete] = useState(null); // what the confirm dialog is about
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
   const fileInputRef = useRef(null);
   // Lead and engineer are roles on the selected project, not on the account.
   const project = projects.find((p) => String(p.id) === String(selectedId));
@@ -62,7 +87,9 @@ export function WbsStructurePage() {
       const resp = await fetch(`${API_BASE_URL}/api/projects/${projectId}/wbs-structure${ancestorParam}`, { headers: authHeaders() });
       if (!resp.ok) throw new Error('Could not load WBS tasks.');
       const data = await resp.json();
-      setTasks(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setTasks(list);
+      setSelected((prev) => prev.filter((id) => list.some((task) => task.id === id)));
       setLastUpdated(new Date());
     } catch (err) {
       setError(err.message);
@@ -91,6 +118,7 @@ export function WbsStructurePage() {
 
   useEffect(() => {
     let active = true;
+    setSelected([]);
     if (!selectedId) {
       setEngineers([]);
       return undefined;
@@ -270,23 +298,54 @@ export function WbsStructurePage() {
     setShowNodeForm(true);
   }
 
-  async function deleteNode(task) {
-    if (!window.confirm(`Delete "${task.task_name}" and your subtasks? This cannot be undone.`)) return;
-    setSavingId(task.id);
-    setError('');
+  // Deleting: a lead deletes tasks and subtasks, an engineer only subtasks under their own
+  // tasks; one confirmation for any number of them. Worked hours are kept by the server.
+  const byId = useMemo(() => Object.fromEntries(tasks.map((task) => [task.id, task])), [tasks]);
+  const deletable = (task) => canDelete(task, byId, { isLead, employeeId });
+  const deletableIds = useMemo(
+    () => tasks.filter((task) => canDelete(task, byId, { isLead, employeeId })).map((task) => task.id),
+    [tasks, byId, isLead, employeeId],
+  );
+  const implied = useMemo(() => impliedSelection(selected, tasks), [selected, tasks]);
+  const selection = useMemo(() => summarizeSelection(selected, tasks), [selected, tasks]);
+
+  const setSelectedMany = (ids, on) =>
+    setSelected((prev) => (on ? [...new Set([...prev, ...ids])] : prev.filter((id) => !ids.includes(id))));
+  const selectAllBox = (label) => (
+    <SelectBox
+      label={label}
+      checked={deletableIds.length > 0 && deletableIds.every((id) => implied.has(id))}
+      indeterminate={deletableIds.some((id) => implied.has(id))}
+      disabled={deletableIds.length === 0}
+      onChange={(on) => setSelectedMany(deletableIds, on)}
+    />
+  );
+
+  function requestDelete(ids) {
+    setDeleteError(null);
+    setPendingDelete(summarizeSelection(ids, tasks));
+  }
+
+  async function confirmDelete() {
+    setDeleting(true);
+    setDeleteError(null);
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/wbs-nodes/${task.id}`, {
-        method: 'DELETE',
-        headers: authHeaders(),
+      const resp = await fetch(`${API_BASE_URL}/api/projects/${selectedId}/wbs-nodes/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ node_ids: pendingDelete.ids }),
       });
-      if (!resp.ok) throw new Error((await resp.json()).detail || 'Could not delete WBS node.');
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(body.detail || 'Could not delete.');
+      setPendingDelete(null);
+      setSelected([]);
       await loadTasks();
-      setToast({ type: 'success', message: 'WBS node deleted.' });
+      const kept = body.hours_kept > 0 ? ` ${body.hours_kept} h of worked time kept.` : '';
+      setToast({ type: 'success', message: `Deleted ${describeCount(body)}.${kept}` });
     } catch (err) {
-      setError(err.message);
-      setToast({ type: 'error', message: err.message });
+      setDeleteError(err.message);
     } finally {
-      setSavingId(null);
+      setDeleting(false);
     }
   }
 
@@ -408,6 +467,14 @@ export function WbsStructurePage() {
     <tr key={task.id} className={engineerView ? 'wbs-row-clickable' : undefined} style={{ cursor: 'pointer' }} onClick={() => navigate(`/task-details?nodeId=${task.id}&projectId=${selectedId}`)}>
       <td>
         <span style={{ paddingLeft: `${(task.depth - 1) * 24}px` }}>
+          {!buHeadView && deletable(task) && (
+            <SelectBox
+              label={`Select ${task.task_name}`}
+              checked={implied.has(task.id)}
+              disabled={task.parent_id != null && implied.has(task.parent_id)}
+              onChange={(on) => setSelectedMany([task.id], on)}
+            />
+          )}
           {children[task.id]?.length ? (
             <button className="wbs-expand" type="button" onClick={(e) => { e.stopPropagation(); setExpanded((prev) => ({ ...prev, [task.id]: prev[task.id] === false })); }}>
               {expanded[task.id] === false ? '\u25b6' : '\u25bc'}
@@ -430,6 +497,9 @@ export function WbsStructurePage() {
                   <button className="button button-secondary" type="button" onClick={(e) => { e.stopPropagation(); openSubtaskForm(task); }}>+ Subtask</button>
                 ) : (
                   <span className="wbs-subtask-slot" role="presentation">+ Subtask</span>
+                )}
+                {deletable(task) && (
+                  <button className="wbs-icon-btn wbs-icon-delete" type="button" title="Delete subtask" aria-label={`Delete ${task.task_name}`} disabled={deleting} onClick={(e) => { e.stopPropagation(); requestDelete([task.id]); }}><Trash2 size={14} /></button>
                 )}
               </div>
             </td>
@@ -457,7 +527,7 @@ export function WbsStructurePage() {
                 <span className="wbs-subtask-slot" role="presentation">+ Subtask</span>
               )}
               <button className="wbs-icon-btn wbs-icon-edit" type="button" title="Edit task" aria-label={`Edit ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openEditForm(task); }}><Pencil size={14} /></button>
-              <button className="wbs-icon-btn wbs-icon-delete" type="button" title="Delete task" aria-label={`Delete ${task.task_name}`} disabled={savingId === task.id} onClick={(e) => { e.stopPropagation(); deleteNode(task); }}><Trash2 size={14} /></button>
+              <button className="wbs-icon-btn wbs-icon-delete" type="button" title={task.depth === 1 ? 'Delete task and its subtasks' : 'Delete subtask'} aria-label={`Delete ${task.task_name}`} disabled={deleting} onClick={(e) => { e.stopPropagation(); requestDelete([task.id]); }}><Trash2 size={14} /></button>
             </div>
           </td>
         </>
@@ -465,9 +535,19 @@ export function WbsStructurePage() {
     </tr>
   );
 
+  const phaseDeletableIds = (phase) => deletableIds.filter((id) => byId[id]?.phase === phase);
+
   const phaseRow = (agg, engineerView = false, buHeadView = false) => (
     <tr className="wbs-phase-row" key={agg.phase}>
       <td>
+        {!buHeadView && phaseDeletableIds(agg.phase).length > 0 && (
+          <SelectBox
+            label={`Select all in ${agg.phase}`}
+            checked={phaseDeletableIds(agg.phase).every((id) => implied.has(id))}
+            indeterminate={phaseDeletableIds(agg.phase).some((id) => implied.has(id))}
+            onChange={(on) => setSelectedMany(phaseDeletableIds(agg.phase), on)}
+          />
+        )}
         <button className="wbs-expand" type="button" aria-label={`${phaseFilters[agg.phase] === false ? 'Expand' : 'Collapse'} ${agg.phase}`} onClick={() => togglePhase(agg.phase)}>
           {phaseFilters[agg.phase] === false ? '\u25b6' : '\u25bc'}
         </button>
@@ -504,6 +584,28 @@ export function WbsStructurePage() {
 
   return (
     <main className="resource-page">
+      {pendingDelete && (
+        <ConfirmDialog
+          title={`Delete ${describeCount(pendingDelete)}?`}
+          confirmLabel="Delete"
+          busyLabel="Deleting…"
+          busy={deleting}
+          error={deleteError}
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        >
+          <ul className="confirm-modal-list">
+            {pendingDelete.names.slice(0, 8).map((name, index) => <li key={index}>{name}</li>)}
+            {pendingDelete.names.length > 8 && <li>… and {pendingDelete.names.length - 8} more</li>}
+          </ul>
+          <p className="confirm-modal-text">This cannot be undone.</p>
+          <p className="confirm-modal-subtext">
+            {pendingDelete.tasks > 0 && 'Deleting a task also deletes its subtasks. '}
+            Hours already worked on these subtasks are <strong>kept</strong> and still count toward working time.
+            Anyone logged in to one of them is logged out now and their time is saved.
+          </p>
+        </ConfirmDialog>
+      )}
       <div className="resource-heading-row">
         <div>
           <div className="breadcrumb">
@@ -649,6 +751,12 @@ export function WbsStructurePage() {
               <div className="wbs-actions">
                 <button className="button button-secondary" type="button" onClick={expandAll}>Expand All</button>
                 <button className="button button-secondary" type="button" onClick={collapseAll}>Collapse All</button>
+                {selection.ids.length > 0 && (
+                  <>
+                    <button className="button button-danger" type="button" disabled={deleting} onClick={() => requestDelete(selected)}>Delete {describeCount(selection)}</button>
+                    <button className="button button-secondary" type="button" onClick={() => setSelected([])}>Clear selection</button>
+                  </>
+                )}
                 <button className="button button-primary" type="button" onClick={() => { setNodeMode('node'); setNodeForm(EMPTY_NODE); setShowNodeForm(true); }}>+ Add WBS Node</button>
               </div>
             </div>
@@ -656,7 +764,7 @@ export function WbsStructurePage() {
               <table className="resource-table wbs-table wbs-lead-table">
                 <thead>
                   <tr>
-                    <th>WBS CODE & TASK NAME</th>
+                    <th>{selectAllBox('Select all tasks and subtasks')} WBS CODE & TASK NAME</th>
                     <th>ASSIGNED ENGINEER</th>
                     <th>ESTIMATED HOURS</th>
                     <th>DELIVERABLE STATUS</th>
@@ -728,6 +836,12 @@ export function WbsStructurePage() {
                 <div className="wbs-actions">
                   <button className="button button-secondary" type="button" onClick={expandAll}>Expand All</button>
                   <button className="button button-secondary" type="button" onClick={collapseAll}>Collapse All</button>
+                {selection.ids.length > 0 && (
+                    <>
+                      <button className="button button-danger" type="button" disabled={deleting} onClick={() => requestDelete(selected)}>Delete {describeCount(selection)}</button>
+                      <button className="button button-secondary" type="button" onClick={() => setSelected([])}>Clear selection</button>
+                    </>
+                  )}
                   <button className="button button-secondary" type="button" onClick={() => loadTasks().catch((err) => setError(err.message))}>Refresh</button>
                 </div>
               </div>
@@ -735,7 +849,7 @@ export function WbsStructurePage() {
                 <table className="resource-table wbs-table">
 <thead>
                       <tr>
-                        <th>WBS CODE & TASK NAME</th>
+                        <th>{selectAllBox('Select all my subtasks')} WBS CODE & TASK NAME</th>
                         <th>ASSIGNED LEAD</th>
                         <th>EST. HOURS</th>
                         <th>DELIVERABLE STATUS</th>

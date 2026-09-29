@@ -359,6 +359,12 @@ class WbsNodeUpdate(WbsNodeBase):
     pass
 
 
+class WbsNodesDeleteIn(BaseModel):
+    """Tasks and subtasks selected for deletion; all of them or none."""
+
+    node_ids: list[int] = Field(min_length=1)
+
+
 class ResourceBookingIn(BaseModel):
     """A Lead's booking of an engineer on a project (dates optional: the WBS dates fill in)."""
 

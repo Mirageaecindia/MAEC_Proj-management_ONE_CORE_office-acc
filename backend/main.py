@@ -48,6 +48,7 @@ from app.services.metrics import executive_dashboard_data
 from app.services.governance_monitor import enforce_governance
 from app.services.hours_review import NOT_YOUR_HOURS, HoursReview, tasks_by_id
 from app.services.wbs_outline import import_outline, looks_like_outline
+from app.services.wbs_delete import delete_nodes
 from app.services.notifications import EXTENSION_REQUESTED, create_bu_head_notification
 
 logger = logging.getLogger(__name__)
@@ -762,7 +763,7 @@ def time_entries_output(db: Session, entries: list, project: models.Project, use
             "project_id": entry.project_id,
             "task_id": entry.task_id,
             "wbs_code": task.wbs_code if task else None,
-            "task_name": task.task_name if task else "",
+            "task_name": task.task_name if task else entry.task_name or "",  # kept after the subtask was deleted
             "employee_id": entry.employee_id,
             "employee_name": employee.name if employee else "",
             "work_date": entry.work_date.isoformat(),
@@ -1719,31 +1720,25 @@ def delete_wbs_node(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    node = db.query(models.WbsNode).filter_by(id=node_id).first()
+    """One task (with its subtasks) or one subtask; the rules and what is kept are in
+    app/services/wbs_delete.py."""
+    node = db.get(models.WbsNode, node_id)
     if not node:
         raise HTTPException(status_code=404, detail="WBS node not found.")
-    project_and_role(db, node.project_id, user, allowed={"lead"})
-    descendant_ids = []
-    stack = [node_id]
-    while stack:
-        current = stack.pop()
-        descendant_ids.append(current)
-        children = db.query(models.WbsNode.id).filter_by(parent_id=current).all()
-        stack.extend(cid for (cid,) in children)
-    db.query(models.WbsNodeHistory).filter(
-        models.WbsNodeHistory.node_id.in_(descendant_ids)
-    ).delete(synchronize_session=False)
-    db.query(models.TimeLogEntry).filter(
-        models.TimeLogEntry.task_id.in_(descendant_ids)
-    ).delete(synchronize_session=False)
-    db.query(models.TimeSession).filter(
-        models.TimeSession.subtask_id.in_(descendant_ids) | models.TimeSession.task_id.in_(descendant_ids)
-    ).delete(synchronize_session=False)
-    db.query(models.WbsNode).filter(
-        models.WbsNode.id.in_(descendant_ids)
-    ).delete(synchronize_session=False)
-    db.commit()
-    return {"ok": True, "deleted_nodes": descendant_ids}
+    _, role = project_and_role(db, node.project_id, user)
+    return delete_nodes(db, node.project_id, role, user, [node_id], datetime.now(timezone.utc)).as_dict()
+
+
+@app.post("/api/projects/{project_id}/wbs-nodes/delete")
+def delete_wbs_nodes(
+    project_id: int,
+    payload: schemas.WbsNodesDeleteIn,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Many tasks and subtasks at once: all of them, or none when one is refused."""
+    _, role = project_and_role(db, project_id, user)
+    return delete_nodes(db, project_id, role, user, payload.node_ids, datetime.now(timezone.utc)).as_dict()
 
 
 _FIELD_ALIASES = {

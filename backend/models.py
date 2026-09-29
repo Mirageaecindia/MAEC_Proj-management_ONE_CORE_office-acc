@@ -274,6 +274,7 @@ class TimeLogEntry(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, nullable=False, index=True)
     task_id = Column(Integer, nullable=False, index=True)
+    task_name = Column(String(255), nullable=True)  # set when the subtask is deleted: the hours stay
     employee_id = Column(Integer, nullable=False, index=True)
     work_date = Column(Date, nullable=False, index=True)
     hours = Column(Float, nullable=False, default=0)
