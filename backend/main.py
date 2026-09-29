@@ -1862,6 +1862,12 @@ def parse_wbs_upload(upload: UploadFile, content: bytes):
     return parsed
 
 
+_UPLOAD_FIELDS = (
+    "wbs_code", "task_name", "parent_wbs_code", "assigned_lead", "assigned_engineer",
+    "estimated_hours", "deliverable_status", "target_due_date", "phase",
+)  # fmt: skip
+
+
 @app.post("/api/projects/{project_id}/wbs-upload")
 async def upload_wbs(
     project_id: int,
@@ -1900,8 +1906,7 @@ async def upload_wbs(
         normalized = {str(key).strip().lower().replace(" ", "_"): value for key, value in row.items()}
         task_name = str(normalized.get("task_name") or normalized.get("task") or normalized.get("name") or "").strip()
         if not task_name:
-            parsed = {k: v for k, v in normalized.items() if k in ("wbs_code", "task_name", "parent_wbs_code", "assigned_lead", "assigned_engineer", "estimated_hours", "deliverable_status", "target_due_date", "phase")}
-            invalid.append((row_num, "Task Name", parsed))
+            invalid.append((row_num, "Task Name", {k: v for k, v in normalized.items() if k in _UPLOAD_FIELDS}))
             continue
         raw_code = str(normalized.get("wbs_code") or normalized.get("code") or "").strip()
         if raw_code:
@@ -1913,7 +1918,15 @@ async def upload_wbs(
             next_root += 1
         due = normalized.get("target_due_date") or normalized.get("due_date") or None
         parent_code = str(normalized.get("parent_wbs_code") or normalized.get("parent_code") or "").strip()
-        parent_id = int(normalized["parent_id"]) if normalized.get("parent_id") else code_to_id.get(parent_code)
+        parsed = {k: v for k, v in normalized.items() if k in _UPLOAD_FIELDS}
+        try:
+            parent_id = int(normalized["parent_id"]) if normalized.get("parent_id") else code_to_id.get(parent_code)
+            engineer_id_raw = int(normalized["assigned_engineer_id"]) if normalized.get("assigned_engineer_id") else None
+            hours_raw = normalized.get("estimated_hours") or normalized.get("planned_hours") or 0
+            estimated_hours = int(float(hours_raw))
+        except (TypeError, ValueError):
+            invalid.append((row_num, "Parent Id, Assigned Engineer Id and Estimated Hours must be numbers", parsed))
+            continue
         phase_raw = str(normalized.get("phase") or "").strip()
         if requested_phase:
             phase = requested_phase
@@ -1921,28 +1934,29 @@ async def upload_wbs(
             phase = phase_raw if phase_raw in schemas.WBS_PHASES else "Space Planning"
             if phase_raw and phase_raw not in schemas.WBS_PHASES:
                 raise HTTPException(status_code=422, detail=f"Phase '{phase_raw}' is not one of the five fixed phases.")
-        engineer_id = None
-        if normalized.get("assigned_engineer_id"):
-            engineer_id = int(normalized["assigned_engineer_id"])
-        elif normalized.get("assigned_engineer"):
+        engineer_id = engineer_id_raw
+        if engineer_id is None and normalized.get("assigned_engineer"):
             name = str(normalized["assigned_engineer"]).strip()
             engineer_id = engineer_by_name.get(name.lower())
             if engineer_id is None:
-                parsed = {k: v for k, v in normalized.items() if k in ("wbs_code", "task_name", "parent_wbs_code", "assigned_lead", "assigned_engineer", "estimated_hours", "deliverable_status", "target_due_date", "phase")}
                 invalid.append((row_num, f"Assigned Engineer '{name}' not found", parsed))
                 continue
-        payload = schemas.WbsNodeUpdate(
-            wbs_code=code,
-            task_name=task_name,
-            parent_id=parent_id,
-            assigned_lead=normalized.get("assigned_lead") or user.full_name,
-            assigned_lead_user_id=user.id,
-            assigned_engineer_id=engineer_id,
-            estimated_hours=int(float(normalized.get("estimated_hours") or normalized.get("planned_hours") or 0)),
-            deliverable_status=normalized.get("deliverable_status") or normalized.get("status") or TO_DO,
-            target_due_date=due,
-            phase=phase,
-        )
+        try:
+            payload = schemas.WbsNodeUpdate(
+                wbs_code=code,
+                task_name=task_name,
+                parent_id=parent_id,
+                assigned_lead=normalized.get("assigned_lead") or user.full_name,
+                assigned_lead_user_id=user.id,
+                assigned_engineer_id=engineer_id,
+                estimated_hours=estimated_hours,
+                deliverable_status=normalized.get("deliverable_status") or normalized.get("status") or TO_DO,
+                target_due_date=due,
+                phase=phase,
+            )
+        except ValidationError as exc:
+            invalid.append((row_num, "; ".join(e["msg"] for e in exc.errors()), parsed))
+            continue
         validate_node_payload(db, project_id, payload)
         node = db.query(models.WbsNode).filter_by(project_id=project_id, wbs_code=code).first()
         if node:

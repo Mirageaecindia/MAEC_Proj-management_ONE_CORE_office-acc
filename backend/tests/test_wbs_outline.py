@@ -148,3 +148,13 @@ def test_unnamed_merged_blocks_take_the_phase_by_position(client, db, world):
     # Fewer than five blocks: an unnamed one can't be placed.
     two = write_template({"_1": [("Task", True)], "Submission": [("Package", True)]})
     assert "put the phase in column A" in _upload(client, world, project_id, two).json()["detail"]
+
+
+def test_a_bad_number_in_the_csv_is_reported_with_its_row(client, world):
+    project_id = world.create_project()["id"]
+    csv = b"WBS Code,Task Name,Estimated Hours\n10.,Load estimate,abc\n"
+
+    response = _upload(client, world, project_id, csv, name="wbs.csv")
+
+    assert response.status_code == 422
+    assert "Row 2: Parent Id, Assigned Engineer Id and Estimated Hours must be numbers" in response.json()["detail"]

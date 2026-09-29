@@ -117,12 +117,17 @@ export function WbsStructurePage() {
     loadTasks().catch((err) => {
       if (active) setError(err.message);
     });
-    const timer = setInterval(() => {
-      if (active) loadTasks().catch(() => {});
-    }, 5000);
+    // Refresh when the user comes back to the tab (other people's changes), not on a timer:
+    // a large WBS is hundreds of rows, and every action on this page reloads it anyway.
+    const onFocus = () => {
+      if (active && document.visibilityState === 'visible') loadTasks().catch(() => {});
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
     return () => {
       active = false;
-      clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
     };
   }, [selectedId, loadTasks]);
 
@@ -181,7 +186,7 @@ export function WbsStructurePage() {
           return;
         }
         hours = Number(rawHours);
-        if (!Number.isInteger(hours) || hours < 1 || hours > 4) {
+        if (!Number.isInteger(hours) || hours < 1 || hours > 8) {
           setError('Subtask planned hours must be between 1 and 8 hours.');
           return;
         }

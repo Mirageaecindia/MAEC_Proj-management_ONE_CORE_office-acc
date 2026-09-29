@@ -91,7 +91,7 @@ export function EngineerPerformanceDashboardPage() {
         fetchDashboard();
       }
     };
-    const interval = window.setInterval(refresh, 15000);
+    const interval = window.setInterval(refresh, 60000); // the focus/visibility refresh covers the common case
     window.addEventListener('focus', refresh);
     document.addEventListener('visibilitychange', refresh);
     return () => {

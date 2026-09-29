@@ -315,7 +315,8 @@ export function ResourceBookingPage() {
     if (!form.employee_id) { setError('Please select an engineer.'); return; }
     if (!form.utilization_rate) { setError('Please select a booking percentage.'); return; }
     try {
-      if (!form.end_date || new Date(form.end_date) < new Date(form.start_date)) throw new Error('End date cannot be before start date.');
+      if (!form.start_date || !form.end_date) throw new Error('Give the booking a start and an end date: they decide when the engineer’s time is taken.');
+      if (form.end_date < form.start_date) throw new Error('End date cannot be before start date.');
       const url = modalMode === 'edit'
         ? `${API_BASE_URL}/api/projects/${projectId}/resource-bookings/${editingBookingId}`
         : `${API_BASE_URL}/api/projects/${projectId}/resource-bookings`;
