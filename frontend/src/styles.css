@@ -1093,8 +1093,9 @@ table.wbs-lead-table:has(> thead > tr > th:nth-child(6)) th:last-child { width: 
 }
 .wbs-icon-btn { width: 27px; height: 27px; flex: 0 0 27px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; cursor: pointer; vertical-align: middle; }
 .wbs-icon-btn:disabled { cursor: not-allowed; opacity: .6; }
-.wbs-check { width: 15px; height: 15px; flex: 0 0 auto; margin: 2px 4px 0 0; accent-color: #1f3d5c; cursor: pointer; vertical-align: middle; }
-.wbs-check:disabled { cursor: default; opacity: .5; }
+.wbs-table input.wbs-check { width: 14px; min-width: 0; height: 14px; flex: 0 0 auto; margin: 3px 6px 0 0; padding: 0; accent-color: #1f3d5c; cursor: pointer; vertical-align: middle; }
+.wbs-table th input.wbs-check { margin: 0 8px 0 0; }
+.wbs-table input.wbs-check:disabled { cursor: default; opacity: .45; }
 .confirm-modal-list { max-height: 170px; margin: 0 0 10px; padding-left: 18px; overflow: auto; color: #243e57; font-size: 12.5px; line-height: 1.5; }
 .wbs-icon-edit { color: #2d5f86; background: #eef5fb; border: 1px solid #cfe3f2; }
 .wbs-icon-edit:hover { background: #dcecf7; }
