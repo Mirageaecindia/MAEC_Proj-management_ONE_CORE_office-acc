@@ -6,6 +6,7 @@ import {
   weekdayIndex,
   isOverMark,
   describeSession,
+  bulkNotice,
 } from './hours';
 
 const row = (overrides) => ({
@@ -83,6 +84,18 @@ describe('describeSession', () => {
     );
     expect(describeSession({ ...session, unattended: false, ended_by: 'engineer' })).not.toMatch(
       /last visit/,
+    );
+  });
+});
+
+describe('bulkNotice', () => {
+  it('says which days a bulk approval left for review', () => {
+    expect(bulkNotice({ reviewed: 3, skipped_over_mark: 0, skipped_unattended: 0 })).toBe('');
+    expect(bulkNotice({ reviewed: 3, skipped_over_mark: 1, skipped_unattended: 2 })).toBe(
+      'Approved 3 days. 3 days left for review: 1 over 8 hours, 2 unattended (open the weekly log).',
+    );
+    expect(bulkNotice({ reviewed: 1, skipped_unattended: 1 })).toBe(
+      'Approved 1 day. 1 day left for review: 1 unattended (open the weekly log).',
     );
   });
 });

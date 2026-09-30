@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
-import { DAY_KEYS, HOURS_STATUS_LABELS, HOURS_STATUS_PILL, groupByEngineer, isOverMark, summarizeWeek } from '../../utils/hours';
+import { DAY_KEYS, HOURS_STATUS_LABELS, HOURS_STATUS_PILL, bulkNotice, groupByEngineer, isOverMark, summarizeWeek } from '../../utils/hours';
 import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 
 const WBS_PHASES = ['Space Planning', 'STR Coordination', 'ID Coordination', 'BoH Area RCP Coordination'];
@@ -307,12 +307,7 @@ export function TimelineLogsPage() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.detail || 'Could not approve these hours.');
-      const left = data.skipped_over_mark || 0;
-      setNotice(
-        left
-          ? `Approved ${data.reviewed} day${data.reviewed === 1 ? '' : 's'}. ${left} day${left === 1 ? ' is' : 's are'} over 8 hours and left for you to approve one by one (open the weekly log).`
-          : '',
-      );
+      setNotice(bulkNotice(data));
       await loadProjectData(projectId, weekStartStr);
     } catch (err) {
       setError(err.message);

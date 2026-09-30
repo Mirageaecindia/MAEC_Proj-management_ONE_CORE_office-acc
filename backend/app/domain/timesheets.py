@@ -6,7 +6,7 @@ sum of its days). All seven weekdays count: offices work different weeks.
 """
 
 from collections.abc import Iterable
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import models
 
@@ -20,7 +20,9 @@ REJECTED = "rejected"
 DAILY_MARK_HOURS = 8
 
 REASON_REQUIRED = "Give a reason for rejecting hours that were already approved."
-OVER_MARK_ONLY = "Only days over 8 hours are waiting for you; overtime is approved day by day, not in bulk."
+INDIVIDUAL_ONLY = (
+    "Only days over 8 hours or with unattended time are waiting for you; those are approved day by day, not in bulk."
+)
 NEVER_RE_APPROVED = "Rejected hours can't be approved again. The engineer corrects them instead."
 
 
@@ -32,6 +34,12 @@ def total_hours(entries: Iterable[models.TimeLogEntry], status: str | None = Non
 def over_mark(entry: models.TimeLogEntry) -> bool:
     """More than a working day's hours on one day: the reviewer looks at it individually."""
     return (entry.hours or 0) > DAILY_MARK_HOURS
+
+
+def today_utc() -> date:
+    """The current day as the rows know it: a session's hours go to the UTC date it started on,
+    so "finished" is judged against the UTC date too (05:30 to 05:30 India time)."""
+    return datetime.now(UTC).date()
 
 
 def week_start(day: date) -> date:

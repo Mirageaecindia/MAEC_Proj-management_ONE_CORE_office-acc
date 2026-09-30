@@ -10,6 +10,18 @@ export const DAILY_MARK_HOURS = 8;
 
 export const isOverMark = (hours) => Number(hours) > DAILY_MARK_HOURS;
 
+/** What a bulk approval left for the reviewer to look at one by one, or '' when nothing. */
+export function bulkNotice({
+  reviewed = 0,
+  skipped_over_mark: over = 0,
+  skipped_unattended: unattended = 0,
+}) {
+  const left = [over && `${over} over 8 hours`, unattended && `${unattended} unattended`].filter(Boolean);
+  if (!left.length) return '';
+  const days = over + unattended;
+  return `Approved ${reviewed} day${reviewed === 1 ? '' : 's'}. ${days} day${days === 1 ? '' : 's'} left for review: ${left.join(', ')} (open the weekly log).`;
+}
+
 const SESSION_END_LABELS = {
   engineer: 'logged out',
   laptop_off: 'laptop off',

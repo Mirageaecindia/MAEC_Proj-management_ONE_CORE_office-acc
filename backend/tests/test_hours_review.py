@@ -11,6 +11,7 @@ import pytest
 from test_project_roles import _approve_booking
 
 import models
+from app.domain.timesheets import today_utc
 from app.repositories.work import WorkRepository
 from factories import PASSWORD, WEEK
 
@@ -60,7 +61,7 @@ def test_each_lead_approves_the_days_on_their_own_tasks(client, db, world, split
     first = _bulk(client, world.lead_h, project_id, employee_id=world.emp1.id)
 
     assert first.status_code == 200, first.text
-    assert first.json() == {"reviewed": 1, "skipped_over_mark": 0, "action": "approved"}
+    assert first.json() == {"reviewed": 1, "skipped_over_mark": 0, "skipped_unattended": 0, "action": "approved"}
     assert (_status(db, row_e), _status(db, row_m)) == ("approved", "pending_review")
     assert WorkRepository(db).approved_hours(project_id) == 8.0  # usage counts each day as it is approved
     assert _bulk(client, world.lead_h, project_id).status_code == 409  # nothing of hers left
@@ -101,12 +102,12 @@ def test_hours_without_an_active_lead_go_to_the_bu_head(client, db, make, world,
 
 def test_only_a_finished_day_is_reviewed(client, db, make, world, split):
     project_id, row_e, _ = split
-    today = make.time_entry(project_id, db.get(models.WbsNode, row_e.task_id), world.emp1, 3, day=date.today())
+    today = make.time_entry(project_id, db.get(models.WbsNode, row_e.task_id), world.emp1, 3, day=today_utc())
 
     refused = _row(client, world.lead_h, today.id)
 
     assert refused.status_code == 409 and "once it is over" in refused.json()["detail"]
-    this_week = date.today() - timedelta(days=date.today().weekday())
+    this_week = today_utc() - timedelta(days=today_utc().weekday())
     rows = client.get(f"/api/projects/{project_id}/timesheet?week_start={this_week}", headers=world.lead_h).json()
     assert next(r for r in rows if r["id"] == today.id)["can_review"] is False
     assert _bulk(client, world.lead_h, project_id, employee_id=world.emp1.id).json()["reviewed"] == 1  # today skipped
@@ -272,7 +273,23 @@ def test_bulk_approval_reports_the_over_eight_days_it_left_alone(client, db, mak
     response = _bulk(client, _headers(client, "lead.e"), project_id)
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"reviewed": 1, "skipped_over_mark": 1, "action": "approved"}
+    assert response.json() == {"reviewed": 1, "skipped_over_mark": 1, "skipped_unattended": 0, "action": "approved"}
     db.refresh(normal)
     db.refresh(row_e)
     assert (normal.approval_status, row_e.approval_status) == ("approved", "pending_review")
+
+
+def test_bulk_approval_skips_unattended_days_and_reports_them(client, db, make, world, split):
+    project_id, row_e, _ = split
+    task = db.get(models.WbsNode, row_e.task_id)
+    normal = make.time_entry(project_id, task, world.emp1, 6, day=DAY + timedelta(days=1))
+    _session(make, row_e, login=9, logout=17, last_visit=11, ended_by="laptop_off")  # flagged: someone must look
+    anita = _headers(client, "lead.e")
+
+    response = _bulk(client, anita, project_id)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"reviewed": 1, "skipped_over_mark": 0, "skipped_unattended": 1, "action": "approved"}
+    assert (_status(db, normal), _status(db, row_e)) == ("approved", "pending_review")
+    again = _bulk(client, anita, project_id)  # only the flagged day is left
+    assert again.status_code == 409 and "day by day" in again.json()["detail"]

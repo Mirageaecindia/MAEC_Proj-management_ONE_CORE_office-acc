@@ -29,7 +29,7 @@ from app.core.migrations import migrate
 from app.core.security import require_role
 from app.domain.calendar import distribute_hours_over_months as _distribute_hours_over_months
 from app.domain.calendar import month_key as _get_month_key
-from app.domain.timesheets import APPROVED, OVER_MARK_ONLY, PENDING_REVIEW, total_hours
+from app.domain.timesheets import APPROVED, INDIVIDUAL_ONLY, PENDING_REVIEW, today_utc, total_hours
 from app.domain.wbs import TO_DO, is_finished
 from app.domain.allocation import peak_allocation
 from app.repositories.bookings import BookingRepository
@@ -772,7 +772,7 @@ def time_entries_output(db: Session, entries: list, project: models.Project, use
     employees = (
         {e.id: e for e in db.query(models.Employee).filter(models.Employee.id.in_(employee_ids))} if employee_ids else {}
     )
-    review = HoursReview(db, project, date.today())
+    review = HoursReview(db, project, today_utc())
     sessions = sessions_by_row(db, entries)
     out = []
     for entry in entries:
@@ -906,16 +906,24 @@ def review_hours_in_bulk(
         query = query.filter(models.TimeLogEntry.employee_id == payload.employee_id)
     entries = query.all()
     tasks = tasks_by_id(db, entries)
-    review = HoursReview(db, project, date.today())
+    review = HoursReview(db, project, today_utc())
     if not any(review.may_review(user, tasks.get(e.task_id), e.employee_id) for e in entries):
         raise HTTPException(status_code=403, detail=NOT_YOUR_HOURS)
-    reviewed, over_mark = review.review_pending(user, entries, tasks, payload.action, datetime.now(timezone.utc))
+    reviewed, over_mark, unattended = review.review_pending(
+        user, entries, tasks, payload.action, datetime.now(timezone.utc)
+    )
     if not reviewed:
-        detail = OVER_MARK_ONLY if over_mark else "No finished days are waiting for your review in this week."
+        held_back = over_mark or unattended
+        detail = INDIVIDUAL_ONLY if held_back else "No finished days are waiting for your review in this week."
         raise HTTPException(status_code=409, detail=detail)
     db.commit()
     enforce_governance(db, project_id)  # usage = approved hours: alerts / auto-lock
-    return {"reviewed": reviewed, "skipped_over_mark": over_mark, "action": payload.action}
+    return {
+        "reviewed": reviewed,
+        "skipped_over_mark": over_mark,
+        "skipped_unattended": unattended,
+        "action": payload.action,
+    }
 
 
 @app.get("/api/projects/{project_id}/timeline-logs")
@@ -1484,7 +1492,7 @@ def review_time_log(
     if project.timesheets_soft_locked:
         raise HTTPException(status_code=409, detail=TIMESHEETS_LOCKED)
     task = db.query(models.WbsNode).filter_by(id=entry.task_id).first()
-    review, now = HoursReview(db, project, date.today()), datetime.now(timezone.utc)
+    review, now = HoursReview(db, project, today_utc()), datetime.now(timezone.utc)
     if attended_only:
         review.approve_attended(user, entry, task, sessions_by_row(db, [entry]).get(row_key(entry), []), now)
     else:

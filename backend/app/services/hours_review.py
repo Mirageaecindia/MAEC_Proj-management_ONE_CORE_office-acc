@@ -212,10 +212,10 @@ class HoursReview:
         tasks: dict[int, models.WbsNode],
         action: str,
         now: datetime,
-    ) -> tuple[int, int]:
+    ) -> tuple[int, int, int]:
         """Bulk: every pending, finished day among `entries` that `user` is responsible for,
-        except days over the mark, which are decided one by one (overtime is pay-relevant).
-        Returns (decided, skipped as over the mark)."""
+        except the days someone has to look at: over the mark (overtime is pay-relevant) and
+        unattended. Returns (decided, skipped as over the mark, skipped as unattended)."""
         mine = [
             entry
             for entry in entries
@@ -224,7 +224,13 @@ class HoursReview:
             and not self.session_open(entry)
             and self.may_review(user, tasks.get(entry.task_id), entry.employee_id)
         ]
-        decided = [entry for entry in mine if not over_mark(entry)]
+        sessions = sessions_by_row(self.db, mine)
+        over = [entry for entry in mine if over_mark(entry)]
+        unattended = [
+            entry for entry in mine if not over_mark(entry) and trimmed_hours(sessions.get(row_key(entry), [])) > 0
+        ]
+        held_back = {id(entry) for entry in (*over, *unattended)}
+        decided = [entry for entry in mine if id(entry) not in held_back]
         for entry in decided:
             self.review(user, entry, tasks.get(entry.task_id), action, None, now)
-        return len(decided), len(mine) - len(decided)
+        return len(decided), len(over), len(unattended)

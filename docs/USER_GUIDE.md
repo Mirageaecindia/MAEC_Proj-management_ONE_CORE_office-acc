@@ -241,6 +241,7 @@ subtask are kept and still count.
 - **Status**: move a task To Do → In-Progress → Submitted for Approval (only once **all its subtasks are Done**); a subtask To Do → In-Progress → Done. The Lead approves the task.
 - **Comments** on your tasks.
 - **Login / Logout** (subtasks only) records your working time: the time from **Login** to **Logout** counts, including idle time and time spent in Revit, AutoCAD or other programs. Before 8 hours in a day nothing logs you out automatically. There is no screen to type hours.
+  - **A day runs from 05:30 to 05:30 India time** (04:00 in the UAE, 03:00 in KSA): the app keeps days in UTC, and a session's hours go to the day it started on. Every page shows that same day for a row.
   - **Log in** when you start a subtask and **log out** when you stop. If a subtask takes longer than planned, keep working; when it's done, create the next subtask and log in there.
   - **Keep MAEC open in a browser tab** while you work (minimised or behind other windows is fine). The tab tells the server once a minute that your laptop is on.
   - **Laptop switched off, asleep or offline** for more than 5 minutes: the time stops at the last signal and that gap is not counted. When you open MAEC again **on the same day**, it carries on by itself on the same subtask; you don't need to log in again. Closing every MAEC tab has the same effect as switching off. **The next day you always log in afresh**: yesterday's subtask never carries on by itself.
