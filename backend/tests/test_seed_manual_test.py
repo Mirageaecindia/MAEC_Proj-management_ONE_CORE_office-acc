@@ -4,6 +4,7 @@ These tests cover the guard; the seeding itself is exercised by running the scri
 """
 
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -11,7 +12,7 @@ from seed_manual_test import DEFAULT_DEV_DATABASE, MARKER_PROJECT_CODE, Refused,
 
 
 def _database(path, project_codes):
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("CREATE TABLE projects (project_code TEXT)")
         connection.executemany("INSERT INTO projects VALUES (?)", [(code,) for code in project_codes])
     return path
@@ -58,3 +59,4 @@ def test_an_existing_file_is_rebuilt_only_if_this_script_made_it(tmp_path):
         safe_target(str(not_a_database), True, set())
 
     assert safe_target(str(scratch), True, set()) == scratch.resolve()
+    scratch.unlink()  # the check left the file closed, so --reset can delete it (Windows refuses otherwise)

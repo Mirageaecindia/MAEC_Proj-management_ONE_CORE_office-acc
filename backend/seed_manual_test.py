@@ -19,6 +19,7 @@ import argparse
 import os
 import sqlite3
 import sys
+from contextlib import closing
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
@@ -63,7 +64,9 @@ def dev_database_paths(environ: dict[str, str], env_file: Path) -> set[Path]:
 def is_scratch(path: Path) -> bool:
     """An existing file this script made: a database whose only project is the marker project."""
     try:
-        with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True) as connection:
+        # closing(): sqlite3's own context manager only ends the transaction and would keep the
+        # file open, so a --reset could not delete it on Windows.
+        with closing(sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)) as connection:
             codes = [code for (code,) in connection.execute("SELECT project_code FROM projects")]
     except sqlite3.Error:
         return False
