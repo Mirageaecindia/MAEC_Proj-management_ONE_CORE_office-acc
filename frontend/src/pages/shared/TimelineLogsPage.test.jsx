@@ -277,12 +277,14 @@ describe('Timeline Logs page groups the weekly log by engineer and navigates to 
 
   it('navigates to the engineer weekly log details page when the name is clicked', async () => {
     render(
-      <MemoryRouter initialEntries={['/timeline-logs?projectId=1']}>
-        <Routes>
-          <Route path="/timeline-logs" element={<TimelineLogsPage />} />
-          <Route path="/weekly-logs" element={<WeeklyLogsStub />} />
-        </Routes>
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/timeline-logs?projectId=1']}>
+          <Routes>
+            <Route path="/timeline-logs" element={<TimelineLogsPage />} />
+            <Route path="/weekly-logs" element={<WeeklyLogsStub />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     fireEvent.click(await screen.findByRole('link', { name: /Ritu/ }));

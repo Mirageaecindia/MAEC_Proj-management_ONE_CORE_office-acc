@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
+import { useServerToday } from '../../hooks/useServerToday';
 import {
   HOURS_STATUS_LABELS,
   HOURS_STATUS_PILL,
@@ -17,6 +18,7 @@ import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 export function EngineerWeeklyLogsPage() {
   const [searchParams] = useSearchParams();
   const { authHeaders } = useAuth();
+  const { today, todayStr: todayUtc } = useServerToday(); // rows are dated by the server's UTC day
 
   const targetProjectId = searchParams.get('projectId') ? Number(searchParams.get('projectId')) : null;
   const targetEmployeeId = searchParams.get('employeeId') ? String(searchParams.get('employeeId')) : '';
@@ -42,8 +44,8 @@ export function EngineerWeeklyLogsPage() {
     if (weekStartParam) {
       return getMonday(new Date(`${weekStartParam}T00:00:00`));
     }
-    return getMonday(new Date());
-  }, [weekStartParam]);
+    return getMonday(today);
+  }, [weekStartParam, today]);
   const weekStartStr = useMemo(() => formatDateStr(monday), [monday]);
   const weekInfo = useMemo(() => getWeekInfo(monday), [monday]);
 
@@ -85,7 +87,6 @@ export function EngineerWeeklyLogsPage() {
   }, [nodes]);
 
   const totals = useMemo(() => summarizeWeek(detailsRows), [detailsRows]);
-  const todayUtc = new Date().toISOString().slice(0, 10); // rows are dated by the UTC day
 
   const loadDetails = useCallback(
     async (projectIdNum, weekStr) => {

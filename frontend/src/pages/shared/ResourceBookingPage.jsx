@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
+import { useServerToday } from '../../hooks/useServerToday';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useRejectResourceBookings } from '../../hooks/useResourceBookings';
 import { bookingPlannedHours, countWorkingDays } from '../../lib/hours';
@@ -76,8 +77,7 @@ export function ResourceBookingPage() {
   const rejectBookings = useRejectResourceBookings();
   const [notifications, setNotifications] = useState([]);
   const [ganttData, setGanttData] = useState(EMPTY_GANTT);
-  const [serverDate, setServerDate] = useState(null);
-  const [now, setNow] = useState(() => new Date()); // the "today" marker moves once a minute
+  const { today: serverDate } = useServerToday(); // the "today" marker follows the server's day
   const [hoveredBarId, setHoveredBarId] = useState(null);
   const [pinnedBarId, setPinnedBarId] = useState(null);
   const ganttTrackElRef = useRef(null);
@@ -95,25 +95,6 @@ export function ResourceBookingPage() {
     resizeObserver.observe(el);
   }, []);
 
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 60000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const fetchServerDate = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/server-date`);
-        if (response.ok) {
-          const data = await response.json();
-          setServerDate(new Date(data.date));
-        }
-      } catch { /* ignore */ }
-    };
-    fetchServerDate();
-    const interval = setInterval(fetchServerDate, 300000);
-    return () => clearInterval(interval);
-  }, []);
 
   const project = projects.find((p) => String(p.id) === String(selectedId));
   const isLead = project?.my_role === 'lead'; // a role on the selected project, not on the account
@@ -455,11 +436,10 @@ export function ResourceBookingPage() {
 
   const todayPct = useMemo(() => {
     if (!timelineStart || !timelineEnd || totalSpan <= 0) return null;
-    const today = serverDate || now;
-    const t = today.getTime();
+    const t = serverDate.getTime();
     if (t < timelineStart.getTime() || t > timelineEnd.getTime()) return null;
     return Math.min(100, Math.max(0, ((t - timelineStart.getTime()) / totalSpan) * 100));
-  }, [serverDate, now, timelineStart, timelineEnd, totalSpan]);
+  }, [serverDate, timelineStart, timelineEnd, totalSpan]);
 
   const ganttRows = useMemo(() => ganttEngineers.map((engineer) => {
     const withDates = (engineer.assignments || []).filter((a) => a.has_date_range);

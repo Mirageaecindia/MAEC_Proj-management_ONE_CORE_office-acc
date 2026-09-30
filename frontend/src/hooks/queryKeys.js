@@ -8,6 +8,7 @@ export const queryKeys = {
   workSummary: (projectId) => ['work-summary', projectId],
   notifications: ['notifications'],
   tracking: ['tracking'],
+  serverDate: ['server-date'],
   rejectedHours: (projectId) => ['rejected-hours', String(projectId)],
   sharepointMirror: (projectId) => ['sharepoint-mirror', projectId],
 };

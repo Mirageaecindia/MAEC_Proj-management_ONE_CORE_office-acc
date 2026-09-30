@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
+import { useServerToday } from '../../hooks/useServerToday';
 import { RejectedHoursPanel } from '../../features/hours/RejectedHours';
 import { DAY_KEYS, DAY_LEGEND, HOURS_STATUS_LABELS, HOURS_STATUS_PILL, bulkNotice, describeTotals, groupByEngineer, isOverMark, summarizeWeek } from '../../utils/hours';
 import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
@@ -43,36 +44,17 @@ export function TimelineLogsPage() {
   const [entries, setEntries] = useState([]);
   const [timelineTasks, setTimelineTasks] = useState([]);
   const [timelinePhases, setTimelinePhases] = useState([]);
-  const [currentMonday, setCurrentMonday] = useState(() => getMonday(new Date()));
-  const [serverDate, setServerDate] = useState(null);
+  const { today, loaded: todayLoaded } = useServerToday(); // the server's day, never the browser's
+  const [weekOffset, setWeekOffset] = useState(0); // weeks before (negative) or after the server's current week
+  const currentMonday = useMemo(() => {
+    const monday = getMonday(today);
+    monday.setDate(monday.getDate() + 7 * weekOffset);
+    return monday;
+  }, [today, weekOffset]);
 
   const [error, setError] = useState('');
   const [sheetMessage, setSheetMessage] = useState(null); // { type, text }: shown beside the sheet's buttons
-  const [now, setNow] = useState(() => new Date()); // the "today" marker moves once a minute
   const weekRequestRef = useRef('');
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 60000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const fetchServerDate = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/server-date`);
-        if (response.ok) {
-          const data = await response.json();
-          setServerDate(new Date(data.date));
-        }
-      } catch {
-        console.warn('Could not fetch server date, using local date');
-        setServerDate(new Date());
-      }
-    };
-    fetchServerDate();
-    const interval = setInterval(fetchServerDate, 300000);
-    return () => clearInterval(interval);
-  }, []);
 
   const project = projects.find((p) => String(p.id) === String(selectedId));
   const projectId = project?.id;
@@ -219,8 +201,7 @@ export function TimelineLogsPage() {
       if (ed) nodeDates.push(new Date(ed));
     });
 
-    const now = new Date();
-    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
 
     if (nodeDates.length > 0) {
       minDate = new Date(Math.min(...nodeDates));
@@ -233,7 +214,7 @@ export function TimelineLogsPage() {
         maxDate = new Date(minDate.getFullYear(), minDate.getMonth() + 6, 0);
       }
     } else {
-      minDate = getMonday(now);
+      minDate = getMonday(today);
       maxDate = new Date(minDate.getFullYear(), minDate.getMonth() + 6, 0);
     }
 
@@ -256,7 +237,7 @@ export function TimelineLogsPage() {
     return {
       quarterTitle: title,
     };
-  }, [nodes, project]);
+  }, [nodes, project, today]);
 
   const visibleMonthColumns = useMemo(
     () => Array.from({ length: INITIAL_VIEWPORT_MONTH_COUNT }, (_, index) => {
@@ -268,12 +249,11 @@ export function TimelineLogsPage() {
   );
 
   const todayPct = useMemo(() => {
-    const today = serverDate || now;
     const total = INITIAL_VIEWPORT_END.getTime() - INITIAL_VIEWPORT_START.getTime();
     if (today < INITIAL_VIEWPORT_START || today > INITIAL_VIEWPORT_END || total <= 0) return null;
     const elapsed = today.getTime() - INITIAL_VIEWPORT_START.getTime();
     return Math.min(100, Math.max(0, (elapsed / total) * 100));
-  }, [now, serverDate]);
+  }, [today]);
 
   const weekInfo = useMemo(() => getWeekInfo(currentMonday), [currentMonday]);
 
@@ -285,17 +265,8 @@ export function TimelineLogsPage() {
   const reviewableAll = useMemo(() => groupRows.reduce((sum, group) => sum + group.reviewable, 0), [groupRows]);
   const heldAll = useMemo(() => groupRows.reduce((sum, group) => sum + group.held, 0), [groupRows]);
 
-  const handlePrevWeek = () => {
-    const prev = new Date(currentMonday);
-    prev.setDate(prev.getDate() - 7);
-    setCurrentMonday(prev);
-  };
-
-  const handleNextWeek = () => {
-    const next = new Date(currentMonday);
-    next.setDate(next.getDate() + 7);
-    setCurrentMonday(next);
-  };
+  const handlePrevWeek = () => setWeekOffset((offset) => offset - 1);
+  const handleNextWeek = () => setWeekOffset((offset) => offset + 1);
 
   // Approve every pending, finished day this viewer is the reviewer of: one engineer's, or all.
   const handleApprove = async (employeeId = null) => {
@@ -358,10 +329,10 @@ export function TimelineLogsPage() {
             <h2>Project Gantt Timeline ({quarterTitle})</h2>
             <p>Visual schedule tracking of WBS node start / target due dates.</p>
           </div>
-          {serverDate && (
+          {todayLoaded && (
             <div className="server-date-badge">
               <span>Server Date: </span>
-              <strong>{serverDate.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</strong>
+              <strong>{today.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</strong>
             </div>
           )}
         </div>

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -103,6 +104,7 @@ const ROUTES = [
   [/\/api\/projects\/1\/wbs-structure$/, NODES],
   [/\/api\/projects\/1\/timesheet\?/, () => entriesData],
   [/\/api\/projects\/1\/timeline-logs$/, TIMELINE],
+  [/\/api\/server-date$/, () => ({ date: new Date().toISOString().slice(0, 10) })], // today, as the server says
 ];
 
 function fakeApi(url, options) {
@@ -135,9 +137,11 @@ function fakeApi(url, options) {
 
 function renderPage(route = '/weekly-logs?projectId=1&employeeId=3&weekStart=2026-09-21') {
   return render(
-    <MemoryRouter initialEntries={[route]}>
-      <EngineerWeeklyLogsPage />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={[route]}>
+        <EngineerWeeklyLogsPage />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
