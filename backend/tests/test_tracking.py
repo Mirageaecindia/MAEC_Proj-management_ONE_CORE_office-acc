@@ -438,3 +438,24 @@ def test_a_switch_that_cannot_happen_leaves_the_running_session_alone(client, db
 
     assert refused.status_code == 403
     assert client.post(HEARTBEAT, headers=world.eng_h).json()["active_session"]["id"] == first
+
+
+def test_coming_back_after_a_long_gap_past_the_mark_is_not_a_visit_that_saves_the_session(client, db, world, subtask):
+    """The browser reports "last visit: now" with the very heartbeat that brings the engineer
+    back. That visit must not excuse the two hours before it."""
+    session_id = _login(client, world, subtask)
+    _rewind(
+        db,
+        session_id,
+        logged_in=timedelta(hours=11),
+        last_seen=timedelta(hours=2),
+        last_visit=timedelta(hours=2, minutes=10),
+    )
+
+    response = client.post(HEARTBEAT, json={"last_active_at": NOON.isoformat()}, headers=world.eng_h)
+
+    assert response.json()["active_session"] is None  # closed, and not resumed
+    db.expire_all()
+    closed = db.get(models.TimeSession, session_id)
+    assert closed.ended_by == NO_VISIT and closed.logout_at == closed.last_active_at
+    assert closed.last_active_at.replace(tzinfo=UTC) == NOON - timedelta(hours=2, minutes=10)

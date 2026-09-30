@@ -165,7 +165,11 @@ class TrackingService:
                 resumed = self._resume_after_pause(user, now)
                 self.db.commit()
                 return self._state_for(resumed, employee_id, now)
-            if last_active_at is not None:  # the browser's clock may run ahead: never later than now
+            silent = now - as_utc(session.last_seen_at) > HEARTBEAT_GRACE
+            if last_active_at is not None and not silent:
+                # The browser's clock may run ahead: never later than now. A visit reported after
+                # a silence is the engineer coming back: it says nothing about the gap, which is
+                # judged on the visits known before it.
                 session.last_active_at = max(last_visit(session), min(as_utc(last_active_at), now))
             ended = self.settle(session, now, engineer_back=True)
             if ended is None:
