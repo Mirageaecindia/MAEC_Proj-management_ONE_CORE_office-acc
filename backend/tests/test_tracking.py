@@ -13,9 +13,18 @@ import models
 from app.core.database import SessionLocal
 from app.domain.timesheets import total_hours
 from app.repositories.tracking import TrackingRepository
+from app.services import tracking
 from app.services.tracking import BY_ENGINEER, LAPTOP_OFF, NO_VISIT, TrackingService, upsert_subtask_time_log
 
 START, HEARTBEAT, LOGOUT = (f"/api/subtask-tracking/{step}" for step in ("start", "heartbeat", "logout"))
+# The service's clock in these tests: noon UTC today, so "three hours ago" is the same
+# calendar day whatever time the suite runs.
+NOON = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
+
+
+@pytest.fixture(autouse=True)
+def at_noon(monkeypatch):
+    monkeypatch.setattr(tracking, "utcnow", lambda: NOON)
 
 
 @pytest.fixture
@@ -33,7 +42,7 @@ def _login(client, world, subtask):
 def _rewind(db, session_id, *, logged_in, last_seen, last_visit=None):
     """Move a session back in time: logged in `logged_in` ago, last heartbeat `last_seen` ago,
     last visit to the app `last_visit` ago (the login itself by default)."""
-    now = datetime.now(UTC)
+    now = NOON
     session = db.get(models.TimeSession, session_id)
     session.login_at, session.last_seen_at = now - logged_in, now - last_seen
     session.last_active_at = now - (logged_in if last_visit is None else last_visit)
@@ -75,7 +84,7 @@ def test_heartbeat_keeps_the_session_and_reports_it(client, db, world, subtask):
     assert response.json()["active_session"]["id"] == session_id
     db.expire_all()
     last_seen = db.get(models.TimeSession, session_id).last_seen_at.replace(tzinfo=UTC)
-    assert datetime.now(UTC) - last_seen < timedelta(seconds=5)
+    assert last_seen == NOON
 
 
 def test_laptop_off_pauses_the_time_and_the_session_resumes_by_itself(client, db, world, subtask):
@@ -178,24 +187,24 @@ def test_visits_keep_a_ten_hour_day_alive(client, db, world, subtask):
     session_id = _login(client, world, subtask)
     _rewind(db, session_id, logged_in=timedelta(hours=10), last_seen=timedelta(0), last_visit=timedelta(minutes=40))
 
-    response = client.post(HEARTBEAT, json={"last_active_at": datetime.now(UTC).isoformat()}, headers=world.eng_h)
+    response = client.post(HEARTBEAT, json={"last_active_at": NOON.isoformat()}, headers=world.eng_h)
 
     assert response.json()["active_session"]["id"] == session_id and response.json()["over_mark"] is True
     db.expire_all()
     session = db.get(models.TimeSession, session_id)
-    assert datetime.now(UTC) - session.last_active_at.replace(tzinfo=UTC) < timedelta(seconds=5)
+    assert session.last_active_at.replace(tzinfo=UTC) == NOON
 
 
 def test_a_reported_visit_is_never_in_the_future_nor_before_the_last_one(client, db, world, subtask):
     session_id = _login(client, world, subtask)
     _rewind(db, session_id, logged_in=timedelta(hours=1), last_seen=timedelta(0), last_visit=timedelta(minutes=10))
-    ahead = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    ahead = (NOON + timedelta(hours=1)).isoformat()
     client.post(HEARTBEAT, json={"last_active_at": ahead}, headers=world.eng_h)
     db.expire_all()
     clamped = db.get(models.TimeSession, session_id).last_active_at.replace(tzinfo=UTC)
-    assert datetime.now(UTC) - clamped < timedelta(seconds=5)
+    assert clamped == NOON
 
-    behind = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    behind = (NOON - timedelta(hours=3)).isoformat()
     client.post(HEARTBEAT, json={"last_active_at": behind}, headers=world.eng_h)
     db.expire_all()
     assert db.get(models.TimeSession, session_id).last_active_at.replace(tzinfo=UTC) == clamped
@@ -339,3 +348,59 @@ def test_two_tabs_resuming_at_once_bank_the_time_once(client, db, world, subtask
     assert resumed_a["id"] == resumed_b["id"]  # tab B sees tab A's result
     assert db.query(models.TimeSession).filter_by(status="active").count() == 1
     assert _banked_hours(db, subtask) == 1.0  # banked once
+
+
+def test_a_pause_is_never_resumed_on_a_later_day(client, db, world, subtask):
+    """Monday: 5 h worked, the laptop goes to sleep without a Logout. Tuesday: MAEC is opened.
+    Monday closes at its last signal and Tuesday starts from nothing, with a fresh Login."""
+    session_id = _login(client, world, subtask)
+    login_at = _rewind(db, session_id, logged_in=timedelta(hours=30), last_seen=timedelta(hours=25))
+
+    response = client.post(HEARTBEAT, headers=world.eng_h)
+
+    assert response.json()["active_session"] is None  # yesterday's subtask does not carry on by itself
+    db.expire_all()
+    monday = db.get(models.TimeSession, session_id)
+    assert (monday.status, monday.ended_by) == ("ended", LAPTOP_OFF)
+    assert monday.logout_at == login_at + timedelta(hours=5)
+    rows = db.query(models.TimeLogEntry).filter_by(task_id=subtask.id).all()
+    assert [(r.work_date, r.hours) for r in rows] == [(login_at.date(), 5.0)]
+    assert client.post(HEARTBEAT, headers=world.eng_h).json()["active_session"] is None  # nor on a later beat
+
+    tuesday = client.post(START, json={"subtask_id": subtask.id}, headers=world.eng_h)
+    assert tuesday.status_code == 201
+    assert client.post(HEARTBEAT, headers=world.eng_h).json()["over_mark"] is False  # the day starts at 0
+
+
+def test_the_sweep_closes_yesterdays_pause_for_good(client, db, world, subtask):
+    session_id = _login(client, world, subtask)
+    _rewind(db, session_id, logged_in=timedelta(hours=30), last_seen=timedelta(hours=25))
+
+    assert _sweep(db) == 1
+    assert client.post(HEARTBEAT, headers=world.eng_h).json()["active_session"] is None
+    assert db.query(models.TimeSession).filter_by(status="active").count() == 0
+
+
+def test_logout_is_a_visit(client, db, world, subtask):
+    session_id = _login(client, world, subtask)
+    _rewind(db, session_id, logged_in=timedelta(hours=5), last_seen=timedelta(0), last_visit=timedelta(hours=5))
+
+    client.post(LOGOUT, headers=world.eng_h)
+
+    db.expire_all()
+    session = db.get(models.TimeSession, session_id)
+    assert session.last_active_at == session.logout_at
+    assert tracking.unattended_seconds(session) == 0
+
+
+def test_a_reviewed_day_is_never_changed_by_a_late_session(db, world, governed, caplog):
+    project_id, node_a, *_ = governed
+    approved = db.query(models.TimeLogEntry).filter_by(task_id=node_a.id, approval_status="approved").one()
+
+    banked = upsert_subtask_time_log(db, project_id, node_a.id, world.emp1.id, approved.work_date, 3600)
+    db.commit()
+
+    assert banked is None
+    db.refresh(approved)
+    assert (approved.hours, approved.approval_status) == (30, "approved")
+    assert "Hours for a reviewed day were not banked" in caplog.text

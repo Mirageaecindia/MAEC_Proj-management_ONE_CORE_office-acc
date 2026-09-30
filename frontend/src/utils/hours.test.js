@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { groupByEngineer, rowsStatus, summarizeWeek, weekdayIndex, isOverMark } from './hours';
+import {
+  groupByEngineer,
+  rowsStatus,
+  summarizeWeek,
+  weekdayIndex,
+  isOverMark,
+  describeSession,
+} from './hours';
 
 const row = (overrides) => ({
   employee_id: 3,
@@ -57,5 +64,25 @@ describe('isOverMark', () => {
       true,
       false,
     ]);
+  });
+});
+
+describe('describeSession', () => {
+  const session = {
+    login_at: '2026-09-24T09:00:00',
+    logout_at: '2026-09-24T17:00:00',
+    last_visit_at: '2026-09-24T11:00:00',
+    ended_by: 'no_visit',
+    unattended: true,
+  };
+
+  it('names the last visit only for an unattended session', () => {
+    expect(describeSession(session)).toMatch(/last visit .* logged out by the system \(no visit\)$/);
+    expect(describeSession({ ...session, unattended: false, ended_by: 'engineer' })).toMatch(
+      / \u00b7 logged out$/,
+    );
+    expect(describeSession({ ...session, unattended: false, ended_by: 'engineer' })).not.toMatch(
+      /last visit/,
+    );
   });
 });

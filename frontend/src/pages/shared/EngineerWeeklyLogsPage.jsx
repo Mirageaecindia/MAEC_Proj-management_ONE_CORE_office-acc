@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
-import { HOURS_STATUS_LABELS, HOURS_STATUS_PILL, isOverMark } from '../../utils/hours';
+import { HOURS_STATUS_LABELS, HOURS_STATUS_PILL, describeSession, isOverMark } from '../../utils/hours';
 import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 
 export function EngineerWeeklyLogsPage() {
@@ -252,6 +252,19 @@ export function EngineerWeeklyLogsPage() {
                             over 8 h
                           </span>
                         )}
+                        {entry.unattended && (
+                          <span
+                            className="over-mark-flag is-unattended"
+                            title="A session on this day ended more than 2 hours after the engineer's last visit to the app"
+                          >
+                            unattended
+                          </span>
+                        )}
+                        {(entry.sessions || []).map((session) => (
+                          <small className="review-progress" key={session.login_at}>
+                            {describeSession(session)}
+                          </small>
+                        ))}
                       </td>
                       <td className="col-approval">
                         <span
@@ -276,6 +289,16 @@ export function EngineerWeeklyLogsPage() {
                                   onClick={() => decide(entry, 'approve')}
                                 >
                                   Approve
+                                </button>
+                              )}
+                              {pending && entry.unattended && (
+                                <button
+                                  type="button"
+                                  className="review-btn review-approve"
+                                  title="Approve only the time up to the engineer's last visit; the rest is kept on the row as not approved"
+                                  onClick={() => decide(entry, 'approve-attended')}
+                                >
+                                  Approve up to last visit ({entry.attended_hours} h)
                                 </button>
                               )}
                               <button

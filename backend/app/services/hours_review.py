@@ -8,18 +8,26 @@ Hours are approved per day, per subtask, per engineer:
    over, or the lead is the engineer themselves): the BU Head.
 Nobody approves their own hours, and no hours are left without a reviewer.
 
-Only finished days are reviewed. Usage counts each day as it is approved; the
-week is nothing more than the sum of its days.
+Only finished days are reviewed, and only once every session the engineer
+started on that day has closed, so a reviewed row never changes afterwards.
+Usage counts each day as it is approved; the week is nothing more than the sum
+of its days.
+
+A session the system closed long after the engineer's last visit is flagged
+"unattended" on its day's row. The reviewer may then approve the day only up to
+the last visit: the rest stays on the row as trimmed hours and in the audit log.
 """
 
+from collections import defaultdict
 from collections.abc import Iterable
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy.orm import Session
 
 import models
 from app.core.errors import BadRequestError, ConflictError, ForbiddenError
 from app.core.roles import Role
+from app.core.security import as_utc
 from app.domain.timesheets import (
     APPROVED,
     PENDING_REVIEW,
@@ -28,6 +36,8 @@ from app.domain.timesheets import (
     review_transition,
     reviewable,
 )
+from app.repositories.tracking import ACTIVE, ENDED
+from app.services.tracking import unattended_seconds
 
 BU_HEAD = None  # reviewer id meaning "the BU Head"
 NOT_YOUR_HOURS = (
@@ -35,12 +45,53 @@ NOT_YOUR_HOURS = (
     "or they are a project lead's own."
 )
 DAY_NOT_OVER = "A day is reviewed once it is over (yesterday or earlier)."
+SESSION_STILL_OPEN = (
+    "The engineer is still logged in to a session started on that day. Review it once the session has closed."
+)
+NOTHING_UNATTENDED = "No unattended time on this day: approve or reject it as a whole."
+NOTHING_ATTENDED = "Nothing on this day was attended: reject it instead."
 HOURS_UNAPPROVED = "hours_unapproved"  # GovernanceAction.action: approved hours taken back, with the reason
+HOURS_PARTLY_APPROVED = "hours_partly_approved"  # GovernanceAction.action: approved up to the last visit
+
+RowKey = tuple[int, int, date]  # (subtask id, employee id, day)
 
 
 def tasks_by_id(db: Session, entries: Iterable[models.TimeLogEntry]) -> dict[int, models.WbsNode]:
     ids = {entry.task_id for entry in entries}
     return {node.id: node for node in db.query(models.WbsNode).filter(models.WbsNode.id.in_(ids))} if ids else {}
+
+
+def row_key(entry: models.TimeLogEntry) -> RowKey:
+    return entry.task_id, entry.employee_id, entry.work_date
+
+
+def sessions_by_row(db: Session, entries: Iterable[models.TimeLogEntry]) -> dict[RowKey, list[models.TimeSession]]:
+    """The closed Login/Logout sessions behind each day's row, in one query."""
+    entries = list(entries)
+    if not entries:
+        return {}
+    days = [entry.work_date for entry in entries]
+    session = models.TimeSession
+    rows = (
+        db.query(session)
+        .filter(
+            session.status == ENDED,
+            session.subtask_id.in_({entry.task_id for entry in entries}),
+            session.employee_id.in_({entry.employee_id for entry in entries}),
+            session.login_at >= datetime.combine(min(days), time.min, tzinfo=UTC),
+            session.login_at < datetime.combine(max(days) + timedelta(days=1), time.min, tzinfo=UTC),
+        )
+        .order_by(session.login_at)
+    )
+    grouped: dict[RowKey, list[models.TimeSession]] = defaultdict(list)
+    for row in rows:
+        grouped[(row.subtask_id, row.employee_id, as_utc(row.login_at).date())].append(row)
+    return grouped
+
+
+def trimmed_hours(sessions: Iterable[models.TimeSession]) -> float:
+    """Hours between the last visit and the close of the row's unattended sessions."""
+    return round(sum(unattended_seconds(session) for session in sessions) / 3600, 2)
 
 
 class HoursReview:
@@ -67,6 +118,12 @@ class HoursReview:
             )
         }
         self._active_leads = {user_id for user_id, employee_id in rows if employee_id not in ended}
+        open_sessions = db.query(models.TimeSession.employee_id, models.TimeSession.login_at).filter_by(status=ACTIVE)
+        self._open_days = {(employee_id, as_utc(login_at).date()) for employee_id, login_at in open_sessions}
+
+    def session_open(self, entry: models.TimeLogEntry) -> bool:
+        """The engineer still has a session running that started on the row's day."""
+        return (entry.employee_id, entry.work_date) in self._open_days
 
     def reviewer(self, task: models.WbsNode | None, employee_id: int) -> int | None:
         """The user id who approves this engineer's hours on this task, or BU_HEAD."""
@@ -95,6 +152,8 @@ class HoursReview:
             raise ForbiddenError(NOT_YOUR_HOURS)
         if not reviewable(entry.work_date, self.today):
             raise ConflictError(DAY_NOT_OVER)
+        if self.session_open(entry):
+            raise ConflictError(SESSION_STILL_OPEN)
         problem = review_transition(entry.approval_status, action, reason)
         if problem == REASON_REQUIRED:
             raise BadRequestError(problem)
@@ -114,6 +173,38 @@ class HoursReview:
         entry.approval_status, entry.reviewed_by, entry.reviewed_at = action, reviewer, now
         entry.review_reason = (reason or "").strip() or None
 
+    def approve_attended(
+        self,
+        user: models.User,
+        entry: models.TimeLogEntry,
+        task: models.WbsNode | None,
+        sessions: Iterable[models.TimeSession],
+        now: datetime,
+    ) -> None:
+        """Approve a pending day only up to the engineer's last visit. The unattended rest
+        stays on the row as trimmed hours and is audited. Same guards as `review`."""
+        trimmed = trimmed_hours(sessions)
+        if trimmed <= 0:
+            raise BadRequestError(NOTHING_UNATTENDED)
+        logged = entry.hours
+        attended = round(logged - trimmed, 2)
+        if attended <= 0:
+            raise BadRequestError(NOTHING_ATTENDED)
+        self.review(user, entry, task, APPROVED, None, now)
+        entry.hours, entry.trimmed_hours = attended, trimmed
+        task_name = task.task_name if task is not None else entry.task_name or f"task #{entry.task_id}"
+        entry.review_reason = (
+            f"Approved up to the last visit: {attended:g} of {logged:g} h; {trimmed:g} h unattended not approved."
+        )
+        self.db.add(
+            models.GovernanceAction(
+                project_id=entry.project_id,
+                action=HOURS_PARTLY_APPROVED,
+                comments=f"{entry.work_date.isoformat()} ({task_name}): {entry.review_reason}",
+                created_by=entry.reviewed_by,
+            )
+        )
+
     def review_pending(
         self,
         user: models.User,
@@ -130,6 +221,7 @@ class HoursReview:
             for entry in entries
             if entry.approval_status == PENDING_REVIEW
             and reviewable(entry.work_date, self.today)
+            and not self.session_open(entry)
             and self.may_review(user, tasks.get(entry.task_id), entry.employee_id)
         ]
         decided = [entry for entry in mine if not over_mark(entry)]

@@ -48,7 +48,15 @@ from app.services.booking_approval import BOOKING_APPROVAL_LABELS, booking_appro
 from app.services.governance import extension_request_output, find_pending_extension_request
 from app.services.metrics import executive_dashboard_data
 from app.services.governance_monitor import enforce_governance
-from app.services.hours_review import NOT_YOUR_HOURS, HoursReview, tasks_by_id
+from app.services.hours_review import (
+    NOT_YOUR_HOURS,
+    HoursReview,
+    row_key,
+    sessions_by_row,
+    tasks_by_id,
+    trimmed_hours,
+)
+from app.services.tracking import last_visit, unattended_seconds
 from app.services.wbs_outline import import_outline, looks_like_outline
 from app.services.wbs_delete import delete_nodes
 from app.services.tracking import sweep_forever
@@ -765,11 +773,14 @@ def time_entries_output(db: Session, entries: list, project: models.Project, use
         {e.id: e for e in db.query(models.Employee).filter(models.Employee.id.in_(employee_ids))} if employee_ids else {}
     )
     review = HoursReview(db, project, date.today())
+    sessions = sessions_by_row(db, entries)
     out = []
     for entry in entries:
         task = tasks.get(entry.task_id)
         employee = employees.get(entry.employee_id)
-        finished = entry.work_date < review.today
+        finished = entry.work_date < review.today and not review.session_open(entry)
+        row_sessions = sessions.get(row_key(entry), [])
+        unattended = trimmed_hours(row_sessions) if entry.trimmed_hours is None else 0
         out.append({
             "id": entry.id,
             "project_id": entry.project_id,
@@ -786,6 +797,20 @@ def time_entries_output(db: Session, entries: list, project: models.Project, use
             "review_reason": entry.review_reason,
             "finished": finished,
             "can_review": finished and review.may_review(user, task, entry.employee_id),
+            # The sessions behind the row, for the reviewer: when the engineer was last seen in the app.
+            "sessions": [
+                {
+                    "login_at": s.login_at,
+                    "logout_at": s.logout_at,
+                    "last_visit_at": last_visit(s),
+                    "ended_by": s.ended_by,
+                    "unattended": unattended_seconds(s) > 0,
+                }
+                for s in row_sessions
+            ],
+            "unattended": unattended > 0,
+            "attended_hours": round(entry.hours - unattended, 2) if unattended > 0 else None,
+            "trimmed_hours": entry.trimmed_hours,
         })
     return out
 
@@ -1445,8 +1470,11 @@ def request_extension(
     return action
 
 
-def review_time_log(db: Session, entry_id: int, user: models.User, action: str, reason: Optional[str]):
-    """One day's hours: approved or rejected by its reviewer (app/services/hours_review.py)."""
+def review_time_log(
+    db: Session, entry_id: int, user: models.User, action: str, reason: Optional[str], attended_only: bool = False
+):
+    """One day's hours: approved (wholly, or only up to the engineer's last visit) or rejected
+    by its reviewer (app/services/hours_review.py)."""
     entry = db.query(models.TimeLogEntry).filter_by(id=entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Time log entry not found.")
@@ -1456,7 +1484,11 @@ def review_time_log(db: Session, entry_id: int, user: models.User, action: str, 
     if project.timesheets_soft_locked:
         raise HTTPException(status_code=409, detail=TIMESHEETS_LOCKED)
     task = db.query(models.WbsNode).filter_by(id=entry.task_id).first()
-    HoursReview(db, project, date.today()).review(user, entry, task, action, reason, datetime.now(timezone.utc))
+    review, now = HoursReview(db, project, date.today()), datetime.now(timezone.utc)
+    if attended_only:
+        review.approve_attended(user, entry, task, sessions_by_row(db, [entry]).get(row_key(entry), []), now)
+    else:
+        review.review(user, entry, task, action, reason, now)
     db.commit()
     enforce_governance(db, entry.project_id)  # usage = approved hours: alerts / auto-lock
     db.refresh(entry)
@@ -1470,6 +1502,17 @@ def approve_time_log(
     db: Session = Depends(get_db),
 ):
     return review_time_log(db, entry_id, user, APPROVED, None)
+
+
+@app.post("/api/time-log-entries/{entry_id}/approve-attended")
+def approve_attended_time_log(
+    entry_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Approve an unattended day only up to the engineer's last visit; the rest is kept on the
+    row as trimmed hours and audited."""
+    return review_time_log(db, entry_id, user, APPROVED, None, attended_only=True)
 
 
 @app.post("/api/time-log-entries/{entry_id}/reject")

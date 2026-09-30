@@ -5,14 +5,13 @@ lead (Anita) and one under the Mechanical lead (Priya), 8 h each on one day
 last week.
 """
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 from test_project_roles import _approve_booking
 
 import models
 from app.repositories.work import WorkRepository
-from app.services.tracking import upsert_subtask_time_log
 from factories import PASSWORD, WEEK
 
 DAY = WEEK  # a Monday in the past
@@ -146,17 +145,88 @@ def test_the_bu_head_is_blocked_by_the_lock_like_the_leads(client, db, make, wor
     assert _status(db, own_row) == "pending_review"
 
 
-def test_more_hours_on_a_reviewed_day_need_review_again(client, db, world, split):
-    project_id, row_e, row_m = split
-    assert _row(client, world.lead_h, row_e.id).status_code == 200
+def _session(make, row, *, login, logout=None, last_visit=None, ended_by=None):
+    """A Login/Logout session behind a day's row (times are hours into the row's day, UTC)."""
+    at = lambda hour: datetime.combine(row.work_date, time.min, tzinfo=UTC) + timedelta(hours=hour)  # noqa: E731
+    return make._save(
+        models.TimeSession(
+            project_id=row.project_id,
+            task_id=row.task_id,
+            subtask_id=row.task_id,
+            employee_id=row.employee_id,
+            login_at=at(login),
+            last_seen_at=at(logout if logout is not None else login),
+            last_active_at=at(last_visit if last_visit is not None else login),
+            logout_at=at(logout) if logout is not None else None,
+            active_seconds=int((logout - login) * 3600) if logout is not None else 0,
+            status="ended" if logout is not None else "active",
+            ended_by=ended_by,
+        )
+    )
 
-    db.expire_all()  # the approval happened through the API
-    upsert_subtask_time_log(db, project_id, row_e.task_id, world.emp1.id, DAY, 3600)  # a session crossing midnight
+
+def test_a_day_is_not_reviewed_while_a_session_started_on_it_is_open(client, db, make, world, split):
+    project_id, row_e, _ = split
+    running = _session(make, row_e, login=20)  # still running overnight
+    anita = _headers(client, "lead.e")
+
+    refused = _row(client, anita, row_e.id)
+    assert refused.status_code == 409 and "still logged in" in refused.json()["detail"]
+    assert _bulk(client, anita, project_id).status_code == 409
+    listed = client.get(f"/api/projects/{project_id}/timesheet?week_start={WEEK.isoformat()}", headers=anita).json()
+    assert {row["id"]: (row["finished"], row["can_review"]) for row in listed}[row_e.id] == (False, False)
+
+    running.status, running.logout_at = "ended", running.login_at + timedelta(hours=2)
     db.commit()
+    assert _row(client, anita, row_e.id).status_code == 200
 
-    assert _status(db, row_e) == "pending_review"  # never counted as approved without a review
-    assert db.get(models.TimeLogEntry, row_e.id).hours == 9.0
-    assert WorkRepository(db).approved_hours(project_id) == 0.0
+
+def test_the_row_shows_its_sessions_and_flags_an_unattended_one(client, db, make, world, split):
+    project_id, row_e, row_m = split
+    _session(make, row_e, login=9, logout=17, last_visit=17, ended_by="engineer")  # logged out by hand
+    _session(make, row_m, login=9, logout=17, last_visit=11, ended_by="laptop_off")  # six hours after the last visit
+
+    listed = client.get(f"/api/projects/{project_id}/timesheet?week_start={WEEK.isoformat()}", headers=world.bu_h)
+    rows = {row["id"]: row for row in listed.json()}
+
+    attended, unattended = rows[row_e.id], rows[row_m.id]
+    assert (attended["unattended"], attended["attended_hours"]) == (False, None)
+    assert (unattended["unattended"], unattended["attended_hours"]) == (True, 2.0)
+    (session,) = unattended["sessions"]
+    assert session["ended_by"] == "laptop_off" and session["unattended"] is True
+    assert [session[key][11:16] for key in ("login_at", "logout_at", "last_visit_at")] == ["09:00", "17:00", "11:00"]
+
+
+def test_approve_up_to_the_last_visit_keeps_the_rest_as_trimmed_hours(client, db, make, world, split):
+    project_id, row_e, row_m = split
+    _session(make, row_m, login=9, logout=17, last_visit=11, ended_by="laptop_off")
+    priya = _headers(client, "lead.m")
+
+    assert client.post(f"/api/time-log-entries/{row_m.id}/approve-attended", headers=world.lead_h).status_code == 403
+    response = client.post(f"/api/time-log-entries/{row_m.id}/approve-attended", headers=priya)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["hours"], body["trimmed_hours"], body["approval_status"]) == (2.0, 6.0, "approved")
+    assert (body["unattended"], body["attended_hours"]) == (False, None)  # decided: no longer flagged
+    assert "2 of 8 h; 6 h unattended not approved" in body["review_reason"]
+    assert WorkRepository(db).approved_hours(project_id) == 2.0  # only the attended hours count
+    audit = db.query(models.GovernanceAction).filter_by(project_id=project_id, action="hours_partly_approved").one()
+    assert "6 h unattended not approved" in audit.comments and audit.created_by == "Priya Nair"
+
+    # A day with nothing unattended is approved or rejected as a whole.
+    whole = client.post(f"/api/time-log-entries/{row_e.id}/approve-attended", headers=_headers(client, "lead.e"))
+    assert whole.status_code == 400 and "as a whole" in whole.json()["detail"]
+
+
+def test_a_day_with_no_attended_time_is_rejected_not_partly_approved(client, db, make, world, split):
+    _, _, row_m = split
+    _session(make, row_m, login=9, logout=17, last_visit=9, ended_by="laptop_off")
+
+    response = client.post(f"/api/time-log-entries/{row_m.id}/approve-attended", headers=_headers(client, "lead.m"))
+
+    assert response.status_code == 400 and "reject it instead" in response.json()["detail"]
+    assert _status(db, row_m) == "pending_review"
 
 
 def test_the_bu_head_approves_a_task_its_lead_worked_on(client, db, make, world):

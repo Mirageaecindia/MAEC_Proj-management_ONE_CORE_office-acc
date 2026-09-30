@@ -20,6 +20,12 @@ but the engineer must visit the app at least every VISIT_GRACE; otherwise the
 session is closed at their last visit (or at the mark, if that came later) and
 does not resume by itself. A forgotten Logout costs at most the grace.
 
+A session's time always goes to the day it started, and a pause is only ever
+resumed on that same calendar day: the next morning the engineer logs in afresh,
+so yesterday's subtask never carries on by itself. A day's row that has been
+reviewed is never changed by a later Logout (review waits for the day's
+sessions to close, see app/services/hours_review.py).
+
 One rule (`settle`) decides all of this, applied by the heartbeat when the
 engineer is back and by a server-side sweep every few minutes when they are
 not, so a closed browser never leaves a session open for long.
@@ -53,6 +59,7 @@ HEARTBEAT_GRACE = timedelta(minutes=5)  # the browser beats every minute; backgr
 DAILY_MARK_SECONDS = DAILY_MARK_HOURS * 3600  # past this, the visit rule applies
 VISIT_GRACE = timedelta(minutes=30)
 SWEEP_INTERVAL = timedelta(minutes=5)
+UNATTENDED_GAP = timedelta(hours=2)  # a session the system closed this long after the last visit is flagged
 
 # TimeSession.ended_by
 BY_ENGINEER = "engineer"  # pressed Logout
@@ -60,6 +67,10 @@ LAPTOP_OFF = "laptop_off"  # heartbeats stopped; closed at the last one and resu
 NO_VISIT = "no_visit"  # past the daily mark without a visit for VISIT_GRACE; closed at the last visit
 SUBTASK_DELETED = "subtask_deleted"  # the subtask was deleted while the engineer was logged in
 PROJECT_ARCHIVED = "project_archived"  # the BU Head archived the project while the engineer was logged in
+
+
+def utcnow() -> datetime:
+    return datetime.now(UTC)
 
 
 def upsert_subtask_time_log(
@@ -85,10 +96,17 @@ def upsert_subtask_time_log(
             approval_status=PENDING_REVIEW,
         )
         db.add(entry)
-    entry.hours = round((entry.hours or 0) + hours, 2)
     if entry.approval_status != PENDING_REVIEW:
-        # More hours on a reviewed day (a session that started the day before) need review too.
-        entry.approval_status, entry.reviewed_by, entry.reviewed_at = PENDING_REVIEW, None, None
+        # Can't happen: a day is not reviewed while one of its sessions is open. A reviewed
+        # row is never changed; the session keeps its own record of the time.
+        log.error(
+            "Hours for a reviewed day were not banked: entry %s (%s), %s h from a late session",
+            entry.id,
+            entry.approval_status,
+            hours,
+        )
+        return None
+    entry.hours = round((entry.hours or 0) + hours, 2)
     return entry
 
 
@@ -109,6 +127,15 @@ def end_session(
 
 def last_visit(session: models.TimeSession) -> datetime:
     return as_utc(session.last_active_at or session.login_at)
+
+
+def unattended_seconds(session: models.TimeSession) -> int:
+    """Seconds between the engineer's last visit and the end of a closed session, when that
+    is long enough (UNATTENDED_GAP) for the reviewer to look at; otherwise 0."""
+    if session.logout_at is None:
+        return 0
+    gap = as_utc(session.logout_at) - max(last_visit(session), as_utc(session.login_at))
+    return int(gap.total_seconds()) if gap > UNATTENDED_GAP else 0
 
 
 def _state(session: models.TimeSession | None, **extra) -> dict:
@@ -136,7 +163,7 @@ class TrackingService:
         """The app is open: keep the session alive, resume it after the laptop was off, or
         end it when the engineer is past the daily mark and hasn't visited for VISIT_GRACE."""
         employee_id = _employee_id(user)
-        now = datetime.now(UTC)
+        now = utcnow()
         session = self.sessions.active_session(employee_id)
         try:
             if session is None:
@@ -167,7 +194,7 @@ class TrackingService:
         refusal = self._refusal(user, node)
         if refusal is not None:
             raise refusal
-        session = self._open(user, node, datetime.now(UTC))
+        session = self._open(user, node, utcnow())
         self.db.commit()
         return _state(session)
 
@@ -175,9 +202,11 @@ class TrackingService:
         session = self.sessions.active_session(_employee_id(user))
         if session is None:  # already logged out, e.g. from another tab
             return _state(None, over_mark=False)
-        now = datetime.now(UTC)
+        now = utcnow()
         try:
             mark_at = self._mark_at(session)
+            if now - as_utc(session.last_seen_at) <= HEARTBEAT_GRACE:
+                session.last_active_at = now  # pressing Logout is a visit
             end_session(self.db, session, now, BY_ENGINEER)
             self.db.commit()
         except StaleDataError:
@@ -211,7 +240,7 @@ class TrackingService:
         """Settle every session whose browser has gone quiet, so a closed laptop never
         leaves hours unbanked. Runs every SWEEP_INTERVAL (see `sweep_forever`).
         Returns how many sessions it closed."""
-        now = now or datetime.now(UTC)
+        now = now or utcnow()
         closed, projects = 0, set()
         for session in self.sessions.silent_sessions(now - HEARTBEAT_GRACE):
             if self.settle(session, now, engineer_back=False) is not None:
@@ -250,6 +279,8 @@ class TrackingService:
         return self._resume(user, last, now) if last is not None and last.ended_by == LAPTOP_OFF else None
 
     def _resume(self, user: models.User, paused: models.TimeSession, now: datetime) -> models.TimeSession | None:
+        if as_utc(paused.logout_at).date() != now.date():
+            return None  # never across a calendar day: the engineer logs in afresh
         node = self.sessions.node(paused.subtask_id)
         if node is None or self._refusal(user, node) is not None:
             paused.ended_by = BY_ENGINEER  # nothing to come back to: the pause is final

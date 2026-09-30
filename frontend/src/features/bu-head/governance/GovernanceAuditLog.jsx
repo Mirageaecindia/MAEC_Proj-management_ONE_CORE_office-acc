@@ -9,6 +9,7 @@ const ACTION_TEXT = {
     `Timesheets locked automatically at ${formatPercent(entry.consumption_pct)} of the baseline`,
   resume_execution: () => 'Resumed execution',
   hours_unapproved: () => 'Approved hours taken back',
+  hours_partly_approved: () => 'Hours approved up to the last visit',
   archive: () => 'Archived the project',
   unarchive: () => 'Reopened the project',
 };

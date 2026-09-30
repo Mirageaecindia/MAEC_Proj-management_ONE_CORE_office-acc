@@ -10,6 +10,24 @@ export const DAILY_MARK_HOURS = 8;
 
 export const isOverMark = (hours) => Number(hours) > DAILY_MARK_HOURS;
 
+const SESSION_END_LABELS = {
+  engineer: 'logged out',
+  laptop_off: 'laptop off',
+  no_visit: 'logged out by the system (no visit)',
+  subtask_deleted: 'subtask deleted',
+  project_archived: 'project archived',
+};
+
+const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+/** One line per Login/Logout session behind a day's row: "09:00 – 17:00 · last visit 11:00 · laptop off". */
+export function describeSession(session) {
+  const parts = [`${clock(session.login_at)} – ${clock(session.logout_at)}`];
+  if (session.unattended) parts.push(`last visit ${clock(session.last_visit_at)}`);
+  parts.push(SESSION_END_LABELS[session.ended_by] || 'ended');
+  return parts.join(' · ');
+}
+
 export const HOURS_STATUS_LABELS = {
   pending_review: 'Pending review',
   approved: 'Approved',

@@ -107,17 +107,19 @@ const ROUTES = [
 
 function fakeApi(url, options) {
   const method = (options && options.method) || 'GET';
-  const decision = url.match(/\/time-log-entries\/(\d+)\/(approve|reject)$/);
+  const decision = url.match(/\/time-log-entries\/(\d+)\/(approve-attended|approve|reject)$/);
   if (method === 'POST' && decision) {
     const [, id, action] = decision;
     const reason = JSON.parse(options.body).reason;
+    const attendedOnly = action === 'approve-attended';
     entriesData = entriesData.map((entry) =>
       String(entry.id) === id
         ? {
             ...entry,
-            approval_status: action === 'approve' ? 'approved' : 'rejected',
+            approval_status: action === 'reject' ? 'rejected' : 'approved',
             reviewed_by: 'Anita Kumar',
-            review_reason: reason,
+            review_reason: attendedOnly ? 'Approved up to the last visit: 2 of 8 h' : reason,
+            ...(attendedOnly ? { hours: entry.attended_hours, unattended: false, attended_hours: null } : {}),
           }
         : entry,
     );
@@ -195,6 +197,38 @@ describe('Reviewing days on the Engineer Weekly Logs page', () => {
     expect(await screen.findByText('Approved')).toBeTruthy();
     expect(screen.getByText('by Anita Kumar')).toBeTruthy();
     expect(screen.getAllByRole('button', { name: 'Approve' })).toHaveLength(1); // the other day is still pending
+  });
+
+  it('shows an unattended session and approves the day up to the last visit', async () => {
+    entriesData = entriesData.map((entry, index) =>
+      index === 0
+        ? {
+            ...entry,
+            hours: 8,
+            can_review: true,
+            unattended: true,
+            attended_hours: 2,
+            sessions: [
+              {
+                login_at: '2026-09-24T09:00:00Z',
+                logout_at: '2026-09-24T17:00:00Z',
+                last_visit_at: '2026-09-24T11:00:00Z',
+                ended_by: 'laptop_off',
+                unattended: true,
+              },
+            ],
+          }
+        : entry,
+    );
+    renderPage();
+
+    expect(await screen.findByText('unattended')).toBeTruthy();
+    expect(screen.getByText(/last visit .* laptop off/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve up to last visit (2 h)' }));
+
+    expect(await screen.findByText(/Approved up to the last visit: 2 of 8 h/)).toBeTruthy();
+    expect(screen.queryByText('unattended')).toBeNull();
+    expect(screen.getByText('2.00 hrs')).toBeTruthy();
   });
 
   it('taking approved hours back asks for a reason and shows it', async () => {

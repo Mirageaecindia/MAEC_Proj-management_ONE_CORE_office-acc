@@ -278,6 +278,7 @@ class TimeLogEntry(Base):
     employee_id = Column(Integer, nullable=False, index=True)
     work_date = Column(Date, nullable=False, index=True)
     hours = Column(Float, nullable=False, default=0)
+    trimmed_hours = Column(Float, nullable=True)  # logged but left out by "approve up to the last visit"
     approval_status = Column(String(20), nullable=False, default="pending_review", index=True)
     reviewed_by = Column(String(150), nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
