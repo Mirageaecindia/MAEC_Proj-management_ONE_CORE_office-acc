@@ -435,6 +435,7 @@ export function ExecutiveDashboardPage() {
                       {entry.action === 'stop_execution' && 'Stopped execution'}
                       {entry.action === 'hours_unapproved' && 'Approved hours taken back'}
                       {entry.action === 'hours_partly_approved' && 'Hours approved up to the last visit'}
+                      {entry.action === 'hours_reapproved' && 'Rejected hours approved again'}
                       {entry.comments && ` — ${entry.comments}`}
                       {entry.created_by && ` by ${entry.created_by}`}
                     </span>

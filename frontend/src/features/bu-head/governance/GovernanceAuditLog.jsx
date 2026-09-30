@@ -10,6 +10,7 @@ const ACTION_TEXT = {
   resume_execution: () => 'Resumed execution',
   hours_unapproved: () => 'Approved hours taken back',
   hours_partly_approved: () => 'Hours approved up to the last visit',
+  hours_reapproved: () => 'Rejected hours approved again',
   archive: () => 'Archived the project',
   unarchive: () => 'Reopened the project',
 };

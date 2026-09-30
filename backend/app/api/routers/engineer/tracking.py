@@ -15,6 +15,7 @@ router = APIRouter(prefix="/subtask-tracking", tags=["tracking"])
 
 class TrackingStart(BaseModel):
     subtask_id: int
+    switch: bool = False  # end the session running on another subtask and start this one
 
 
 class Heartbeat(BaseModel):
@@ -38,7 +39,7 @@ def start(
     user: models.User = Depends(require_staff),
     service: TrackingService = Depends(get_tracking_service),
 ):
-    return service.start(user, payload.subtask_id)
+    return service.start(user, payload.subtask_id, payload.switch)
 
 
 @router.post("/logout")

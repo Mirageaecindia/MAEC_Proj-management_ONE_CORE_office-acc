@@ -14,7 +14,7 @@ Scope: the whole application (backend, frontend, database), reviewed and tested 
 | Migrations | 8 revisions; a test builds a fresh database from them and checks it matches the models exactly |
 | Fixes in this pass | 12 defects found and fixed (§2); none open in the code that was reviewed |
 
-**Release recommendation.** The code is in good shape for a v1.0 pilot with internal users, once the go-live checklist in §6 is done. Two items were declared go-live blockers by product decision and are **not built yet**: keeping hours over 8 a day (H1) and corrections of hours logged on the wrong subtask (H2). Until H2 exists, a lead's only way to fix a wrong day is to reject it, which discards real time. Two security items (S1 rotate the Azure secret, S2 purge the secret and the HR file from git history) must be done before the repository or the app is exposed beyond the team.
+**Release recommendation.** The code is in good shape for a v1.0 pilot with internal users, once the go-live checklist in §6 is done. Update 2026-09-30: H1 (hours over 8 a day) is built, with the visit rule and the unattended flag. H2 (corrections) was dropped by decision: hours stay on the subtask they were logged on, rejected hours can be approved again by a lead of the project within 7 days, and switching subtasks is one step. A manual walk-through of the timesheet flow is still to be done. Two security items (S1 rotate the Azure secret, S2 purge the secret and the HR file from git history) must be done before the repository or the app is exposed beyond the team.
 
 ## 2. Defects found and fixed in this pass
 
@@ -45,7 +45,7 @@ Earlier in the same release cycle (28 Sep) the review also removed a per-render 
 ### 3.2 Business rules verified by tests
 - **Roles:** BU Head or engineer accounts; lead is a role on a project (`project_role`). A person can lead one project and work on another with one login; every lead action requires the lead role on that project.
 - **Leads:** chosen per project with a period and %, stored as approved `role="lead"` bookings; capacity = the busiest day across all active projects ≤ 100% (`peak_allocation`); a lead can't be booked as an engineer on their project; one person per slot.
-- **Hours:** only Login/Logout on subtasks; Logout − Login, paused by a 5-minute heartbeat silence, resumed on the same subtask, 8 h/day cap; one row per subtask, engineer and day; approved per finished day by the task's lead, else the BU Head (leads' own hours, tasks without an active lead); transitions pending → approved/rejected, approved → rejected with a reason (audited), rejected → approved never; more hours on a reviewed day reopen it.
+- **Hours:** only Login/Logout on subtasks; Logout − Login, paused by a 5-minute heartbeat silence, resumed on the same subtask, 8 h/day cap; one row per subtask, engineer and day; approved per finished day by the task's lead, else the BU Head (leads' own hours, tasks without an active lead); transitions pending → approved/rejected, approved → rejected with a reason (audited), rejected → approved only within 7 days by a lead of the project or the BU Head, with a reason (audited); a reviewed day never changes.
 - **Governance:** usage = approved hours; alert at the threshold, automatic lock at 100% of target + approved extensions; a manual stop is never lifted automatically; nobody approves hours while locked; an approved extension that leaves usage at or above 100% keeps the lock.
 - **Projects:** unique code; edit audited field by field; replacing a lead moves their WBS nodes; archive = read-only for everyone (flush-time guard), hidden from leads and engineers, ended tracking sessions banked; delete only without history.
 - **Access:** engineers see a project only after the BU Head approves their booking; leads see their projects; archived projects are hidden.
@@ -102,9 +102,8 @@ W1 the BU Head's Timeline view is thin; W3 the Resource Booking page keeps its o
 | `resource_bookings` | Engineer bookings and lead assignments | `role` (`engineer` / `lead`), `utilization_rate`, dates, `approval_status`; indexed by project, employee, role, status |
 | `wbs_nodes` | Tasks and subtasks (2 levels) | `parent_id`, `phase`, assigned lead (user id) and engineer (employee id), dates, status |
 | `wbs_node_history` | Status changes and comments | by node and project |
-| `hours_corrections` | Requests to move a day's hours between an engineer's subtasks; the audit trail of every move | `from_task_id`, `to_task_id`, `hours`, `status` (pending, approved, rejected, cancelled), `requested_by`, `decided_by/at`, `decision_reason` |
 | `time_sessions` | Login/Logout sessions | `login_at`, `last_seen_at`, `last_active_at` (last visit), `logout_at`, `active_seconds`, `ended_by`, `version_id` (optimistic lock) |
-| `time_log_entries` | One day's hours per subtask and engineer; outlives the subtask | **unique** (project, task, employee, work_date); `approval_status`, `reviewed_by/at`, `review_reason`; `task_name` kept when the subtask is deleted; `trimmed_hours` left out by "approve up to last visit" |
+| `time_log_entries` | One day's hours per subtask and engineer; outlives the subtask | **unique** (project, task, employee, work_date); `approval_status`, `reviewed_by/at`, `review_reason`; `task_name` kept when the subtask is deleted; `trimmed_hours` left out by "approve up to last visit"; `reviewed_by_user_id` |
 | `governance_actions` | Audit log (stop, resume, lock, extension decisions, edits, archive, hours taken back) | by project |
 | `extension_requests` | Extra-hours requests and decisions | by project, requester, status |
 | `notifications` | Per-role or per-user notifications | by recipient role / user / project |
@@ -114,12 +113,12 @@ W1 the BU Head's Timeline view is thin; W3 the Resource Booking page keeps its o
 ### 5.3 Integrity notes
 - Referential integrity is enforced in code (project delete removes children explicitly; the archive guard refuses writes at flush time). There are **no database foreign keys** yet (E5); adding them before Postgres goes live is recommended.
 - Unique constraints cover the identities that matter (username, employee code, project code, one hours row per day).
-- Migration chain 0001 → 0012 is verified by `tests/test_migrations.py` (fresh build equals the models) and by data migration tests for 0006 (lead accounts → engineers) and 0007 (week decisions → rows). 0008 drops the old weekly rows by design (test data only).
+- Migration chain 0001 → 0014 is verified by `tests/test_migrations.py` (fresh build equals the models) and by data migration tests for 0006 (lead accounts → engineers) and 0007 (week decisions → rows). 0008 drops the old weekly rows by design (test data only).
 
 ## 6. Go-live checklist (status)
 - [ ] **S1** rotate the Azure client secret (needs Azure credentials).
 - [ ] **S2** purge the HR CSV and the old secret from git history; both remotes (`origin`, `company`) must be force-pushed once; ask the one other clone owner to delete her clone.
-- [ ] **H1** hours over 8 a day are kept (flagged), **H2** corrections: both decided as go-live blockers.
+- [x] **H1** hours over 8 a day are kept (flagged). **H2** corrections: dropped by decision 2026-09-30 (second look at rejected hours and one-step switching instead).
 - [ ] **E5** run the full suite and `alembic upgrade head` against Postgres; add foreign keys.
 - [ ] Map or delete the `L*` placeholder employees before the real HR roster is loaded.
 - [ ] Give every existing project's leads a period and % (projects created before 28 Sep).

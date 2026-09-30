@@ -281,35 +281,11 @@ class TimeLogEntry(Base):
     trimmed_hours = Column(Float, nullable=True)  # logged but left out by "approve up to the last visit"
     approval_status = Column(String(20), nullable=False, default="pending_review", index=True)
     reviewed_by = Column(String(150), nullable=True)
+    reviewed_by_user_id = Column(Integer, nullable=True)  # hours the BU Head rejected: only the BU Head re-approves
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     review_reason = Column(Text, nullable=True)  # why approved hours were taken back, or a rejection note
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-
-class HoursCorrection(Base):
-    """
-    An engineer's request to move hours of one day from one of their subtasks
-    to another on the same project (app/services/corrections.py). The target
-    task's reviewer decides; the day's total never changes. The table is also
-    the audit trail of every move.
-    """
-    __tablename__ = "hours_corrections"
-
-    id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, nullable=False, index=True)
-    employee_id = Column(Integer, nullable=False, index=True)
-    work_date = Column(Date, nullable=False)
-    from_task_id = Column(Integer, nullable=False)
-    to_task_id = Column(Integer, nullable=False)
-    hours = Column(Float, nullable=False)
-    note = Column(Text, nullable=True)
-    status = Column(String(20), nullable=False, default="pending", index=True)  # pending | approved | rejected | cancelled
-    requested_by = Column(String(150), nullable=True)
-    decided_by = Column(String(150), nullable=True)
-    decided_at = Column(DateTime(timezone=True), nullable=True)
-    decision_reason = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class TimeSession(Base):

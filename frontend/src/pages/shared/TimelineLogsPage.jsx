@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
+import { RejectedHoursPanel } from '../../features/hours/RejectedHours';
 import { DAY_KEYS, HOURS_STATUS_LABELS, HOURS_STATUS_PILL, bulkNotice, groupByEngineer, isOverMark, summarizeWeek } from '../../utils/hours';
 import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 
@@ -591,6 +592,10 @@ export function TimelineLogsPage() {
               </tbody>
             </table>
         </div>
+
+        {projectId && (isLead || isBuHead) && (
+          <RejectedHoursPanel projectId={projectId} onChanged={() => loadProjectData(projectId, weekStartStr)} />
+        )}
 
         <div className="timesheet-footer">
           <div className="footer-info">

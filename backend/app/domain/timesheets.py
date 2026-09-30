@@ -23,7 +23,12 @@ REASON_REQUIRED = "Give a reason for rejecting hours that were already approved.
 INDIVIDUAL_ONLY = (
     "Only days over 8 hours or with unattended time are waiting for you; those are approved day by day, not in bulk."
 )
-NEVER_RE_APPROVED = "Rejected hours can't be approved again. The engineer corrects them instead."
+NEVER_RE_APPROVED = (
+    "Rejected hours are approved again only from the project's Rejected hours list: by one of its leads or "
+    "the BU Head, within 7 days, with a reason."
+)
+# A rejection can be put right for this long (app/services/rejected_hours.py); after that it is final.
+REAPPROVAL_WINDOW = timedelta(days=7)
 
 
 def total_hours(entries: Iterable[models.TimeLogEntry], status: str | None = None) -> float:
@@ -34,6 +39,23 @@ def total_hours(entries: Iterable[models.TimeLogEntry], status: str | None = Non
 def over_mark(entry: models.TimeLogEntry) -> bool:
     """More than a working day's hours on one day: the reviewer looks at it individually."""
     return (entry.hours or 0) > DAILY_MARK_HOURS
+
+
+def open_time(start: datetime, end: datetime, events: Iterable[tuple[datetime, str, bool]]) -> timedelta:
+    """How long between `start` and `end` a project was open, i.e. paused by nothing.
+    `events` are (when, what paused it, pausing?) in time order, e.g. a lock and its release;
+    ones before `start` only set the state it starts in."""
+    paused: set[str] = set()
+    total, cursor = timedelta(0), start
+    for at, reason, pausing in events:
+        at = min(max(at, start), end)
+        if not paused:
+            total += at - cursor
+        cursor = at
+        (paused.add if pausing else paused.discard)(reason)
+    if not paused:
+        total += end - cursor
+    return total
 
 
 def today_utc() -> date:

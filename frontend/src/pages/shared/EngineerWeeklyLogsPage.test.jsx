@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -98,50 +97,16 @@ const TIMELINE = {
 };
 
 let entriesData = [];
-let correctionsData = [];
-
-const CORRECTION = {
-  id: 7,
-  project_id: 1,
-  employee_id: 3,
-  employee_name: 'Ritu',
-  work_date: '2026-09-24',
-  from_task_id: 2,
-  from_task_name: '1.1 subtask 1',
-  to_task_id: 4,
-  to_task_name: 'subtask 2',
-  hours: 2,
-  note: null,
-  status: 'pending',
-  source_status: 'pending_review',
-  can_decide: true,
-  can_cancel: false,
-};
 
 const ROUTES = [
   [/\/api\/projects$/, () => PROJECTS.map((project) => ({ ...project, my_role: currentRole }))],
   [/\/api\/projects\/1\/wbs-structure$/, NODES],
   [/\/api\/projects\/1\/timesheet\?/, () => entriesData],
   [/\/api\/projects\/1\/timeline-logs$/, TIMELINE],
-  [/\/api\/projects\/1\/hours-corrections$/, () => correctionsData],
 ];
 
 function fakeApi(url, options) {
   const method = (options && options.method) || 'GET';
-  if (method === 'POST' && /\/api\/projects\/1\/hours-corrections$/.test(url)) {
-    correctionsData = [{ ...CORRECTION, ...JSON.parse(options.body), can_decide: false, can_cancel: true }];
-    return Promise.resolve(new Response(JSON.stringify(correctionsData[0]), { status: 201 }));
-  }
-  const moved = url.match(/\/hours-corrections\/(\d+)\/(approve|reject|cancel)$/);
-  if (method === 'POST' && moved) {
-    correctionsData = correctionsData.map((c) => ({
-      ...c,
-      status: 'approved',
-      can_decide: false,
-      decided_by: 'Anita Kumar',
-    }));
-    return Promise.resolve(new Response(JSON.stringify(correctionsData[0]), { status: 200 }));
-  }
   const decision = url.match(/\/time-log-entries\/(\d+)\/(approve-attended|approve|reject)$/);
   if (method === 'POST' && decision) {
     const [, id, action] = decision;
@@ -169,13 +134,10 @@ function fakeApi(url, options) {
 }
 
 function renderPage(route = '/weekly-logs?projectId=1&employeeId=3&weekStart=2026-09-21') {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[route]}>
-        <EngineerWeeklyLogsPage />
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <MemoryRouter initialEntries={[route]}>
+      <EngineerWeeklyLogsPage />
+    </MemoryRouter>,
   );
 }
 
@@ -183,7 +145,6 @@ describe('Engineer Weekly Logs details page', () => {
   beforeEach(() => {
     currentRole = 'engineer';
     entriesData = ENTRIES;
-    correctionsData = [];
     vi.stubGlobal('fetch', vi.fn(fakeApi));
   });
   afterEach(() => {
@@ -206,43 +167,6 @@ describe('Engineer Weekly Logs details page', () => {
     expect(within(details).getByText('0.02 hrs')).toBeTruthy();
     expect(within(details).getByText('0.01 hrs')).toBeTruthy();
     expect(within(details).getAllByText('Pending review')).toHaveLength(2);
-  });
-
-  it('an engineer asks to move hours logged on the wrong subtask', async () => {
-    entriesData = ENTRIES.map((entry, index) =>
-      index === 0 ? { ...entry, hours: 5, can_correct: true } : entry,
-    );
-    renderPage();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Move hours' }));
-    fireEvent.change(screen.getByLabelText('Hours to move'), { target: { value: '2' } });
-    fireEvent.change(screen.getByLabelText('To subtask'), { target: { value: '4' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Ask to move' }));
-
-    expect(await screen.findByText(/2 h on Thu, Sep 24 from 1.1 subtask 1 to subtask 2/)).toBeTruthy();
-    const [, options] = fetch.mock.calls.find(
-      ([url, opts]) => url.endsWith('/hours-corrections') && opts?.method === 'POST',
-    );
-    expect(JSON.parse(options.body)).toEqual({
-      work_date: '2026-09-24',
-      from_task_id: 2,
-      to_task_id: 4,
-      hours: 2,
-      note: null,
-    });
-    expect(screen.getByRole('button', { name: 'Withdraw' })).toBeTruthy();
-  });
-
-  it('the reviewer of the target task moves the hours', async () => {
-    currentRole = 'lead';
-    correctionsData = [CORRECTION];
-    renderPage();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Move the hours' }));
-
-    expect(await screen.findByText('Moved')).toBeTruthy();
-    expect(screen.getByText(/by Anita Kumar/)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Move the hours' })).toBeNull();
   });
 
   it('an engineer only reads the status of each day', async () => {

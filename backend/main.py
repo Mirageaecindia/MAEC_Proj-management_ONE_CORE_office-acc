@@ -807,16 +807,6 @@ def time_entries_output(db: Session, entries: list, project: models.Project, use
                 for s in row_sessions
             ],
             "unattended": unattended > 0,
-            # Corrections (app/services/corrections.py): the engineer may move their own pending or
-            # rejected hours to another subtask; a pending one holds the day's approval back.
-            "correction_pending": review.correction_pending(entry),
-            "can_correct": (
-                user.employee_id is not None
-                and entry.employee_id == user.employee_id
-                and entry.approval_status != APPROVED
-                and not review.correction_pending(entry)
-                and not review.session_open(entry)
-            ),
             "attended_hours": round(entry.hours - unattended, 2) if unattended > 0 else None,
             "trimmed_hours": entry.trimmed_hours,
         })

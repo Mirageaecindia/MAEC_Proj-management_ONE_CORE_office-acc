@@ -33,6 +33,7 @@ const session = (subtaskId) => ({
   project_id: 1,
   task_id: 4,
   subtask_id: subtaskId,
+  subtask_name: `1.${subtaskId} Subtask ${subtaskId}`,
   login_at: '2026-09-27T09:00:00Z',
 });
 
@@ -88,7 +89,7 @@ describe('Task Details: subtask Login/Logout', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Logout' }, WAIT));
     expect(await screen.findByRole('button', { name: 'Login' }, WAIT)).toBeTruthy();
 
-    expect(JSON.parse(posts('/subtask-tracking/start')[0][1].body)).toEqual({ subtask_id: 5 });
+    expect(JSON.parse(posts('/subtask-tracking/start')[0][1].body)).toEqual({ subtask_id: 5, switch: false });
     expect(posts('/subtask-tracking/logout')[0][1].body).toBeUndefined(); // no durations are sent
   });
 
@@ -139,10 +140,20 @@ describe('Task Details: subtask Login/Logout', () => {
     expect(screen.getByRole('button', { name: 'Login' })).toBeTruthy();
   });
 
-  it('blocks Login while the engineer is logged in to another subtask', async () => {
+  it('switches subtask in one confirmed step when logged in to another one', async () => {
     activeSession = session(9);
     renderPage();
+    const login = await screen.findByRole('button', { name: 'Login' }, WAIT);
+    await vi.waitFor(() => expect(login.title).toMatch(/1\.9 Subtask 9/), WAIT);
 
-    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Login' }).disabled).toBe(true), WAIT);
+    fireEvent.click(login);
+
+    expect(await screen.findByText('You are logged in to 1.9 Subtask 9.')).toBeTruthy();
+    expect(posts('/subtask-tracking/start')).toHaveLength(0); // nothing happens until it is confirmed
+    fireEvent.click(screen.getByRole('button', { name: 'Log out there and log in here' }));
+
+    expect(await screen.findByRole('button', { name: 'Logout' }, WAIT)).toBeTruthy();
+    expect(JSON.parse(posts('/subtask-tracking/start')[0][1].body)).toEqual({ subtask_id: 5, switch: true });
+    expect(screen.queryByText('Switch subtask?')).toBeNull();
   });
 });

@@ -48,7 +48,6 @@ DAY_NOT_OVER = "A day is reviewed once it is over (yesterday or earlier)."
 SESSION_STILL_OPEN = (
     "The engineer is still logged in to a session started on that day. Review it once the session has closed."
 )
-CORRECTION_PENDING = "A correction on these hours is waiting for a decision. Decide it before approving the day."
 NOTHING_UNATTENDED = "No unattended time on this day: approve or reject it as a whole."
 NOTHING_ATTENDED = "Nothing on this day was attended: reject it instead."
 HOURS_UNAPPROVED = "hours_unapproved"  # GovernanceAction.action: approved hours taken back, with the reason
@@ -122,18 +121,6 @@ class HoursReview:
         open_sessions = db.query(models.TimeSession.employee_id, models.TimeSession.login_at).filter_by(status=ACTIVE)
         self._open_days = {(employee_id, as_utc(login_at).date()) for employee_id, login_at in open_sessions}
 
-        moving = models.HoursCorrection
-        self._being_corrected = {
-            (task_id, employee_id, day)
-            for task_id, employee_id, day in db.query(
-                moving.from_task_id, moving.employee_id, moving.work_date
-            ).filter_by(project_id=project.id, status="pending")
-        }
-
-    def correction_pending(self, entry: models.TimeLogEntry) -> bool:
-        """The engineer has asked to move some of these hours to another subtask (app/services/corrections.py)."""
-        return row_key(entry) in self._being_corrected
-
     def session_open(self, entry: models.TimeLogEntry) -> bool:
         """The engineer still has a session running that started on the row's day."""
         return (entry.employee_id, entry.work_date) in self._open_days
@@ -167,8 +154,6 @@ class HoursReview:
             raise ConflictError(DAY_NOT_OVER)
         if self.session_open(entry):
             raise ConflictError(SESSION_STILL_OPEN)
-        if action == APPROVED and self.correction_pending(entry):
-            raise ConflictError(CORRECTION_PENDING)
         problem = review_transition(entry.approval_status, action, reason)
         if problem == REASON_REQUIRED:
             raise BadRequestError(problem)
@@ -186,6 +171,7 @@ class HoursReview:
                 )
             )
         entry.approval_status, entry.reviewed_by, entry.reviewed_at = action, reviewer, now
+        entry.reviewed_by_user_id = user.id  # who may approve rejected hours again depends on who rejected them
         entry.review_reason = (reason or "").strip() or None
 
     def approve_attended(
@@ -237,7 +223,6 @@ class HoursReview:
             if entry.approval_status == PENDING_REVIEW
             and reviewable(entry.work_date, self.today)
             and not self.session_open(entry)
-            and not (action == APPROVED and self.correction_pending(entry))
             and self.may_review(user, tasks.get(entry.task_id), entry.employee_id)
         ]
         sessions = sessions_by_row(self.db, mine)

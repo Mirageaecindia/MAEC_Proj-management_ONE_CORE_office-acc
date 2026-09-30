@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
@@ -7,6 +8,7 @@ import { TimelineLogsPage } from './TimelineLogsPage';
 let currentRole = 'engineer';
 let reviewBody = { reviewed: 0, skipped_over_mark: 0, action: 'approved' };
 let timesheetData;
+let rejectedData = [];
 
 const authHeaders = () => ({}); // stable, like the real context
 vi.mock('../../AuthContext', () => ({
@@ -163,6 +165,7 @@ const ROUTES = [
   [/\/api\/projects$/, () => PROJECTS.map((project) => ({ ...project, my_role: currentRole }))],
   [/\/api\/projects\/1\/wbs-structure$/, NODES],
   [/\/api\/projects\/1\/timeline-logs$/, TIMELINE],
+  [/\/api\/projects\/1\/rejected-hours$/, () => rejectedData],
 ];
 
 function fakeApi(url, options = {}) {
@@ -182,6 +185,11 @@ function fakeApi(url, options = {}) {
       action: body.action,
     };
     return Promise.resolve(new Response(JSON.stringify(reviewBody), { status: 200 }));
+  }
+
+  if (method === 'POST' && /\/time-log-entries\/\d+\/reapprove$/.test(url)) {
+    rejectedData = [];
+    return Promise.resolve(new Response(JSON.stringify({ approval_status: 'approved' }), { status: 200 }));
   }
 
   if (/\/api\/projects\/1\/timesheet\?/.test(url)) {
@@ -205,10 +213,13 @@ function WeeklyLogsStub() {
 }
 
 function renderPage() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={['/timeline-logs?projectId=1']}>
-      <TimelineLogsPage />
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/timeline-logs?projectId=1']}>
+        <TimelineLogsPage />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -330,5 +341,41 @@ describe('Approving a week, day by day, from the Timeline Logs page', () => {
       ([url, options]) => /\/hours\/review$/.test(url) && options?.method === 'POST',
     );
     expect(JSON.parse(call[1].body).employee_id).toBeNull();
+  });
+
+  it('a lead approves hours another lead rejected, with a reason', async () => {
+    timesheetData = [];
+    rejectedData = [
+      {
+        id: 31,
+        employee_name: 'Ritu',
+        work_date: '2026-09-21',
+        hours: 3,
+        wbs_code: '1.1',
+        task_name: 'subtask 1',
+        rejected_by: 'Anita Kumar',
+        reason: 'Idle time',
+        hours_left: 50,
+        clock_paused: false,
+        unattended: false,
+        attended_hours: null,
+        can_reapprove: true,
+      },
+    ];
+    renderPage();
+
+    expect(await screen.findByText(/Rejected by Anita Kumar: Idle time/)).toBeTruthy();
+    expect(screen.getByText(/2 days left to approve/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    const confirm = screen.getByRole('button', { name: 'Approve 3 h' });
+    expect(confirm.disabled).toBe(true); // a reason is required
+    fireEvent.change(screen.getByLabelText('Reason for approving rejected hours'), {
+      target: { value: 'She was on the site survey' },
+    });
+    fireEvent.click(confirm);
+
+    await vi.waitFor(() => expect(screen.queryByText(/Rejected by Anita Kumar/)).toBeNull());
+    const call = fetch.mock.calls.find(([url]) => /\/time-log-entries\/31\/reapprove$/.test(url));
+    expect(JSON.parse(call[1].body)).toEqual({ reason: 'She was on the site survey', attended_only: false });
   });
 });

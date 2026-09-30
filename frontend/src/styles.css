@@ -1199,17 +1199,15 @@ button.td-pill:active { transform: translateY(1px); }
 .day-hour-input.is-over-mark { border-color: #d98a00; box-shadow: inset 0 0 0 1px #d98a00; }
 .over-mark-flag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 10px; background: #fff1d6; color: #9a5b00; font-size: 10px; font-weight: 700; vertical-align: middle; }
 .over-mark-flag.is-unattended { background: #fde7e4; color: #9a2a1f; }
-.corrections-panel { margin: 16px 0 4px; padding: 14px 16px; border: 1px solid #d8e2ec; border-radius: 8px; background: #f8fbfd; }
-.corrections-panel h3 { margin: 0 0 4px; font-size: 14px; color: #1c334b; }
-.corrections-hint { margin: 0 0 10px; color: #6d7e8d; font-size: 12px; }
-.corrections-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.corrections-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; color: #24415d; }
-.corrections-text { flex: 1 1 320px; }
-.corrections-text small { display: block; color: #6d7e8d; font-size: 11.5px; }
-.move-hours-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 8px; text-align: left; }
-.move-hours-form label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #56697b; }
-.move-hours-form input, .move-hours-form select { height: 30px; padding: 0 8px; font-size: 12px; border: 1px solid #c8d5e1; border-radius: 4px; }
-.move-hours-form input[type='number'] { width: 90px; }
+.rejected-panel { margin: 16px 0 4px; padding: 14px 16px; border: 1px solid #ecd3cf; border-radius: 8px; background: #fffaf9; }
+.rejected-panel h3 { margin: 0 0 4px; font-size: 14px; color: #1c334b; }
+.rejected-hint { margin: 0 0 10px; color: #6d7e8d; font-size: 12px; }
+.rejected-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.rejected-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; color: #24415d; }
+.rejected-text { flex: 1 1 320px; }
+.rejected-text small { display: block; color: #6d7e8d; font-size: 11.5px; }
+.rejected-form { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 6px; }
+.rejected-form input { flex: 1 1 260px; height: 30px; padding: 0 8px; font-size: 12px; border: 1px solid #c8d5e1; border-radius: 4px; }
 .tracking-notice { margin: 0 0 14px; padding: 10px 14px; border: 1px solid #f0c36d; border-radius: 6px; background: #fff8e8; color: #5a4200; font-size: 13px; line-height: 1.5; }
 .tracking-notice.is-logout { border-color: #c8d5e1; background: #eef4fa; color: #1c334b; }
 

@@ -20,6 +20,11 @@ but the engineer must visit the app at least every VISIT_GRACE; otherwise the
 session is closed at their last visit (or at the mark, if that came later) and
 does not resume by itself. A forgotten Logout costs at most the grace.
 
+Only one session runs at a time. Logging in to another subtask while one is
+running is a switch: with the engineer's confirmation the running session ends
+and the new one starts in the same moment, so switching is one step and hours
+land on the subtask actually being worked on.
+
 A session's time always goes to the day it started, and a pause is only ever
 resumed on that same calendar day: the next morning the engineer logs in afresh,
 so yesterday's subtask never carries on by itself. A day's row that has been
@@ -138,18 +143,8 @@ def unattended_seconds(session: models.TimeSession) -> int:
     return int(gap.total_seconds()) if gap > UNATTENDED_GAP else 0
 
 
-def _state(session: models.TimeSession | None, **extra) -> dict:
-    """What the Task Details page needs: which subtask the engineer is logged in to (no durations)."""
-    active = None
-    if session is not None:
-        active = {
-            "id": session.id,
-            "project_id": session.project_id,
-            "task_id": session.task_id,
-            "subtask_id": session.subtask_id,
-            "login_at": session.login_at,
-        }
-    return {"active_session": active, **extra}
+def node_label(node: models.WbsNode | None) -> str:
+    return " ".join(filter(None, [node.wbs_code, node.task_name])) if node is not None else "another subtask"
 
 
 class TrackingService:
@@ -186,7 +181,9 @@ class TrackingService:
         enforce_governance(self.db, session.project_id)
         return self._state_for(resumed, employee_id, now)
 
-    def start(self, user: models.User, subtask_id: int) -> dict:
+    def start(self, user: models.User, subtask_id: int, switch: bool = False) -> dict:
+        """Log in to a subtask. With `switch`, a session running on another subtask ends now
+        and this one starts in the same moment; without it, that case is refused."""
         _employee_id(user)
         node = self.sessions.node(subtask_id)
         if node is None:
@@ -194,14 +191,27 @@ class TrackingService:
         refusal = self._refusal(user, node)
         if refusal is not None:
             raise refusal
-        session = self._open(user, node, utcnow())
+        now = utcnow()
+        running = self.sessions.active_session(user.employee_id)
+        if running is not None:
+            if running.subtask_id == node.id:
+                raise ConflictError("You are already logged in to this subtask.")
+            if not switch:
+                label = node_label(self.sessions.node(running.subtask_id))
+                raise ConflictError(f"You are logged in to '{label}'. Log out there first, or switch to this subtask.")
+            running.last_active_at = now  # switching is a visit
+            end_session(self.db, running, now, BY_ENGINEER)
+            self.db.flush()
+        session = self._open(user, node, now)
         self.db.commit()
-        return _state(session)
+        if running is not None:
+            enforce_governance(self.db, running.project_id)
+        return self._state(session)
 
     def logout(self, user: models.User) -> dict:
         session = self.sessions.active_session(_employee_id(user))
         if session is None:  # already logged out, e.g. from another tab
-            return _state(None, over_mark=False)
+            return self._state(None, over_mark=False)
         now = utcnow()
         try:
             mark_at = self._mark_at(session)
@@ -213,7 +223,7 @@ class TrackingService:
             self.db.rollback()
             return self.logout(user)  # retry on the fresh state (the session may have resumed)
         enforce_governance(self.db, session.project_id)  # hours on an approved day count at once
-        return _state(None, over_mark=mark_at <= as_utc(session.logout_at))
+        return self._state(None, over_mark=mark_at <= as_utc(session.logout_at))
 
     # -- the rule ---------------------------------------------------------------------------
 
@@ -260,10 +270,24 @@ class TrackingService:
 
     # -- state and resuming ---------------------------------------------------------------
 
+    def _state(self, session: models.TimeSession | None, **extra) -> dict:
+        """What the Task Details page needs: which subtask the engineer is logged in to (no durations)."""
+        active = None
+        if session is not None:
+            active = {
+                "id": session.id,
+                "project_id": session.project_id,
+                "task_id": session.task_id,
+                "subtask_id": session.subtask_id,
+                "subtask_name": node_label(self.sessions.node(session.subtask_id)),
+                "login_at": session.login_at,
+            }
+        return {"active_session": active, **extra}
+
     def _state_for(self, session: models.TimeSession | None, employee_id: int, now: datetime) -> dict:
         if session is not None:
-            return _state(session, over_mark=self._mark_at(session) <= now)
-        return _state(None, system_logout=self._system_logout(employee_id, now))
+            return self._state(session, over_mark=self._mark_at(session) <= now)
+        return self._state(None, system_logout=self._system_logout(employee_id, now))
 
     def _system_logout(self, employee_id: int, now: datetime) -> dict | None:
         """The engineer's last session today, when the system ended it for want of a visit."""
@@ -288,7 +312,8 @@ class TrackingService:
         return self._open(user, node, now)
 
     def _refusal(self, user: models.User, node: models.WbsNode) -> DomainError | None:
-        """Why the engineer can't log in to this subtask now, or None."""
+        """Why the engineer can't log in to this subtask at all, or None (a running session
+        elsewhere is `start`'s business: it may be a switch)."""
         if node.parent_id is None:
             return BadRequestError("Login/Logout is for subtasks. Open one of this task's subtasks.")
         if node.assigned_engineer_id != user.employee_id:
@@ -298,8 +323,6 @@ class TrackingService:
             return ForbiddenError(NO_PROJECT_ACCESS)
         if project.timesheets_soft_locked:
             return ConflictError("Timesheets are soft-locked by the BU Head, so working time can't be tracked.")
-        if self.sessions.active_session(user.employee_id) is not None:
-            return ConflictError("You are already logged in to another subtask. Log out there first.")
         return None
 
     def _open(self, user: models.User, node: models.WbsNode, now: datetime) -> models.TimeSession:

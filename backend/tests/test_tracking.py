@@ -404,3 +404,37 @@ def test_a_reviewed_day_is_never_changed_by_a_late_session(db, world, governed, 
     db.refresh(approved)
     assert (approved.hours, approved.approval_status) == (30, "approved")
     assert "Hours for a reviewed day were not banked" in caplog.text
+
+
+def test_logging_in_to_another_subtask_is_a_switch_the_engineer_confirms(client, db, make, world, governed, subtask):
+    project_id, node_a, *_ = governed
+    other = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, parent_id=node_a.id, estimated_hours=4)
+    first = _login(client, world, subtask)
+    _rewind(db, first, logged_in=timedelta(hours=2), last_seen=timedelta(0))
+
+    refused = client.post(START, json={"subtask_id": other.id}, headers=world.eng_h)
+    assert refused.status_code == 409 and subtask.task_name in refused.json()["detail"]  # names what is running
+    assert client.post(HEARTBEAT, headers=world.eng_h).json()["active_session"]["id"] == first
+
+    switched = client.post(START, json={"subtask_id": other.id, "switch": True}, headers=world.eng_h)
+
+    assert switched.status_code == 201, switched.text
+    active = switched.json()["active_session"]
+    assert (active["subtask_id"], active["subtask_name"]) == (other.id, f"{other.wbs_code} {other.task_name}")
+    db.expire_all()
+    ended = db.get(models.TimeSession, first)
+    assert (ended.status, ended.ended_by) == ("ended", BY_ENGINEER)
+    assert ended.logout_at.replace(tzinfo=UTC) == NOON  # the same moment the new session starts
+    assert _banked_hours(db, subtask) == 2.0  # the first subtask keeps exactly its two hours
+    assert db.query(models.TimeSession).filter_by(status="active").count() == 1
+
+
+def test_a_switch_that_cannot_happen_leaves_the_running_session_alone(client, db, make, world, governed, subtask):
+    project_id, node_a, *_ = governed
+    someone_elses = make.wbs_node(project_id, world.lead_e, engineer=world.emp2, parent_id=node_a.id)
+    first = _login(client, world, subtask)
+
+    refused = client.post(START, json={"subtask_id": someone_elses.id, "switch": True}, headers=world.eng_h)
+
+    assert refused.status_code == 403
+    assert client.post(HEARTBEAT, headers=world.eng_h).json()["active_session"]["id"] == first

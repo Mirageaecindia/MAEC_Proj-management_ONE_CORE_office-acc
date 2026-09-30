@@ -1,7 +1,7 @@
 import { X } from 'lucide-react';
 import { ErrorBanner } from './Feedback';
 
-/** Modal asking the user to confirm a destructive action. */
+/** Modal asking the user to confirm an action: destructive by default (`tone="danger"`), or `tone="primary"`. */
 export function ConfirmDialog({
   title,
   children,
@@ -9,6 +9,7 @@ export function ConfirmDialog({
   busyLabel = 'Working…',
   busy = false,
   confirmDisabled = false,
+  tone = 'danger',
   error = null,
   onConfirm,
   onCancel,
@@ -31,7 +32,7 @@ export function ConfirmDialog({
             Cancel
           </button>
           <button
-            className="button button-danger"
+            className={`button button-${tone}`}
             type="button"
             disabled={busy || confirmDisabled}
             onClick={onConfirm}

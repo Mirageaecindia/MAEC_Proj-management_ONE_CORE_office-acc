@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useLogoutTracking, useStartTracking, useTrackingState } from '../../hooks/useTracking';
 import { formatDateTimeIST } from '../../utils/displayTime';
 
@@ -59,6 +60,7 @@ export function TaskDetailsPage() {
     const loggedInHere = activeSession?.subtask_id === nodeId;
     const loggedInElsewhere = Boolean(activeSession) && !loggedInHere;
     const trackingBusy = startTracking.isPending || logoutTracking.isPending;
+    const [confirmSwitch, setConfirmSwitch] = useState(false);
 
     const showToast = useCallback((type, message) => {
         setToast({ type, message });
@@ -226,10 +228,15 @@ export function TaskDetailsPage() {
                     : 'Logged out. Your working time is saved.'),
                 onError,
             });
+        } else if (loggedInElsewhere && !confirmSwitch) {
+            setConfirmSwitch(true); // one step: confirm, and the other subtask is logged out as this one starts
         } else {
-            startTracking.mutate(nodeId, {
-                onSuccess: () => showToast('success', 'Logged in. Your time on this subtask counts until you log out.'),
+            startTracking.mutate({ subtaskId: nodeId, switchOver: loggedInElsewhere }, {
+                onSuccess: () => showToast('success', loggedInElsewhere
+                    ? 'Switched. Your time on the other subtask is saved; this subtask counts from now.'
+                    : 'Logged in. Your time on this subtask counts until you log out.'),
                 onError,
+                onSettled: () => setConfirmSwitch(false),
             });
         }
     }
@@ -268,6 +275,26 @@ export function TaskDetailsPage() {
                 </div>
             )}
 
+            {confirmSwitch && (
+                <ConfirmDialog
+                    title="Switch subtask?"
+                    tone="primary"
+                    confirmLabel="Log out there and log in here"
+                    busyLabel="Switching…"
+                    busy={startTracking.isPending}
+                    onConfirm={toggleTracking}
+                    onCancel={() => setConfirmSwitch(false)}
+                >
+                    <p className="confirm-modal-text">
+                        You are logged in to {activeSession?.subtask_name || 'another subtask'}.
+                    </p>
+                    <p className="confirm-modal-subtext">
+                        Confirm to log out there and log in to this subtask in the same moment. Your time on the
+                        other subtask is saved up to now, and this subtask counts from now.
+                    </p>
+                </ConfirmDialog>
+            )}
+
             {error && <div className="resource-error">{error}</div>}
 
             {isStaff && activeSession && overMark && (
@@ -300,11 +327,11 @@ export function TaskDetailsPage() {
                                     <button
                                         type="button"
                                         className={`td-login-btn${loggedInHere ? ' logged-in' : ''}`}
-                                        disabled={trackingBusy || loggedInElsewhere}
+                                        disabled={trackingBusy}
                                         title={loggedInHere
                                             ? 'Logout: stop working on this subtask'
                                             : loggedInElsewhere
-                                                ? 'You are logged in to another subtask. Log out there first.'
+                                                ? `You are logged in to ${activeSession.subtask_name || 'another subtask'}. Login here switches to this subtask.`
                                                 : 'Login: start working on this subtask'}
                                         onClick={toggleTracking}
                                     >

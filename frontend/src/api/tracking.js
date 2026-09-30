@@ -8,6 +8,8 @@ import { api } from './client';
 export const trackingApi = {
   heartbeat: (lastActiveAt = null) =>
     api.post('/api/subtask-tracking/heartbeat', { last_active_at: lastActiveAt }),
-  start: (subtaskId) => api.post('/api/subtask-tracking/start', { subtask_id: subtaskId }),
+  /** `switchOver`: end the session running on another subtask and start this one in the same moment. */
+  start: ({ subtaskId, switchOver = false }) =>
+    api.post('/api/subtask-tracking/start', { subtask_id: subtaskId, switch: switchOver }),
   logout: () => api.post('/api/subtask-tracking/logout'),
 };

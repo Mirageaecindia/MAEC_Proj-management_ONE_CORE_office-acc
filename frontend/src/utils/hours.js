@@ -22,16 +22,12 @@ export function bulkNotice({
   return `Approved ${reviewed} day${reviewed === 1 ? '' : 's'}. ${days} day${days === 1 ? '' : 's'} left for review: ${left.join(', ')} (open the weekly log).`;
 }
 
-const dayLabel = (isoDate) =>
-  new Date(`${isoDate}T00:00:00`).toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  });
-
-/** A correction in words: "3 h on Mon, Sep 21 from 1.1 Load estimate to 2.1 Plinths". */
-export function describeCorrection(correction) {
-  return `${correction.hours} h on ${dayLabel(correction.work_date)} from ${correction.from_task_name} to ${correction.to_task_name}`;
+/** What is left of the seven days in which rejected hours can be approved again. */
+export function describeTimeLeft(hoursLeft) {
+  if (hoursLeft >= 48) return `${Math.floor(hoursLeft / 24)} days left to approve.`;
+  if (hoursLeft >= 24) return '1 day left to approve.';
+  const hours = Math.max(1, Math.round(hoursLeft));
+  return `${hours} hour${hours === 1 ? '' : 's'} left to approve.`;
 }
 
 const SESSION_END_LABELS = {

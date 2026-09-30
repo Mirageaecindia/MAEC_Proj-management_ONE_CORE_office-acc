@@ -20,13 +20,13 @@ from app.repositories.work import WorkRepository
 from app.services import archive_guard
 from app.services.auth import AuthService, LoginThrottle, get_login_throttle
 from app.services.booking_approval import BookingApprovalService
-from app.services.corrections import CorrectionService
 from app.services.documents import ProjectDocumentService
 from app.services.governance import GovernanceService
 from app.services.governance_monitor import GovernanceMonitor
 from app.services.metrics import ProjectMetricsService
 from app.services.notifications import NotificationService
 from app.services.projects import ProjectService
+from app.services.rejected_hours import RejectedHours
 from app.services.tracking import TrackingService
 from app.services.work_summary import WorkSummaryService
 
@@ -83,5 +83,5 @@ def get_tracking_service(db: Session = Depends(get_db)) -> TrackingService:
     return TrackingService(db, TrackingRepository(db))
 
 
-def get_correction_service(db: Session = Depends(get_db)) -> CorrectionService:
-    return CorrectionService(db)
+def get_rejected_hours_service(db: Session = Depends(get_db)) -> RejectedHours:
+    return RejectedHours(db)
