@@ -40,7 +40,8 @@ export function RejectedHoursPanel({ projectId, onChanged }) {
       <h3>Rejected hours</h3>
       <p className="rejected-hint">
         Any lead of the project can approve these again within 7 days of the rejection, with a reason. After
-        that the rejection is final. Hours the BU Head rejected are approved again only by the BU Head.
+        that the rejection is final. A row is approved again once: from then on, and for hours the BU Head
+        rejected, only the BU Head decides.
       </p>
       <ErrorBanner error={error || reapprove.error} />
       <ul className="rejected-list">

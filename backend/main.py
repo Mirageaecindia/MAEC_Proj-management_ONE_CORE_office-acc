@@ -794,7 +794,7 @@ def time_entries_output(db: Session, entries: list, project: models.Project, use
             "reviewed_at": entry.reviewed_at.isoformat() if entry.reviewed_at else None,
             "review_reason": entry.review_reason,
             "finished": finished,
-            "can_review": finished and review.may_review(user, task, entry.employee_id),
+            "can_review": finished and review.may_decide(user, entry, task),
             # The sessions behind the row, for the reviewer: when the engineer was last seen in the app.
             "sessions": [
                 {
@@ -905,7 +905,7 @@ def review_hours_in_bulk(
     entries = query.all()
     tasks = tasks_by_id(db, entries)
     review = HoursReview(db, project, today_utc())
-    if not any(review.may_review(user, tasks.get(e.task_id), e.employee_id) for e in entries):
+    if not any(review.may_decide(user, e, tasks.get(e.task_id)) for e in entries):
         raise HTTPException(status_code=403, detail=NOT_YOUR_HOURS)
     reviewed, over_mark, unattended = review.review_pending(
         user, entries, tasks, payload.action, datetime.now(timezone.utc)

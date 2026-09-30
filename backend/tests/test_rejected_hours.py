@@ -11,9 +11,11 @@ from datetime import UTC, datetime, time, timedelta
 from types import SimpleNamespace
 
 import pytest
+from test_governance_workflow import _reach_baseline
 from test_project_roles import _approve_booking
 
 import models
+from app.domain.governance import WARNING
 from app.domain.timesheets import open_time
 from app.repositories.work import WorkRepository
 from factories import PASSWORD, WEEK
@@ -213,3 +215,93 @@ def test_an_unattended_rejected_day_can_be_approved_up_to_the_last_visit(client,
 )
 def test_open_time_leaves_out_the_time_a_project_was_closed(events, expected_days):
     assert open_time(T0, T0 + timedelta(days=10), events) == timedelta(days=expected_days)
+
+
+def test_approving_rejected_hours_again_runs_the_governance_check(client, db, make, world, governed):
+    """Usage is approved hours, so the second look must alert and lock like any other approval."""
+    project_id, node_a, *_ = governed  # target 100 h, threshold 80%, 30 h approved
+    priya = _headers(client, "lead.m")
+
+    def rejected_row(hours, day):
+        row = make.time_entry(project_id, node_a, world.emp1, hours, status="rejected", day=day)
+        row.reviewed_by, row.reviewed_by_user_id, row.reviewed_at = "Anita Kumar", world.lead_e.id, datetime.now(UTC)
+        db.commit()
+        return row.id
+
+    first, second = rejected_row(50, DAY + timedelta(days=1)), rejected_row(20, DAY + timedelta(days=2))
+
+    assert _reapprove(client, priya, first).status_code == 200  # 80 of 100 h: the threshold
+    db.expire_all()
+    project = db.get(models.Project, project_id)
+    assert (project.governance_alert_level, project.timesheets_soft_locked) == (WARNING, False)
+
+    assert _reapprove(client, priya, second).status_code == 200  # 100 of 100 h: the baseline
+    db.expire_all()
+    project = db.get(models.Project, project_id)
+    assert (project.timesheets_soft_locked, project.lock_reason) == (True, "auto")
+    actions = [a.action for a in db.query(models.GovernanceAction).filter_by(project_id=project_id)]
+    assert actions.count("hours_reapproved") == 2 and "auto_lock" in actions
+
+
+def test_the_clock_stops_for_an_automatic_lock_and_restarts_when_an_extension_reopens_it(client, db, world, governed):
+    """Reject, the project locks itself two days later, an extension reopens it three days
+    after that: the hours are still approvable on day 9 and final on day 10. The lock and the
+    reopening are the real ones the system records, not hand-written audit rows."""
+    project_id, node_a, _, pending = governed
+    rejected_id = pending.id
+    assert client.post(f"/api/time-log-entries/{rejected_id}/reject", headers=world.lead_h).status_code == 200
+    _reach_baseline(client, world, node_a)  # approved hours reach 100%: the automatic lock
+    request = client.post(
+        f"/api/projects/{project_id}/extension-requests",
+        json={"requested_hours": 50, "justification": "Client added a floor"},
+        headers=world.lead_h,
+    )
+    decided = client.post(
+        f"/api/projects/{project_id}/extension-requests/{request.json()['id']}/decision",
+        json={"decision": "approve", "comments": "Agreed"},
+        headers=world.bu_h,
+    )
+    assert decided.status_code == 200
+    db.expire_all()
+    assert db.get(models.Project, project_id).timesheets_soft_locked is False
+    recorded = {a.action: a for a in db.query(models.GovernanceAction).filter_by(project_id=project_id)}
+    assert {"auto_lock", "resume_execution"} <= set(recorded)  # both written by the system itself
+
+    def on_day(day):
+        """Place the rejection `day` days ago, the lock two days after it and the reopening three later."""
+        rejected_at = datetime.now(UTC) - timedelta(days=day)
+        db.get(models.TimeLogEntry, rejected_id).reviewed_at = rejected_at
+        recorded["auto_lock"].created_at = rejected_at + timedelta(days=2)
+        recorded["resume_execution"].created_at = rejected_at + timedelta(days=5)
+        db.commit()
+
+    priya = _headers(client, "lead.m")
+    on_day(10)  # seven open days are used up
+    assert _listed(client, priya, project_id).json() == []
+    assert _reapprove(client, priya, rejected_id).status_code == 409
+
+    on_day(9)  # six open days used: one left
+    (listed,) = _listed(client, priya, project_id).json()
+    assert listed["hours_left"] == 24.0
+    assert _reapprove(client, priya, rejected_id).status_code == 200
+
+
+def test_a_row_is_approved_again_once_then_only_the_bu_head_decides_it(client, db, world, rejected):
+    assert _reapprove(client, rejected.priya, rejected.row_id).status_code == 200
+
+    took_back = client.post(
+        f"/api/time-log-entries/{rejected.row_id}/reject", json={"reason": "Still idle time"}, headers=world.lead_h
+    )
+    assert took_back.status_code == 403 and "only the BU Head" in took_back.json()["detail"]  # no ping-pong
+    week = client.get(
+        f"/api/projects/{rejected.project_id}/timesheet?week_start={WEEK.isoformat()}", headers=world.lead_h
+    ).json()
+    assert [row["can_review"] for row in week if row["id"] == rejected.row_id] == [False]
+
+    by_bu_head = client.post(
+        f"/api/time-log-entries/{rejected.row_id}/reject", json={"reason": "Checked: idle"}, headers=world.bu_h
+    )
+    assert by_bu_head.status_code == 200
+    again = _reapprove(client, rejected.priya, rejected.row_id)
+    assert again.status_code == 403 and "only the BU Head" in again.json()["detail"]
+    assert _reapprove(client, world.bu_h, rejected.row_id).status_code == 200

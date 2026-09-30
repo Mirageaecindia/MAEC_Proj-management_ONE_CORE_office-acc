@@ -9,6 +9,8 @@ final: nobody can approve those hours.
 Guards:
 - hours the BU Head rejected are approved again only by the BU Head;
 - nobody approves their own hours;
+- a row is approved again from the list once: after that only the BU Head takes the
+  hours back or approves them again, so two leads can't reverse each other in turn;
 - a reason is required, and the decision is audited with both names
   (`hours_reapproved`, shown on the dashboards);
 - an unattended day can be approved up to the engineer's last visit;
@@ -31,6 +33,7 @@ from app.services.governance_monitor import enforce_governance
 from app.services.hours_review import (
     NOTHING_ATTENDED,
     NOTHING_UNATTENDED,
+    REAPPROVED_ONCE,
     row_key,
     sessions_by_row,
     tasks_by_id,
@@ -166,6 +169,7 @@ class RejectedHours:
             now,
         )
         entry.review_reason = f"Approved again: {reason} ({was})"
+        entry.reapproved_at = now
         self.db.commit()
         enforce_governance(self.db, entry.project_id)  # usage = approved hours: alerts / auto-lock
         return {
@@ -187,6 +191,8 @@ class RejectedHours:
             return ForbiddenError(OWN_HOURS)
         if by_bu_head and user.role != Role.BU_HEAD:
             return ForbiddenError(BU_HEAD_REJECTED)
+        if entry.reapproved_at is not None and user.role != Role.BU_HEAD:
+            return ForbiddenError(REAPPROVED_ONCE)
         if project.timesheets_soft_locked or project.archived_at:
             return ConflictError(LOCKED)
         return None

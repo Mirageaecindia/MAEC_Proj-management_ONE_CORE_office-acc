@@ -207,7 +207,8 @@ just the sum of its days.
 - **Rejected hours** (the panel under the weekly sheet): every rejection on the project from the last 7 days,
   with who rejected it and why. **Any lead of the project can approve those hours again**, with a reason; the
   decision is recorded with both names. After 7 days a rejection is final. Hours the BU Head rejected can only
-  be approved again by the BU Head, and nobody approves their own. The 7 days do not run while the project is
+  be approved again by the BU Head, and nobody approves their own. A row can be approved again once: after
+  that only the BU Head can take those hours back or approve them again. The 7 days do not run while the project is
   locked or archived.
 - **Real work on the wrong subtask: approve it.** Hours stay on the subtask they were logged on. If the work
   was done, approve the day even when it sits on the wrong subtask: the project's total and the engineer's

@@ -284,6 +284,7 @@ class TimeLogEntry(Base):
     reviewed_by_user_id = Column(Integer, nullable=True)  # hours the BU Head rejected: only the BU Head re-approves
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     review_reason = Column(Text, nullable=True)  # why approved hours were taken back, or a rejection note
+    reapproved_at = Column(DateTime(timezone=True), nullable=True)  # approved again once: then only the BU Head decides
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

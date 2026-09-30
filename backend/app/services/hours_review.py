@@ -45,6 +45,7 @@ NOT_YOUR_HOURS = (
     "or they are a project lead's own."
 )
 DAY_NOT_OVER = "A day is reviewed once it is over (yesterday or earlier)."
+REAPPROVED_ONCE = "These hours were rejected and approved again once already. From here only the BU Head decides them."
 SESSION_STILL_OPEN = (
     "The engineer is still logged in to a session started on that day. Review it once the session has closed."
 )
@@ -138,6 +139,13 @@ class HoursReview:
         reviewer = self.reviewer(task, employee_id)
         return user.role == Role.BU_HEAD if reviewer is BU_HEAD else reviewer == user.id
 
+    def may_decide(self, user: models.User, entry: models.TimeLogEntry, task: models.WbsNode | None) -> bool:
+        """Whether `user` decides this row: its reviewer, except that a row already approved
+        again from the rejected list (app/services/rejected_hours.py) belongs to the BU Head alone."""
+        if entry.reapproved_at is not None:
+            return user.role == Role.BU_HEAD
+        return self.may_review(user, task, entry.employee_id)
+
     def review(
         self,
         user: models.User,
@@ -148,8 +156,8 @@ class HoursReview:
         now: datetime,
     ) -> None:
         """One decision on one day's hours. The caller checks the project lock and commits."""
-        if not self.may_review(user, task, entry.employee_id):
-            raise ForbiddenError(NOT_YOUR_HOURS)
+        if not self.may_decide(user, entry, task):
+            raise ForbiddenError(REAPPROVED_ONCE if entry.reapproved_at is not None else NOT_YOUR_HOURS)
         if not reviewable(entry.work_date, self.today):
             raise ConflictError(DAY_NOT_OVER)
         if self.session_open(entry):
@@ -223,7 +231,7 @@ class HoursReview:
             if entry.approval_status == PENDING_REVIEW
             and reviewable(entry.work_date, self.today)
             and not self.session_open(entry)
-            and self.may_review(user, tasks.get(entry.task_id), entry.employee_id)
+            and self.may_decide(user, entry, tasks.get(entry.task_id))
         ]
         sessions = sessions_by_row(self.db, mine)
         over = [entry for entry in mine if over_mark(entry)]
