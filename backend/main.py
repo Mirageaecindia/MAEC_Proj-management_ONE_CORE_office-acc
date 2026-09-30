@@ -492,7 +492,7 @@ def resource_booking_gantt(
 
     date_range = {"start": None, "end": None}
     if earliest and latest:
-        today = date.today()
+        today = today_utc()  # the app's day is the UTC day, everywhere
         start, end = earliest, latest
         if today < start:
             start = today
