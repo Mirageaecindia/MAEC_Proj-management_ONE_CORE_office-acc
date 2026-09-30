@@ -33,6 +33,7 @@ _PROJECT_DATA = (
     models.WbsNodeHistory,
     models.GanttTask,
     models.TimeLogEntry,
+    models.HoursCorrection,
     models.TimeSession,
     models.ResourceBooking,
     models.ExtensionRequest,

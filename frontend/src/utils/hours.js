@@ -22,6 +22,18 @@ export function bulkNotice({
   return `Approved ${reviewed} day${reviewed === 1 ? '' : 's'}. ${days} day${days === 1 ? '' : 's'} left for review: ${left.join(', ')} (open the weekly log).`;
 }
 
+const dayLabel = (isoDate) =>
+  new Date(`${isoDate}T00:00:00`).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+
+/** A correction in words: "3 h on Mon, Sep 21 from 1.1 Load estimate to 2.1 Plinths". */
+export function describeCorrection(correction) {
+  return `${correction.hours} h on ${dayLabel(correction.work_date)} from ${correction.from_task_name} to ${correction.to_task_name}`;
+}
+
 const SESSION_END_LABELS = {
   engineer: 'logged out',
   laptop_off: 'laptop off',

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
+import { CorrectionsPanel, MoveHoursForm } from '../../features/hours/HoursCorrections';
 import { HOURS_STATUS_LABELS, HOURS_STATUS_PILL, describeSession, isOverMark } from '../../utils/hours';
 import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 
@@ -19,6 +20,7 @@ export function EngineerWeeklyLogsPage() {
   const [nodes, setNodes] = useState([]);
   const [entries, setEntries] = useState([]);
   const [rejecting, setRejecting] = useState(null); // { id, reason } while a reason is being typed
+  const [movingId, setMovingId] = useState(null); // the row whose "move hours" form is open
   const [timelineEngineers, setTimelineEngineers] = useState([]);
   const [scopeEngineerName, setScopeEngineerName] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -278,6 +280,37 @@ export function EngineerWeeklyLogsPage() {
                         {entry.review_reason && (
                           <small className="review-progress">{entry.review_reason}</small>
                         )}
+                        {entry.correction_pending && (
+                          <small className="review-progress">A correction on these hours is waiting.</small>
+                        )}
+                        {entry.can_correct && movingId !== entry.id && (
+                          <span className="review-actions">
+                            <button
+                              type="button"
+                              className="review-btn"
+                              title="Logged on the wrong subtask? Ask to move these hours to another of your subtasks"
+                              onClick={() => setMovingId(entry.id)}
+                            >
+                              Move hours
+                            </button>
+                          </span>
+                        )}
+                        {movingId === entry.id && (
+                          <MoveHoursForm
+                            entry={entry}
+                            subtasks={nodes.filter(
+                              (candidate) =>
+                                candidate.parent_id != null &&
+                                candidate.assigned_engineer_id === entry.employee_id &&
+                                candidate.id !== entry.task_id,
+                            )}
+                            onDone={() => {
+                              setMovingId(null);
+                              loadDetails(projectId, weekStartStr);
+                            }}
+                            onCancel={() => setMovingId(null)}
+                          />
+                        )}
                         {entry.can_review &&
                           entry.approval_status !== 'rejected' &&
                           rejecting?.id !== entry.id && (
@@ -343,6 +376,10 @@ export function EngineerWeeklyLogsPage() {
             </table>
           )}
         </div>
+
+        {projectId && (
+          <CorrectionsPanel projectId={projectId} onChanged={() => loadDetails(projectId, weekStartStr)} />
+        )}
 
         <div className="timesheet-footer">
           <div className="footer-info">

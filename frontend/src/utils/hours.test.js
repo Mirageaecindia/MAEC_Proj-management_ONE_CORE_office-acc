@@ -7,6 +7,7 @@ import {
   isOverMark,
   describeSession,
   bulkNotice,
+  describeCorrection,
 } from './hours';
 
 const row = (overrides) => ({
@@ -97,5 +98,17 @@ describe('bulkNotice', () => {
     expect(bulkNotice({ reviewed: 1, skipped_unattended: 1 })).toBe(
       'Approved 1 day. 1 day left for review: 1 unattended (open the weekly log).',
     );
+  });
+});
+
+describe('describeCorrection', () => {
+  it('says what moves where', () => {
+    const correction = {
+      hours: 3,
+      work_date: '2026-09-21',
+      from_task_name: '1.1 Load',
+      to_task_name: '2.1 Plinths',
+    };
+    expect(describeCorrection(correction)).toBe('3 h on Mon, Sep 21 from 1.1 Load to 2.1 Plinths');
   });
 });

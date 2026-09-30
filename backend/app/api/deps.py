@@ -20,6 +20,7 @@ from app.repositories.work import WorkRepository
 from app.services import archive_guard
 from app.services.auth import AuthService, LoginThrottle, get_login_throttle
 from app.services.booking_approval import BookingApprovalService
+from app.services.corrections import CorrectionService
 from app.services.documents import ProjectDocumentService
 from app.services.governance import GovernanceService
 from app.services.governance_monitor import GovernanceMonitor
@@ -80,3 +81,7 @@ def get_work_summary_service(db: Session = Depends(get_db)) -> WorkSummaryServic
 
 def get_tracking_service(db: Session = Depends(get_db)) -> TrackingService:
     return TrackingService(db, TrackingRepository(db))
+
+
+def get_correction_service(db: Session = Depends(get_db)) -> CorrectionService:
+    return CorrectionService(db)

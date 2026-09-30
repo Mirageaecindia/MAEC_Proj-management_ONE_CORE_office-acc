@@ -102,6 +102,7 @@ W1 the BU Head's Timeline view is thin; W3 the Resource Booking page keeps its o
 | `resource_bookings` | Engineer bookings and lead assignments | `role` (`engineer` / `lead`), `utilization_rate`, dates, `approval_status`; indexed by project, employee, role, status |
 | `wbs_nodes` | Tasks and subtasks (2 levels) | `parent_id`, `phase`, assigned lead (user id) and engineer (employee id), dates, status |
 | `wbs_node_history` | Status changes and comments | by node and project |
+| `hours_corrections` | Requests to move a day's hours between an engineer's subtasks; the audit trail of every move | `from_task_id`, `to_task_id`, `hours`, `status` (pending, approved, rejected, cancelled), `requested_by`, `decided_by/at`, `decision_reason` |
 | `time_sessions` | Login/Logout sessions | `login_at`, `last_seen_at`, `last_active_at` (last visit), `logout_at`, `active_seconds`, `ended_by`, `version_id` (optimistic lock) |
 | `time_log_entries` | One day's hours per subtask and engineer; outlives the subtask | **unique** (project, task, employee, work_date); `approval_status`, `reviewed_by/at`, `review_reason`; `task_name` kept when the subtask is deleted; `trimmed_hours` left out by "approve up to last visit" |
 | `governance_actions` | Audit log (stop, resume, lock, extension decisions, edits, archive, hours taken back) | by project |
@@ -113,7 +114,7 @@ W1 the BU Head's Timeline view is thin; W3 the Resource Booking page keeps its o
 ### 5.3 Integrity notes
 - Referential integrity is enforced in code (project delete removes children explicitly; the archive guard refuses writes at flush time). There are **no database foreign keys** yet (E5); adding them before Postgres goes live is recommended.
 - Unique constraints cover the identities that matter (username, employee code, project code, one hours row per day).
-- Migration chain 0001 → 0011 is verified by `tests/test_migrations.py` (fresh build equals the models) and by data migration tests for 0006 (lead accounts → engineers) and 0007 (week decisions → rows). 0008 drops the old weekly rows by design (test data only).
+- Migration chain 0001 → 0012 is verified by `tests/test_migrations.py` (fresh build equals the models) and by data migration tests for 0006 (lead accounts → engineers) and 0007 (week decisions → rows). 0008 drops the old weekly rows by design (test data only).
 
 ## 6. Go-live checklist (status)
 - [ ] **S1** rotate the Azure client secret (needs Azure credentials).
