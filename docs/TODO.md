@@ -191,7 +191,8 @@ Nothing here is urgent while the app is in development. All of it must be done b
 - [ ] **Lead periods:** every project's leads have a From / To / % (projects created before 2026-09-28 get them when edited; until then their leads' capacity isn't counted).
 - [x] **H1** is built (hours over 8 kept, visit rule, sweep, unattended flag, approve up to last visit).
 - [x] **H2** dropped by decision; its replacements are built (second look at rejected hours within 7 days; one-step subtask switching).
-- [ ] **Manual walk-through** of the timesheet flow by hand, as engineer, lead and BU Head (Login, switch, pass 8 h, system logout, approve, bulk, approve up to last visit, reject, approve again), before real users.
+- [ ] **Manual walk-through** of the timesheet flow by hand, as engineer, lead and BU Head (Login, switch, pass 8 h, system logout, approve, bulk, approve up to last visit, reject, approve again), before real users. `backend/seed_manual_test.py --database manual_test.db` builds a **scratch** database with every situation ready (it refuses the development database) and prints the accounts and the steps.
+- [ ] **One approve function (cleanup, next time that code is touched):** `RejectedHours.reapprove` sets the row approved itself and then runs the governance check, next to `HoursReview.review`. Make the list call the same approve function with its extra checks in front, so a rule added to normal approval can't be missed there.
 - [ ] **Tracking sweep:** it runs inside the API process every 5 minutes. With the single API process of DEPLOYMENT.md nothing is needed; with several processes each would sweep (safe, but wasteful), so run one.
 - [ ] **Day boundary:** a day is the UTC date (05:30–05:30 India time) until N3; tell the teams (user guide §5.2).
 - [ ] **Hours:** engineers keep MAEC open in a browser tab while working, with the site excluded from Edge sleeping tabs / Chrome Memory Saver (user guide §5.2).

@@ -42,7 +42,7 @@ select = [
 # Backend modules are imported flat (e.g. `import models`). Declare them so
 # import grouping is identical whether ruff runs from backend/ or the repo
 # root (pre-commit). The legacy flat modules can go once they are folded into `app`.
-known-first-party = ["app", "auth", "backup_db", "create_user", "database", "main", "models", "schemas", "tests", "factories", "fakes", "conftest"]
+known-first-party = ["app", "auth", "backup_db", "create_user", "database", "main", "models", "schemas", "seed_manual_test", "tests", "factories", "fakes", "conftest"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI's dependency-injection idiom uses calls in default arguments.
