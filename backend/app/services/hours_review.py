@@ -126,17 +126,20 @@ class HoursReview:
         """The engineer still has a session running that started on the row's day."""
         return (entry.employee_id, entry.work_date) in self._open_days
 
-    def reviewer(self, task: models.WbsNode | None, employee_id: int) -> int | None:
-        """The user id who approves this engineer's hours on this task, or BU_HEAD."""
+    def reviewer(self, task: models.WbsNode | None, employee_id: int, remembered_lead: int | None = None) -> int | None:
+        """The user id who approves this engineer's hours on this task, or BU_HEAD. A deleted
+        task's rows remember its lead (`remembered_lead`), so a cleanup changes nothing."""
         if employee_id in self.lead_employee_ids:
             return BU_HEAD
-        lead = task.assigned_lead_user_id if task is not None else None
+        lead = task.assigned_lead_user_id if task is not None else remembered_lead
         if lead not in self._active_leads or self._employee_of_lead.get(lead) == employee_id:
             return BU_HEAD
         return lead
 
-    def may_review(self, user: models.User, task: models.WbsNode | None, employee_id: int) -> bool:
-        reviewer = self.reviewer(task, employee_id)
+    def may_review(
+        self, user: models.User, task: models.WbsNode | None, employee_id: int, remembered_lead: int | None = None
+    ) -> bool:
+        reviewer = self.reviewer(task, employee_id, remembered_lead)
         return user.role == Role.BU_HEAD if reviewer is BU_HEAD else reviewer == user.id
 
     def may_decide(self, user: models.User, entry: models.TimeLogEntry, task: models.WbsNode | None) -> bool:
@@ -144,7 +147,7 @@ class HoursReview:
         again from the rejected list (app/services/rejected_hours.py) belongs to the BU Head alone."""
         if entry.reapproved_at is not None:
             return user.role == Role.BU_HEAD
-        return self.may_review(user, task, entry.employee_id)
+        return self.may_review(user, task, entry.employee_id, entry.task_lead_user_id)
 
     def review(
         self,

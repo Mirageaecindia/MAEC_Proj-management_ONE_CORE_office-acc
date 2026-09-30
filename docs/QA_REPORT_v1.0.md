@@ -113,7 +113,7 @@ W1 the BU Head's Timeline view is thin; W3 the Resource Booking page keeps its o
 ### 5.3 Integrity notes
 - Referential integrity is enforced in code (project delete removes children explicitly; the archive guard refuses writes at flush time). There are **no database foreign keys** yet (E5); adding them before Postgres goes live is recommended.
 - Unique constraints cover the identities that matter (username, employee code, project code, one hours row per day).
-- Migration chain 0001 → 0016 is verified by `tests/test_migrations.py` (fresh build equals the models) and by data migration tests for 0006 (lead accounts → engineers) and 0007 (week decisions → rows). 0008 drops the old weekly rows by design (test data only).
+- Migration chain 0001 → 0017 is verified by `tests/test_migrations.py` (fresh build equals the models) and by data migration tests for 0006 (lead accounts → engineers) and 0007 (week decisions → rows). 0008 drops the old weekly rows by design (test data only).
 
 ## 6. Go-live checklist (status)
 - [ ] **S1** rotate the Azure client secret (needs Azure credentials).

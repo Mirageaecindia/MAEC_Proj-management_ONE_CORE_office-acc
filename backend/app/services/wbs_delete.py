@@ -8,8 +8,8 @@ not at all: one refused item and nothing changes.
 
 Hours already worked are never deleted or changed. An open Login session on a
 deleted subtask is logged out and banked first, and the day rows keep the
-subtask's name so the timesheet, the dashboards and the approval still show
-them. Only the WBS items themselves go.
+subtask's name and its lead, so the timesheet, the dashboards and the approval
+still show them and the same person reviews them. Only the WBS items themselves go.
 """
 
 from dataclasses import asdict, dataclass
@@ -87,7 +87,11 @@ def delete_nodes(
     db.execute(
         update(entry)
         .where(entry.task_id.in_(doomed_ids))
-        .values(task_name=case({id_: n.task_name for id_, n in doomed.items()}, value=entry.task_id))
+        .values(
+            task_name=case({id_: n.task_name for id_, n in doomed.items()}, value=entry.task_id),
+            # The task's lead keeps reviewing these days: a routine cleanup does not move approvals.
+            task_lead_user_id=case({id_: n.assigned_lead_user_id for id_, n in doomed.items()}, value=entry.task_id),
+        )
     )
     db.query(models.WbsNodeHistory).filter(models.WbsNodeHistory.node_id.in_(doomed_ids)).delete(
         synchronize_session=False

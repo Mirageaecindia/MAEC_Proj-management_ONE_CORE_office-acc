@@ -151,12 +151,16 @@ def test_worked_hours_survive_the_subtask_and_keep_counting(client, db, make, wo
     ]
     assert engineer_hours() == hours_before == [(50 + 7.5, 30 + 5, 20 + 2.5)]  # the engineer's working time stands
 
-    timesheet = client.get(f"/api/projects/{project_id}/timesheet?week_start=2026-09-21", headers=world.bu_h).json()
+    # The rows remember the task's lead: a routine cleanup does not move approvals to the BU Head.
+    timesheet = client.get(f"/api/projects/{project_id}/timesheet?week_start=2026-09-21", headers=world.lead_h).json()
     assert [(row["task_name"], row["hours"], row["can_review"]) for row in timesheet] == [
         (sub_name, 5, True),
-        (sub_name, 2.5, True),  # the BU Head reviews hours whose task has no lead any more
+        (sub_name, 2.5, True),
     ]
-    approve = client.post(f"/api/time-log-entries/{timesheet[1]['id']}/approve", headers=world.bu_h)
+    for_bu_head = client.get(f"/api/projects/{project_id}/timesheet?week_start=2026-09-21", headers=world.bu_h).json()
+    assert [row["can_review"] for row in for_bu_head] == [False, False]  # the BU Head does not need to act
+    assert client.post(f"/api/time-log-entries/{timesheet[1]['id']}/approve", headers=world.bu_h).status_code == 403
+    approve = client.post(f"/api/time-log-entries/{timesheet[1]['id']}/approve", headers=world.lead_h)
     assert approve.status_code == 200, approve.text
     db.expire_all()
     assert total_hours(db.query(models.TimeLogEntry).filter_by(employee_id=world.emp1.id), "approved") == 30 + 7.5

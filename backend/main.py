@@ -815,6 +815,15 @@ def time_entries_output(db: Session, entries: list, project: models.Project, use
     return out
 
 
+def _rows_on(task_ids: list):
+    return models.TimeLogEntry.task_id.in_(task_ids) if task_ids else models.TimeLogEntry.id < 0
+
+
+def lead_rows_condition(task_ids: list, user: models.User):
+    """A lead's rows: on their tasks, plus rows whose subtask was deleted while they led it."""
+    return _rows_on(task_ids) | (models.TimeLogEntry.task_lead_user_id == user.id)
+
+
 def scoped_wbs_tasks(
     db: Session,
     project_id: int,
@@ -851,7 +860,7 @@ def list_timesheet_entries(
         query = query.filter_by(employee_id=user.employee_id)
     elif role == "lead":
         task_ids = [task.id for task in scoped_wbs_tasks(db, project_id, user, role)]
-        query = query.filter(models.TimeLogEntry.task_id.in_(task_ids)) if task_ids else query.filter(models.TimeLogEntry.id < 0)
+        query = query.filter(lead_rows_condition(task_ids, user))
     if week_start:
         first = date.fromisoformat(week_start)
         query = query.filter(models.TimeLogEntry.work_date >= first, models.TimeLogEntry.work_date < first + timedelta(days=7))
@@ -942,10 +951,9 @@ def project_timeline_logs(
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
         entries_query = entries_query.filter_by(employee_id=user.employee_id)
-    if task_ids:
-        entries_query = entries_query.filter(models.TimeLogEntry.task_id.in_(task_ids))
-    else:
-        entries_query = entries_query.filter(models.TimeLogEntry.id < 0)
+    entries_query = entries_query.filter(
+        lead_rows_condition(task_ids, user) if role == "lead" else _rows_on(task_ids)
+    )
     entries = entries_query.order_by(models.TimeLogEntry.work_date).all()
 
     engineer_ids = {task.assigned_engineer_id for task in tasks if task.assigned_engineer_id}

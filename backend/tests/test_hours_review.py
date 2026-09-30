@@ -5,7 +5,7 @@ lead (Anita) and one under the Mechanical lead (Priya), 8 h each on one day
 last week.
 """
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 import pytest
 from test_project_roles import _approve_booking
@@ -94,7 +94,7 @@ def test_hours_without_an_active_lead_go_to_the_bu_head(client, db, make, world,
         .filter_by(project_id=project_id, employee_id=world.lead_e.employee_id, role="lead")
         .one()
     )
-    anita_booking.end_date = date.today() - timedelta(days=1)
+    anita_booking.end_date = today_utc() - timedelta(days=1)  # the app's day is the UTC day
     db.commit()
     assert _row(client, world.lead_h, row_e.id).status_code == 403
     assert _row(client, world.bu_h, row_e.id).status_code == 200
