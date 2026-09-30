@@ -5,7 +5,7 @@ import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useRejectResourceBookings } from '../../hooks/useResourceBookings';
-import { countWorkingDays, plannedHoursForRange } from '../../lib/hours';
+import { bookingPlannedHours, countWorkingDays } from '../../lib/hours';
 
 function formatMonthHeader(dateObj) {
   return dateObj.toLocaleString('en-US', { month: 'short', year: 'numeric' }).toUpperCase();
@@ -269,7 +269,7 @@ export function ResourceBookingPage() {
   const benchTip = [...bookings].sort((a, b) => Number(a.utilization_rate) - Number(b.utilization_rate))[0];
 
   const bookingDays = useMemo(() => countWorkingDays(form.start_date, form.end_date), [form.start_date, form.end_date]);
-  const computedPlannedHours = plannedHoursForRange(form.start_date, form.end_date);
+  const computedPlannedHours = bookingPlannedHours(form.start_date, form.end_date, form.utilization_rate);
 
   function openCreateModal() {
     setModalMode('create');
@@ -716,7 +716,7 @@ export function ResourceBookingPage() {
             <label className="field"><span className="field-label">Engineer *</span><select value={form.employee_id} onChange={(event) => setForm({ ...form, employee_id: event.target.value })} required><option value="">Select employee</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} · {employee.role_title}</option>)}</select></label>
             <label className="field"><span className="field-label">Start Date *</span><input type="date" value={form.start_date} onChange={(event) => setForm({ ...form, start_date: event.target.value })} required /></label>
             <label className="field"><span className="field-label">End Date *</span><input type="date" min={form.start_date || undefined} value={form.end_date} onChange={(event) => setForm({ ...form, end_date: event.target.value })} required /></label>
-            <p className="wbs-field-hint">Planned Hours: {computedPlannedHours} Hrs ({bookingDays} working days × 8 hrs/day)</p>
+            <p className="wbs-field-hint">Planned Hours: {computedPlannedHours} Hrs ({bookingDays} working days × 8 hrs/day × {Number(form.utilization_rate) || 0}%)</p>
             <label className="field"><span className="field-label">Booking % *</span><select value={form.utilization_rate} onChange={(event) => setForm({ ...form, utilization_rate: event.target.value })} required><option value="">Select booking %</option><option value="20">20%</option><option value="40">40%</option><option value="60">60%</option><option value="80">80%</option><option value="100">100%</option></select></label>
             <div className="modal-actions"><button className="button button-secondary" type="button" onClick={() => setModalOpen(false)}>Cancel</button><button className="button button-primary" type="submit">{modalMode === 'edit' ? 'Save Changes' : 'Assign Engineer'}</button></div>
           </form>

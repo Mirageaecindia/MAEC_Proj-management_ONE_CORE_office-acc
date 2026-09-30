@@ -91,7 +91,7 @@ Step by step:
 1. **Project creation (BU Head).** Fill in the Create Project form: name, unique code, client, one lead per discipline, start date, currency and contract value, target effort hours, alert threshold, and the SharePoint discipline folders to create. The API saves the project, then calls Microsoft Graph to create `…/Project/<Project Name>/` plus a subfolder per selected discipline. If SharePoint fails, the project is still created and the error is returned.
 2. **Resource booking (Lead → BU Head).**
    - The Lead books engineers onto the project with a date range and a booking % (20–100).
-   - Planned hours are calculated by the server: weekdays in the range × 8.
+   - Planned hours are calculated by the server: weekdays in the range × 8 × the booking % (20% is 1.6 h a day).
    - An engineer's bookings across **all** projects may not exceed 100%.
    - The Lead submits the whole project's bookings. They become `pending_approval` and the BU Head gets a notification. The BU Head approves them, making them `approved`.
 3. **WBS planning (Lead).**
@@ -325,7 +325,7 @@ Shared helpers that the Lead/Engineer code in `main.py` needs (access rules, das
 |---|---|
 | Main task estimated hours | Weekdays (Mon–Fri, inclusive) between start and end date × 8. Calculated by the server. Planned-hours maths moves to the person's office calendar in TODO N3. |
 | Subtask planned hours | Whole number from **1 to 8** (a working day). Start date must equal end date (a single-day unit). |
-| Resource booking planned hours | Weekdays in the booking range × 8. Calculated by the server (the booking % is not applied). |
+| Resource booking planned hours | Weekdays in the booking range × 8 h × the booking %, rounded to a whole hour (`planned_hours` in `app/domain/allocation.py`, the same function as lead assignments). Calculated by the server. |
 | Allocation cap | Sum of an engineer's `utilization_rate` across all projects must be ≤ 100%. Otherwise the API returns 400 with `X-Error-Code: ALLOCATION_LIMIT`. |
 | Hours over 8 a day | Banked in full and flagged "over 8 h" for the reviewer; the visit rule (§7.4) stops a forgotten Logout within 30 minutes of the last visit |
 | Weekly timesheet total | The sum of the week's daily rows, **all seven days** (offices work different weeks: KSA Sun–Thu, Indian offices often Saturday). Each day's approval decides whether it counts. `total_hours` in `app/domain/timesheets.py` is the one totals function. |

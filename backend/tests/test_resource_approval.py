@@ -37,11 +37,10 @@ def test_bu_head_sees_bookings_and_summary(client, world, booked_project):
     assert bookings[0]["approval_status"] == "draft"
     leads = {r["employee_name"]: (r["approval_status"], r["utilization_rate"]) for r in rows if r["role"] == "lead"}
     assert leads == {name: ("approved", 20.0) for name in ("Anita Kumar", "Priya Nair", "Mohan Daniel")}
-    # Planned hours are derived server-side from the date range: weekdays x 8
-    # (1-30 Sep 2026 = 22 weekdays = 176h); the client-sent 80 is ignored.
-    # The 50% utilisation is not applied to the figure.
-    assert bookings[0]["planned_hours"] == 176
-    assert summary["total_booked_hours"] == 176
+    # Planned hours are derived server-side: weekdays x 8 h x the booking %
+    # (1-30 Sep 2026 = 22 weekdays x 8 h x 50% = 88 h); the client-sent 80 is ignored.
+    assert bookings[0]["planned_hours"] == 88
+    assert summary["total_booked_hours"] == 88
     assert summary["approval_status"] == "draft"
     assert summary["approval_status_label"] == "Draft"
 
@@ -278,3 +277,16 @@ def test_rejected_assignment_grants_no_project_access(client, make, world, assig
     assert _eng_list(client, world) == set()
     assert _eng_open(client, world, project_id).status_code == 403
     assert _login_to_subtask(client, make, world, node).status_code == 403
+
+
+def test_planned_hours_follow_the_booking_percentage_on_edit(client, world, booked_project):
+    project_id, booking = booked_project
+
+    edited = client.put(
+        f"/api/projects/{project_id}/resource-bookings/{booking['id']}",
+        json={"utilization_rate": 20},
+        headers=world.lead_h,
+    )
+
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["planned_hours"] == 35  # 22 weekdays x 8 h x 20% = 35.2, a fifth of a day each day

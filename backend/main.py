@@ -31,7 +31,7 @@ from app.domain.calendar import distribute_hours_over_months as _distribute_hour
 from app.domain.calendar import month_key as _get_month_key
 from app.domain.timesheets import APPROVED, INDIVIDUAL_ONLY, PENDING_REVIEW, today_utc, total_hours
 from app.domain.wbs import TO_DO, is_finished
-from app.domain.allocation import peak_allocation
+from app.domain.allocation import peak_allocation, planned_hours
 from app.repositories.bookings import BookingRepository
 from app.services.allocation import over_capacity_message
 from app.services.access import (
@@ -523,11 +523,11 @@ def create_resource_booking(
     over = over_capacity_message(db, employee.name, employee.id, requested, start_date, end_date)
     if over:
         raise HTTPException(status_code=400, detail=over, headers={"X-Error-Code": "ALLOCATION_LIMIT"})
-    derived_hours = estimated_hours_from_dates(start_date, end_date)
     booking = models.ResourceBooking(
         project_id=project_id,
         employee_id=employee.id,
-        planned_hours=derived_hours if derived_hours is not None else payload.planned_hours,
+        # With both dates the server decides: weekdays x 8 h x the booking % (20% = 1.6 h a day).
+        planned_hours=planned_hours(start_date, end_date, requested) if start_date and end_date else payload.planned_hours,
         utilization_rate=requested,
         start_date=start_date,
         end_date=end_date,
@@ -570,12 +570,10 @@ def update_resource_booking(
         raise HTTPException(status_code=400, detail=over, headers={"X-Error-Code": "ALLOCATION_LIMIT"})
     booking.employee_id = employee.id
     booking.start_date, booking.end_date = start_date, end_date
-    derived_hours = estimated_hours_from_dates(booking.start_date, booking.end_date)
-    booking.planned_hours = (
-        derived_hours
-        if derived_hours is not None
-        else (payload.planned_hours if payload.planned_hours is not None else booking.planned_hours or 0)
-    )
+    if start_date and end_date:
+        booking.planned_hours = planned_hours(start_date, end_date, requested)
+    elif payload.planned_hours is not None:
+        booking.planned_hours = payload.planned_hours
     booking.utilization_rate = requested
     db.commit()
     db.refresh(booking)

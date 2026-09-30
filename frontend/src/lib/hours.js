@@ -25,3 +25,8 @@ export function countWorkingDays(startDate, endDate) {
 export function plannedHoursForRange(startDate, endDate) {
   return countWorkingDays(startDate, endDate) * HOURS_PER_WORKING_DAY;
 }
+
+/** A booking's planned hours: working days x 8 h x the booking percentage (the server's rule). */
+export function bookingPlannedHours(startDate, endDate, percent) {
+  return Math.round((plannedHoursForRange(startDate, endDate) * (Number(percent) || 0)) / 100);
+}
