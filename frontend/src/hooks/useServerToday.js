@@ -19,8 +19,12 @@ export function useServerToday() {
   const { data } = useQuery({
     queryKey: queryKeys.serverDate,
     queryFn: serverDateApi.get,
+    // A tab left open across the day boundary (05:30 India time) must not keep yesterday as
+    // today: ask again every few minutes and whenever the window regains focus.
     staleTime: 60_000,
     refetchInterval: REFRESH_MS,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: 'always',
   });
   const todayStr = data?.date ?? browserUtcDate();
   return { todayStr, today: new Date(`${todayStr}T00:00:00`), loaded: Boolean(data) };
