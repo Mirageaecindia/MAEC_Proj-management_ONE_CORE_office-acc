@@ -1,7 +1,8 @@
 """Deleting WBS tasks and subtasks, one or many at a time (decided 2026-09-29).
 
 Who may delete: the project's lead deletes any task or subtask on the project;
-an engineer deletes only subtasks under tasks assigned to them, never a task.
+an engineer deletes only subtasks they created themselves, never a task and
+never a subtask the lead planned for them.
 Deleting a task deletes its subtasks. A selection is deleted as a whole or
 not at all: one refused item and nothing changes.
 
@@ -24,7 +25,7 @@ from app.services.access import ENGINEER, LEAD
 from app.services.tracking import SUBTASK_DELETED, end_session
 
 LEAD_ONLY = "only the project's lead deletes tasks"
-NOT_YOURS = "you can only delete subtasks under tasks assigned to you"
+NOT_YOURS = "you can only delete subtasks you created yourself"
 READ_ONLY = "The WBS is read-only for your role on this project."
 NOTHING_SELECTED = "Select at least one task or subtask."
 GONE = "Some of the selected items no longer exist. Refresh the page and try again."
@@ -41,7 +42,7 @@ class Deleted:
         return asdict(self)
 
 
-def refusal(role: str, node: models.WbsNode, parent: models.WbsNode | None, user: models.User) -> str | None:
+def refusal(role: str, node: models.WbsNode, user: models.User) -> str | None:
     """Why this user may not delete this node, or None when they may."""
     if role == LEAD:
         return None
@@ -49,7 +50,7 @@ def refusal(role: str, node: models.WbsNode, parent: models.WbsNode | None, user
         return READ_ONLY
     if node.parent_id is None:
         return LEAD_ONLY
-    if parent is None or not user.employee_id or parent.assigned_engineer_id != user.employee_id:
+    if node.created_by_user_id != user.id:
         return NOT_YOURS
     return None
 
@@ -66,13 +67,7 @@ def delete_nodes(
     nodes = db.query(node).filter(node.id.in_(ids), node.project_id == project_id).all()
     if len(nodes) != len(ids):
         raise NotFoundError(GONE)
-    parent_ids = {n.parent_id for n in nodes if n.parent_id is not None} - ids
-    parents = {p.id: p for p in db.query(node).filter(node.id.in_(parent_ids))} if parent_ids else {}
-    refused = [
-        f"{n.wbs_code} {n.task_name}: {reason}"
-        for n in nodes
-        if (reason := refusal(role, n, parents.get(n.parent_id), user))
-    ]
+    refused = [f"{n.wbs_code} {n.task_name}: {reason}" for n in nodes if (reason := refusal(role, n, user))]
     if refused:
         raise ForbiddenError("Nothing was deleted. " + "; ".join(refused))
 

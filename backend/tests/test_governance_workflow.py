@@ -139,7 +139,10 @@ def test_rejected_hours_do_not_count(client, db, world, governed):
     project_id, node_a, *_ = governed
     entry_id = _log(client, world, node_a, "2026-09-14", 70)
 
-    assert client.post(f"/api/time-log-entries/{entry_id}/reject", headers=world.lead_h).status_code == 200
+    rejected = client.post(
+        f"/api/time-log-entries/{entry_id}/reject", json={"reason": "Not worked"}, headers=world.lead_h
+    )
+    assert rejected.status_code == 200
 
     dashboard = _dashboard(client, world, project_id)
     assert dashboard["governance_status"]["consumption_pct"] == 30.0

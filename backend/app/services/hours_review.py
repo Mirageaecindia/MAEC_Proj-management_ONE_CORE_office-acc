@@ -221,6 +221,7 @@ class HoursReview:
         tasks: dict[int, models.WbsNode],
         action: str,
         now: datetime,
+        reason: str | None = None,
     ) -> tuple[int, int, int]:
         """Bulk: every pending, finished day among `entries` that `user` is responsible for,
         except the days someone has to look at: over the mark (overtime is pay-relevant) and
@@ -241,5 +242,5 @@ class HoursReview:
         held_back = {id(entry) for entry in (*over, *unattended)}
         decided = [entry for entry in mine if id(entry) not in held_back]
         for entry in decided:
-            self.review(user, entry, tasks.get(entry.task_id), action, None, now)
+            self.review(user, entry, tasks.get(entry.task_id), action, reason, now)
         return len(decided), len(over), len(unattended)

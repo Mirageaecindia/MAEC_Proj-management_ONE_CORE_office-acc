@@ -14,10 +14,19 @@ from tests.test_query_counts import counted
 BULK = "/api/projects/{}/wbs-nodes/delete"
 
 
-def _tree(make, world, project_id, engineer=None):
-    task = make.wbs_node(project_id, world.lead_e, engineer=engineer or world.emp1)
+def _tree(make, world, project_id, engineer=None, created_by=None):
+    """A task with two subtasks, created by the lead unless `created_by` says otherwise."""
+    creator = (created_by or world.lead_e).id
+    task = make.wbs_node(project_id, world.lead_e, engineer=engineer or world.emp1, created_by_user_id=world.lead_e.id)
     subtasks = [
-        make.wbs_node(project_id, world.lead_e, engineer=engineer or world.emp1, parent_id=task.id, estimated_hours=4)
+        make.wbs_node(
+            project_id,
+            world.lead_e,
+            engineer=engineer or world.emp1,
+            parent_id=task.id,
+            estimated_hours=4,
+            created_by_user_id=creator,
+        )
         for _ in range(2)
     ]
     return task, subtasks
@@ -29,7 +38,7 @@ def _ids(db, project_id):
 
 def test_engineer_deletes_own_subtasks_but_never_a_task(client, db, make, world, governed):
     project_id, *_ = governed
-    task, (mine, _) = _tree(make, world, project_id)
+    task, (mine, _) = _tree(make, world, project_id, created_by=world.engineer)
 
     refused = client.delete(f"/api/wbs-nodes/{task.id}", headers=world.eng_h)
     assert refused.status_code == 403 and "only the project's lead deletes tasks" in refused.json()["detail"]
@@ -40,14 +49,30 @@ def test_engineer_deletes_own_subtasks_but_never_a_task(client, db, make, world,
     assert mine.id not in _ids(db, project_id) and task.id in _ids(db, project_id)
 
 
-def test_engineer_cannot_delete_a_subtask_under_someone_elses_task(client, db, make, world, governed):
+def test_engineer_cannot_delete_a_subtask_the_lead_planned_for_them(client, db, make, world, governed):
     project_id, *_ = governed
-    task, (theirs, _) = _tree(make, world, project_id, engineer=world.emp2)
+    task, (planned, _) = _tree(make, world, project_id)  # assigned to the engineer, created by the lead
 
-    response = client.delete(f"/api/wbs-nodes/{theirs.id}", headers=world.eng_h)
+    response = client.delete(f"/api/wbs-nodes/{planned.id}", headers=world.eng_h)
 
-    assert response.status_code == 403 and "under tasks assigned to you" in response.json()["detail"]
-    assert theirs.id in _ids(db, project_id)
+    assert response.status_code == 403 and "subtasks you created yourself" in response.json()["detail"]
+    assert planned.id in _ids(db, project_id)
+
+
+def test_a_subtask_the_engineer_adds_through_the_app_is_theirs_to_delete(client, db, make, world, governed):
+    project_id, *_ = governed
+    task, _ = _tree(make, world, project_id)
+    day = "2026-09-15"
+    created = client.post(
+        f"/api/wbs-nodes/{task.id}/subtasks",
+        json={"task_name": "Check the riser drawing", "estimated_hours": 4, "start_date": day, "end_date": day},
+        headers=world.eng_h,
+    )
+    assert created.status_code == 201, created.text
+    listed = client.get(f"/api/projects/{project_id}/wbs-structure?include_ancestors=true", headers=world.eng_h).json()
+    assert {n["id"]: n["created_by_user_id"] for n in listed}[created.json()["id"]] == world.engineer.id
+
+    assert client.delete(f"/api/wbs-nodes/{created.json()['id']}", headers=world.eng_h).status_code == 200
 
 
 def test_bu_head_and_other_leads_cannot_delete(client, make, world, governed):
@@ -77,7 +102,7 @@ def test_lead_deletes_tasks_and_subtasks_together(client, db, make, world, gover
 
 def test_a_selection_is_all_or_nothing(client, db, make, world, governed):
     project_id, *_ = governed
-    task, (mine, _) = _tree(make, world, project_id)
+    task, (mine, _) = _tree(make, world, project_id, created_by=world.engineer)
     before = _ids(db, project_id)
 
     response = client.post(BULK.format(project_id), json={"node_ids": [mine.id, task.id]}, headers=world.eng_h)
@@ -139,7 +164,7 @@ def test_worked_hours_survive_the_subtask_and_keep_counting(client, db, make, wo
 
 def test_an_open_session_on_a_deleted_subtask_is_banked_first(client, db, make, world, governed):
     project_id, *_ = governed
-    task, (sub, _) = _tree(make, world, project_id)
+    task, (sub, _) = _tree(make, world, project_id, created_by=world.engineer)
     now = datetime.now(UTC)
     make._save(
         models.TimeSession(

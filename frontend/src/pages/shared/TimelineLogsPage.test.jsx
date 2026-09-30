@@ -271,7 +271,8 @@ describe('Timeline Logs page groups the weekly log by engineer and navigates to 
 
     await screen.findByText('No hours logged for this week yet.');
     expect(screen.queryByText('Pending review')).toBeNull();
-    expect(screen.getByText(/Weekly Hours Logging \(Week/)).toBeTruthy();
+    expect(screen.getByText(/Weekly hours \(Week/)).toBeTruthy();
+    expect(screen.queryAllByRole('spinbutton')).toHaveLength(0); // nothing on the sheet looks typeable
   });
 
   it('navigates to the engineer weekly log details page when the name is clicked', async () => {

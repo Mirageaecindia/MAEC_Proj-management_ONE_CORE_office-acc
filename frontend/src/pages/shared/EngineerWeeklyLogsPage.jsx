@@ -3,7 +3,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
-import { HOURS_STATUS_LABELS, HOURS_STATUS_PILL, describeSession, isOverMark } from '../../utils/hours';
+import {
+  HOURS_STATUS_LABELS,
+  HOURS_STATUS_PILL,
+  describeSession,
+  describeTotals,
+  formatDuration,
+  isOverMark,
+  summarizeWeek,
+} from '../../utils/hours';
 import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 
 export function EngineerWeeklyLogsPage() {
@@ -76,10 +84,8 @@ export function EngineerWeeklyLogsPage() {
     return map;
   }, [nodes]);
 
-  const grandTotal = useMemo(
-    () => detailsRows.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0),
-    [detailsRows],
-  );
+  const totals = useMemo(() => summarizeWeek(detailsRows), [detailsRows]);
+  const todayUtc = new Date().toISOString().slice(0, 10); // rows are dated by the UTC day
 
   const loadDetails = useCallback(
     async (projectIdNum, weekStr) => {
@@ -132,7 +138,7 @@ export function EngineerWeeklyLogsPage() {
       day: 'numeric',
     });
 
-  // One day's hours: approved or rejected by its reviewer. Taking approved hours back needs a reason.
+  // One day's hours: approved or rejected by its reviewer. Every rejection needs a reason.
   const decide = async (entry, action, reason = null) => {
     try {
       setError('');
@@ -195,7 +201,8 @@ export function EngineerWeeklyLogsPage() {
             </Link>
             <span className="week-pill">{weekInfo.rangeStr}</span>
             <span className="week-pill">
-              Total: <strong className="total-hours-blue">{grandTotal.toFixed(2)} hrs</strong>
+              Total: <strong className="total-hours-blue">{totals.total.toFixed(2)} hrs</strong>
+              {describeTotals(totals) && <small> ({describeTotals(totals)})</small>}
             </span>
           </div>
         </div>
@@ -260,6 +267,11 @@ export function EngineerWeeklyLogsPage() {
                             unattended
                           </span>
                         )}
+                        {entry.trimmed_hours > 0 && (
+                          <small className="review-progress is-trimmed">
+                            {formatDuration(entry.trimmed_hours)} not approved (unattended)
+                          </small>
+                        )}
                         {(entry.sessions || []).map((session) => (
                           <small className="review-progress" key={session.login_at}>
                             {describeSession(session)}
@@ -277,6 +289,13 @@ export function EngineerWeeklyLogsPage() {
                         )}
                         {entry.review_reason && (
                           <small className="review-progress">{entry.review_reason}</small>
+                        )}
+                        {pending && !entry.finished && (
+                          <small className="review-progress">
+                            {entry.work_date === todayUtc
+                              ? 'Reviewable from tomorrow.'
+                              : 'Reviewable once the session still running from that day has closed.'}
+                          </small>
                         )}
                         {entry.can_review &&
                           entry.approval_status !== 'rejected' &&
@@ -304,11 +323,7 @@ export function EngineerWeeklyLogsPage() {
                               <button
                                 type="button"
                                 className="review-btn review-reject"
-                                onClick={() =>
-                                  pending
-                                    ? decide(entry, 'reject')
-                                    : setRejecting({ id: entry.id, reason: '' })
-                                }
+                                onClick={() => setRejecting({ id: entry.id, reason: '' })}
                               >
                                 Reject
                               </button>
@@ -317,7 +332,7 @@ export function EngineerWeeklyLogsPage() {
                         {rejecting?.id === entry.id && (
                           <span className="review-actions">
                             <input
-                              aria-label="Reason for rejecting approved hours"
+                              aria-label="Reason for rejecting these hours"
                               placeholder="Reason (required)"
                               value={rejecting.reason}
                               onChange={(e) => setRejecting({ id: entry.id, reason: e.target.value })}

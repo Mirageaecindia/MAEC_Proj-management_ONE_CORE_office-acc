@@ -153,7 +153,10 @@ def test_the_leads_approval_of_a_day_counts_the_engineers_hours(client, world, m
 def test_a_rejected_day_excludes_its_hours(client, world, make, dash):
     project_id, node = dash
     row = add_entry(make, project_id, node, world.emp1, date(2026, 7, 6), 6.0, status="pending_review")
-    assert client.post(f"/api/time-log-entries/{row.id}/reject", headers=world.lead_h).status_code == 200
+    rejected = client.post(
+        f"/api/time-log-entries/{row.id}/reject", json={"reason": "Not worked"}, headers=world.lead_h
+    )
+    assert rejected.status_code == 200
 
     body = dashboard(client, world, project_id)
 

@@ -4,7 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { RejectedHoursPanel } from '../../features/hours/RejectedHours';
-import { DAY_KEYS, HOURS_STATUS_LABELS, HOURS_STATUS_PILL, bulkNotice, groupByEngineer, isOverMark, summarizeWeek } from '../../utils/hours';
+import { DAY_KEYS, DAY_LEGEND, HOURS_STATUS_LABELS, HOURS_STATUS_PILL, bulkNotice, describeTotals, groupByEngineer, isOverMark, summarizeWeek } from '../../utils/hours';
 import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 
 const WBS_PHASES = ['Space Planning', 'STR Coordination', 'ID Coordination', 'BoH Area RCP Coordination'];
@@ -47,7 +47,7 @@ export function TimelineLogsPage() {
   const [serverDate, setServerDate] = useState(null);
 
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [sheetMessage, setSheetMessage] = useState(null); // { type, text }: shown beside the sheet's buttons
   const [now, setNow] = useState(() => new Date()); // the "today" marker moves once a minute
   const weekRequestRef = useRef('');
 
@@ -283,6 +283,7 @@ export function TimelineLogsPage() {
     [entries],
   );
   const reviewableAll = useMemo(() => groupRows.reduce((sum, group) => sum + group.reviewable, 0), [groupRows]);
+  const heldAll = useMemo(() => groupRows.reduce((sum, group) => sum + group.held, 0), [groupRows]);
 
   const handlePrevWeek = () => {
     const prev = new Date(currentMonday);
@@ -300,7 +301,7 @@ export function TimelineLogsPage() {
   const handleApprove = async (employeeId = null) => {
     if (!projectId || !weekStartStr) return;
     try {
-      setError('');
+      setSheetMessage(null);
       const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/hours/review`, {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
@@ -308,10 +309,11 @@ export function TimelineLogsPage() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.detail || 'Could not approve these hours.');
-      setNotice(bulkNotice(data));
+      const days = `${data.reviewed} day${data.reviewed === 1 ? '' : 's'}`;
+      setSheetMessage({ type: 'done', text: bulkNotice(data) || `Approved ${days}. They count from now.` });
       await loadProjectData(projectId, weekStartStr);
     } catch (err) {
-      setError(err.message);
+      setSheetMessage({ type: 'error', text: err.message });
     }
   };
 
@@ -329,7 +331,7 @@ export function TimelineLogsPage() {
           <h1>Timeline Schedule &amp; Weekly Timesheet Logs</h1>
           <p>
             {isEngineer
-              ? 'Review your assigned WBS schedule and log actual labor hours for the week.'
+              ? 'Your assigned WBS schedule, and the hours recorded from Login/Logout on your subtasks.'
               : 'Track project progress on a weekly Gantt schedule and review actual labor hours against assigned WBS nodes.'}
           </p>
         </div>
@@ -349,7 +351,6 @@ export function TimelineLogsPage() {
       </div>
 
       {error && <div className="resource-error">{error}</div>}
-      {notice && <div className="tracking-notice" role="status">{notice}</div>}
 
       <section className="allocation-card gantt-card">
         <div className="allocation-header">
@@ -479,7 +480,7 @@ export function TimelineLogsPage() {
       <section className="allocation-card timesheet-card">
         <div className="allocation-header timesheet-header">
           <div>
-            <h2>Weekly Hours Logging (Week {weekInfo.weekNum}: {weekInfo.rangeStr})</h2>
+            <h2>Weekly hours (Week {weekInfo.weekNum}: {weekInfo.rangeStr})</h2>
             <p>
               {isEngineer
                 ? 'Your hours for this week, one row per subtask and day from Login/Logout. Each day is approved by the task’s lead once the day is over.'
@@ -494,6 +495,11 @@ export function TimelineLogsPage() {
               Approve all on my tasks ({reviewableAll})
             </button>
           )}
+          {heldAll > 0 && (
+            <span className="sheet-held" title="Days over 8 hours and unattended days are approved one by one, in the engineer's weekly log">
+              {heldAll} day{heldAll === 1 ? '' : 's'} to review one by one
+            </span>
+          )}
           <div className="week-navigation">
             <button type="button" className="button button-secondary week-nav-btn" onClick={handlePrevWeek}>
               <ChevronLeft size={16} /> Prev Week
@@ -505,6 +511,11 @@ export function TimelineLogsPage() {
           </div>
         </div>
 
+        {sheetMessage && (
+          <div className={sheetMessage.type === 'error' ? 'sheet-message is-error' : 'sheet-message'} role="status">
+            {sheetMessage.text}
+          </div>
+        )}
         <div className="resource-table-wrap">
           <table className="resource-table timesheet-table">
             <thead>
@@ -551,19 +562,22 @@ export function TimelineLogsPage() {
 
                     {group.days.map((day, index) => (
                       <td key={DAY_KEYS[index]} className="col-day">
-                        <input
-                          type="number"
-                          className={`day-hour-input ${HOURS_STATUS_PILL[day.status] || ''}${isOverMark(day.hours) ? ' is-over-mark' : ''}`}
-                          value={day.hours === 0 ? '' : day.hours}
-                          placeholder="0"
-                          readOnly
-                          title={day.status === 'none' ? group.employee_name : `${group.employee_name}: ${HOURS_STATUS_LABELS[day.status] || 'partly rejected'}${isOverMark(day.hours) ? ' (over 8 h)' : ''}`}
-                        />
+                        {day.status === 'none' ? (
+                          <span className="day-cell is-empty">–</span>
+                        ) : (
+                          <span
+                            className={`day-cell ${HOURS_STATUS_PILL[day.status] || ''}${isOverMark(day.hours) ? ' is-over-mark' : ''}${day.unattended ? ' is-unattended' : ''}`}
+                            title={`${group.employee_name}: ${HOURS_STATUS_LABELS[day.status] || 'partly rejected'}${isOverMark(day.hours) ? ', over 8 h' : ''}${day.unattended ? ', unattended' : ''}`}
+                          >
+                            {day.hours}
+                          </span>
+                        )}
                       </td>
                     ))}
 
                     <td className="col-total">
                       <strong className="total-hours-blue">{group.total.toFixed(2)} hrs</strong>
+                      <small className="review-progress">{describeTotals(group)}</small>
                     </td>
 
                     <td className="col-approval">
@@ -591,6 +605,15 @@ export function TimelineLogsPage() {
               )}
               </tbody>
             </table>
+        </div>
+
+        <div className="day-legend" aria-label="What the day colours mean">
+          {DAY_LEGEND.map(([className, label]) => (
+            <span key={className}>
+              <i className={`day-cell ${className}`} /> {label}
+            </span>
+          ))}
+          <span>The week&apos;s total counts approved and pending hours; rejected hours never count.</span>
         </div>
 
         {projectId && (isLead || isBuHead) && (

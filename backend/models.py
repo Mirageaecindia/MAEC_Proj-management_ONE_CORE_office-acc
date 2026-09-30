@@ -1,9 +1,32 @@
+from datetime import UTC
+
 from sqlalchemy import Boolean, Column, Integer, String, Date, DateTime, Text, Float, UniqueConstraint, true
 from sqlalchemy.orm import validates
 from sqlalchemy.sql import func
+from sqlalchemy.types import TypeDecorator
 
 from app.domain.wbs import TO_DO, normalize_status
 from database import Base
+
+
+
+class UTCDateTime(TypeDecorator):
+    """A timestamp that is always UTC, and says so.
+
+    Every timestamp in this app is stored in UTC. SQLite hands them back without
+    a time zone, and a value serialised that way ("2026-09-30T04:00:00") is read
+    by a browser as local time. This type attaches UTC on the way out of the
+    database (and on the way in, for a naive value), so every API response
+    carries an explicit offset and the browser can show local time correctly.
+    """
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return value.replace(tzinfo=UTC) if value is not None and value.tzinfo is None else value
+
+    def process_result_value(self, value, dialect):
+        return value.replace(tzinfo=UTC) if value is not None and value.tzinfo is None else value
 
 
 class Project(Base):
@@ -55,11 +78,11 @@ class Project(Base):
     extension_status = Column(String(20), nullable=True, index=True)
     extension_approved_hours = Column(Float, nullable=True)
     # Set when the BU Head archives the project; archived projects are read-only (app/services/archive_guard.py).
-    archived_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    archived_at = Column(UTCDateTime, nullable=True, index=True)
     sharepoint_site_url = Column(String(500), nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=func.now())
 
 
 class ProjectLead(Base):
@@ -92,7 +115,7 @@ class User(Base):
     employee_id = Column(Integer, nullable=True, index=True)
     # Deactivated accounts (leavers) can't log in and their sessions stop working.
     is_active = Column(Boolean, nullable=False, default=True, server_default=true())
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())
 
 
 class LoginSession(Base):
@@ -105,7 +128,7 @@ class LoginSession(Base):
     id = Column(Integer, primary_key=True, index=True)
     token = Column(String(64), nullable=False, unique=True, index=True)
     user_id = Column(Integer, nullable=False, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())
 
 
 class Employee(Base):
@@ -128,7 +151,7 @@ class GanttTask(Base):
     status = Column(String(40), nullable=False, default="scheduled")
     planned_hours = Column(Integer, nullable=False, default=0)
     assigned_engineer_id = Column(Integer, nullable=True, index=True)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(UTCDateTime, server_default=func.now(), onupdate=func.now())
 
 
 class ResourceBooking(Base):
@@ -148,8 +171,8 @@ class ResourceBooking(Base):
 
     # BU Head approval workflow state. draft -> pending_approval -> approved.
     approval_status = Column(String(20), nullable=False, default="draft", index=True)
-    submitted_at = Column(DateTime(timezone=True), nullable=True)
-    approved_at = Column(DateTime(timezone=True), nullable=True)
+    submitted_at = Column(UTCDateTime, nullable=True)
+    approved_at = Column(UTCDateTime, nullable=True)
 
 
 class Notification(Base):
@@ -165,7 +188,7 @@ class Notification(Base):
     project_id = Column(Integer, nullable=True, index=True)
     actor_name = Column(String(150), nullable=True)
     is_read = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())
 
 
 class WbsNode(Base):
@@ -179,6 +202,7 @@ class WbsNode(Base):
     assigned_lead = Column(String(150), nullable=True)
     assigned_lead_user_id = Column(Integer, nullable=True)
     assigned_engineer_id = Column(Integer, nullable=True, index=True)
+    created_by_user_id = Column(Integer, nullable=True)  # an engineer deletes only subtasks they created
     estimated_hours = Column(Integer, nullable=True, default=None)
     deliverable_status = Column(String(40), nullable=False, default=TO_DO)
     description = Column(Text, nullable=True)
@@ -186,10 +210,10 @@ class WbsNode(Base):
     start_date = Column(Date, nullable=True)
     target_due_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
-    actual_start_datetime = Column(DateTime(timezone=True), nullable=True)
-    actual_end_datetime = Column(DateTime(timezone=True), nullable=True)
+    actual_start_datetime = Column(UTCDateTime, nullable=True)
+    actual_end_datetime = Column(UTCDateTime, nullable=True)
     phase = Column(String(50), nullable=True, index=True)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(UTCDateTime, server_default=func.now(), onupdate=func.now())
 
     @validates("deliverable_status")
     def _canonical_status(self, _key, status):
@@ -211,7 +235,7 @@ class WbsNodeHistory(Base):
     old_status = Column(String(40), nullable=True)
     new_status = Column(String(40), nullable=False)
     comment = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())
 
 
 class GovernanceAction(Base):
@@ -234,7 +258,7 @@ class GovernanceAction(Base):
     created_by = Column(String(150), nullable=True)
     extension_request_id = Column(Integer, nullable=True, index=True)
     requested_hours = Column(Float, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())
 
 
 class ExtensionRequest(Base):
@@ -255,8 +279,8 @@ class ExtensionRequest(Base):
     status = Column(String(20), nullable=False, default="pending", index=True)
     decision_comments = Column(Text, nullable=True)
     decided_by = Column(String(150), nullable=True)
-    requested_at = Column(DateTime(timezone=True), server_default=func.now())
-    decided_at = Column(DateTime(timezone=True), nullable=True)
+    requested_at = Column(UTCDateTime, server_default=func.now())
+    decided_at = Column(UTCDateTime, nullable=True)
 
 
 class TimeLogEntry(Base):
@@ -282,11 +306,11 @@ class TimeLogEntry(Base):
     approval_status = Column(String(20), nullable=False, default="pending_review", index=True)
     reviewed_by = Column(String(150), nullable=True)
     reviewed_by_user_id = Column(Integer, nullable=True)  # hours the BU Head rejected: only the BU Head re-approves
-    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_at = Column(UTCDateTime, nullable=True)
     review_reason = Column(Text, nullable=True)  # why approved hours were taken back, or a rejection note
-    reapproved_at = Column(DateTime(timezone=True), nullable=True)  # approved again once: then only the BU Head decides
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    reapproved_at = Column(UTCDateTime, nullable=True)  # approved again once: then only the BU Head decides
+    created_at = Column(UTCDateTime, server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=func.now())
 
 
 class TimeSession(Base):
@@ -307,15 +331,15 @@ class TimeSession(Base):
     task_id = Column(Integer, nullable=False, index=True)
     subtask_id = Column(Integer, nullable=False, index=True)
     employee_id = Column(Integer, nullable=False, index=True)
-    login_at = Column(DateTime(timezone=True), nullable=False, index=True)
-    last_seen_at = Column(DateTime(timezone=True), nullable=False)
-    last_active_at = Column(DateTime(timezone=True), nullable=True)  # last click, key press or tab switch
-    logout_at = Column(DateTime(timezone=True), nullable=True)
+    login_at = Column(UTCDateTime, nullable=False, index=True)
+    last_seen_at = Column(UTCDateTime, nullable=False)
+    last_active_at = Column(UTCDateTime, nullable=True)  # last click, key press or tab switch
+    logout_at = Column(UTCDateTime, nullable=True)
     active_seconds = Column(Integer, nullable=False, default=0)
     status = Column(String(20), nullable=False, default="active", index=True)
     ended_by = Column(String(20), nullable=True)  # engineer | laptop_off | no_visit | subtask_deleted
     version_id = Column(Integer, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(UTCDateTime, server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=func.now())
 
     __mapper_args__ = {"version_id_col": version_id}

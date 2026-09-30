@@ -7,6 +7,8 @@ import {
   isOverMark,
   describeSession,
   bulkNotice,
+  describeTotals,
+  formatDuration,
   describeTimeLeft,
 } from './hours';
 
@@ -33,8 +35,8 @@ describe('daily hours helpers', () => {
       row({ hours: 3, work_date: '2026-09-26', approval_status: 'approved' }),
     ]);
 
-    expect(summary.days[3]).toEqual({ hours: 3.5, status: 'pending_review' }); // Thursday: one row still pending
-    expect(summary.days[5]).toEqual({ hours: 3, status: 'approved' }); // Saturday counts like any day
+    expect(summary.days[3]).toEqual({ hours: 3.5, status: 'pending_review', unattended: false }); // one row still pending
+    expect(summary.days[5]).toEqual({ hours: 3, status: 'approved', unattended: false }); // Saturday counts like any day
     expect(summary.total).toBe(6.5);
     expect([summary.approved, summary.pending, summary.rejected]).toEqual([5, 1.5, 0]);
     expect([summary.daysLogged, summary.daysApproved, summary.reviewable]).toEqual([2, 1, 1]);
@@ -110,6 +112,43 @@ describe('describeTimeLeft', () => {
       '1 day left to approve.',
       '23 hours left to approve.',
       '1 hour left to approve.',
+    ]);
+  });
+});
+
+describe('what counts and what a bulk approval decides', () => {
+  const rows = [
+    row({ hours: 6, approval_status: 'approved' }),
+    row({ hours: 4, work_date: '2026-09-22', approval_status: 'rejected' }),
+    row({ hours: 7, work_date: '2026-09-23', can_review: true }),
+    row({ hours: 9.5, work_date: '2026-09-24', can_review: true }), // over 8 h
+    row({ hours: 8, work_date: '2026-09-25', can_review: true, unattended: true }),
+  ];
+
+  it('leaves rejected hours out of the week total and says so in parts', () => {
+    const summary = summarizeWeek(rows);
+
+    expect(summary.total).toBe(30.5); // 6 approved + 24.5 pending; the 4 rejected never count
+    expect(describeTotals(summary)).toBe('6 h approved \u00b7 24.5 h pending \u00b7 4 h rejected');
+    expect(describeTotals({ approved: 6, pending: 0, rejected: 0 })).toBe('6 h approved');
+  });
+
+  it('counts for the bulk button only the days it will approve', () => {
+    const summary = summarizeWeek(rows);
+
+    expect([summary.reviewable, summary.held]).toEqual([1, 2]); // the 7 h day; overtime and unattended are held
+    expect(summary.days[4].unattended).toBe(true);
+  });
+});
+
+describe('formatDuration', () => {
+  it('writes hours to the minute in words', () => {
+    expect([8.17, 6, 0.5, 2.0, 9.99].map(formatDuration)).toEqual([
+      '8 h 10 min',
+      '6 h',
+      '30 min',
+      '2 h',
+      '9 h 59 min',
     ]);
   });
 });

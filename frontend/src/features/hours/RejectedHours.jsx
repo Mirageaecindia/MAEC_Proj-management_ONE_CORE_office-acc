@@ -19,15 +19,20 @@ export function RejectedHoursPanel({ projectId, onChanged }) {
   const { data: rows = [], error } = useRejectedHours(projectId);
   const reapprove = useReapproveHours(projectId);
   const [open, setOpen] = useState(null); // { id, attendedOnly, reason } while a reason is being typed
+  const [done, setDone] = useState(''); // what was just approved again
 
-  if (!error && rows.length === 0) return null;
+  if (!error && !done && rows.length === 0) return null;
 
   const submit = (event) => {
     event.preventDefault();
     reapprove.mutate(
       { id: open.id, reason: open.reason.trim(), attendedOnly: open.attendedOnly },
       {
-        onSuccess: () => {
+        onSuccess: (result) => {
+          const row = rows.find((candidate) => candidate.id === open.id);
+          setDone(
+            `Approved again: ${result.hours} h for ${row?.employee_name || 'the engineer'}. They count from now.`,
+          );
           setOpen(null);
           onChanged?.();
         },
@@ -44,6 +49,11 @@ export function RejectedHoursPanel({ projectId, onChanged }) {
         rejected, only the BU Head decides.
       </p>
       <ErrorBanner error={error || reapprove.error} />
+      {done && (
+        <p className="rejected-done" role="status">
+          {done}
+        </p>
+      )}
       <ul className="rejected-list">
         {rows.map((row) => (
           <li key={row.id}>

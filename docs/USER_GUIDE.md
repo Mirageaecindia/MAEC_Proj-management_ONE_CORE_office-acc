@@ -201,9 +201,14 @@ just the sum of its days.
   theirs on *your* tasks. **Approve all on my tasks** does it for every engineer
   at once. Approved days count toward the project's usage straight away.
 - Click the engineer to open their **weekly log**: one row per subtask and day,
-  with **Approve** / **Reject** per day. Rejecting hours that were already
-  approved needs a **reason**; it is recorded in the audit log and shown on the
-  BU Head's dashboard.
+  with **Approve** / **Reject** per day. **Every rejection needs a reason**: the
+  engineer reads it, and so does the lead who may look at the rejection again.
+  Taking back hours that were already approved is also recorded in the audit
+  log and shown on the BU Head's dashboard.
+- **Reading the sheet:** a green day is approved, yellow is pending, red is rejected; a thick amber edge means
+  over 8 hours and a dashed edge means unattended. The week's total counts approved and pending hours, never
+  rejected ones. "Approve all on my tasks" counts only the days it will approve; days over 8 hours and
+  unattended days are named beside it and approved one by one in the weekly log.
 - **Rejected hours** (the panel under the weekly sheet): every rejection on the project from the last 7 days,
   with who rejected it and why. **Any lead of the project can approve those hours again**, with a reason; the
   decision is recorded with both names. After 7 days a rejection is final. Hours the BU Head rejected can only
@@ -241,7 +246,7 @@ their dashboard. You are notified of the decision.
 
 ### 5.1 WBS Structure
 Only the tasks and subtasks assigned to you (with their parent tasks). Click one
-to open Task Details. You can **delete your own subtasks** (one with the bin icon, or tick several and
+to open Task Details. You can **delete subtasks you created yourself** (one with the bin icon, or tick several and
 **Delete N subtasks**); only the project's lead deletes main tasks. Hours you already worked on a deleted
 subtask are kept and still count.
 
@@ -250,6 +255,7 @@ subtask are kept and still count.
 - **Comments** on your tasks.
 - **Login / Logout** (subtasks only) records your working time: the time from **Login** to **Logout** counts, including idle time and time spent in Revit, AutoCAD or other programs. Before 8 hours in a day nothing logs you out automatically. There is no screen to type hours.
   - **A day runs from 05:30 to 05:30 India time** (04:00 in the UAE, 03:00 in KSA): the app keeps days in UTC, and a session's hours go to the day it started on. Every page shows that same day for a row.
+  - **The bar under the header** shows on every page which subtask you are logged in to and since when. Past 8 hours it reminds you of the 30-minute rule, and if the system logged you out it says when and how long your day is so far.
   - **Switching subtasks is one step:** press **Login** on the next subtask. MAEC asks "You are logged in to X. Log out there and log in here?"; confirm, and X is logged out as the new one starts. Switch when you change what you work on, because hours stay on the subtask they were logged on.
   - **Log in** when you start a subtask and **log out** when you stop. If a subtask takes longer than planned, keep working; when it's done, create the next subtask and log in there.
   - **Keep MAEC open in a browser tab** while you work (minimised or behind other windows is fine). The tab tells the server once a minute that your laptop is on.

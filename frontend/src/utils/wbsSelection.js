@@ -2,16 +2,14 @@
  * Selecting WBS tasks and subtasks for deletion (decided 2026-09-29).
  *
  * A project lead may delete any task or subtask; an engineer only subtasks
- * under tasks assigned to them. Deleting a task takes its subtasks with it, so
+ * they created themselves. Deleting a task takes its subtasks with it, so
  * a ticked task implies its subtasks and they cannot be unticked on their own.
  */
 
-/** Whether this viewer may delete the node. `byId` maps node id → node. */
-export function canDelete(node, byId, { isLead, employeeId }) {
+/** Whether this viewer may delete the node. */
+export function canDelete(node, { isLead, userId }) {
   if (isLead) return true;
-  if (node.parent_id == null) return false;
-  const parent = byId[node.parent_id];
-  return Boolean(parent && employeeId && parent.assigned_engineer_id === employeeId);
+  return node.parent_id != null && userId != null && node.created_by_user_id === userId;
 }
 
 /** Ids the user ticked plus the subtasks of every ticked task. */

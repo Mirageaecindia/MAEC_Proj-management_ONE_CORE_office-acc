@@ -124,6 +124,7 @@ export function WbsStructurePage() {
       return undefined;
     }
     setEngineers([]);
+    if (!isLead) return undefined; // only a lead assigns engineers; the list is theirs to read
     // The Assign Engineer dropdown lists only engineers booked onto THIS
     // project via Resource Booking, refreshed whenever the project changes.
     fetch(`${API_BASE_URL}/api/projects/${selectedId}/booked-engineers`, { headers: authHeaders() })
@@ -134,7 +135,7 @@ export function WbsStructurePage() {
       })
       .catch(() => {});
     return () => { active = false; };
-  }, [selectedId, authHeaders]);
+  }, [selectedId, authHeaders, isLead]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -301,10 +302,11 @@ export function WbsStructurePage() {
   // Deleting: a lead deletes tasks and subtasks, an engineer only subtasks under their own
   // tasks; one confirmation for any number of them. Worked hours are kept by the server.
   const byId = useMemo(() => Object.fromEntries(tasks.map((task) => [task.id, task])), [tasks]);
-  const deletable = (task) => canDelete(task, byId, { isLead, employeeId });
+  const userId = user?.id;
+  const deletable = (task) => canDelete(task, { isLead, userId });
   const deletableIds = useMemo(
-    () => tasks.filter((task) => canDelete(task, byId, { isLead, employeeId })).map((task) => task.id),
-    [tasks, byId, isLead, employeeId],
+    () => tasks.filter((task) => canDelete(task, { isLead, userId })).map((task) => task.id),
+    [tasks, isLead, userId],
   );
   const implied = useMemo(() => impliedSelection(selected, tasks), [selected, tasks]);
   const selection = useMemo(() => summarizeSelection(selected, tasks), [selected, tasks]);

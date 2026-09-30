@@ -142,7 +142,6 @@ def seed(target: Path) -> dict:
     bu_head, _ = person("bu.test", "Test BU Head", "bu_head", None)
     lead_a, _ = person("lead.test", "Test Lead A", "engineer", "Electrical Lead")
     lead_b, _ = person("lead2.test", "Test Lead B", "engineer", "Mechanical Lead")
-    lead_c, _ = person("lead3.test", "Test Lead C", "engineer", "BIM Lead")
     engineer, engineer_employee = person("eng.test", "Test Engineer", "engineer", "Electrical Engineer")
     bu_h, lead_h = headers("bu.test"), headers("lead.test")
 
@@ -150,7 +149,7 @@ def seed(target: Path) -> dict:
         "start_date": (today - timedelta(days=30)).isoformat(),
         "end_date": (today + timedelta(days=335)).isoformat(),
     }
-    slots = {"electrical": lead_a, "mechanical": lead_b, "bim": lead_c}
+    slots = {"electrical": lead_a, "mechanical": lead_b}  # a project needs at least one lead, not all three
     project = ok(
         client.post(
             "/api/projects",
@@ -184,9 +183,10 @@ def seed(target: Path) -> dict:
     ok(client.post(f"/api/projects/{project_id}/resource-bookings/submit", headers=lead_h))
     ok(client.post(f"/api/projects/{project_id}/resource-bookings/approve", headers=bu_h))
 
-    def node(code: str, name: str, parent=None, day: date | None = None):
+    def node(code: str, name: str, parent=None, day: date | None = None, creator=None):
         row = models.WbsNode(
             project_id=project_id,
+            created_by_user_id=(creator or lead_a).id,
             wbs_code=code,
             task_name=name,
             phase="Space Planning",
@@ -251,7 +251,7 @@ def seed(target: Path) -> dict:
     overtime = node("1.4", "Overtime day: 9.5 hours", task)
     recent = node("1.5", "Rejected 6 days ago: one day left", task)
     final = node("1.6", "Rejected 8 days ago: final", task)
-    node("1.7", "Free subtask: try Login and switching here", task, day=today)
+    node("1.7", "Free subtask: try Login and switching here", task, day=today, creator=engineer)  # theirs to delete
 
     db.add(  # still open: opening the app as the engineer (or the 5-minute sweep) logs it out at the last visit
         models.TimeSession(
@@ -273,7 +273,7 @@ def seed(target: Path) -> dict:
     rejected(worked_day(final, 9, start=4, end=8), days_ago=8, reason="Not worked")
     db.close()
     engine.dispose()
-    return {"project": project["project_name"], "accounts": [bu_head, lead_a, lead_b, lead_c, engineer]}
+    return {"project": project["project_name"], "accounts": [bu_head, lead_a, lead_b, engineer]}
 
 
 GUIDE = """
@@ -283,7 +283,6 @@ Accounts (password for all: {password})
   bu.test     BU Head
   lead.test   Test Lead A: leads the project, assigned lead of the task, rejected the two days
   lead2.test  Test Lead B: another lead of the project (approves what Lead A rejected)
-  lead3.test  Test Lead C: the third lead slot
   eng.test    Test Engineer
 
 Start the backend on the scratch database (PowerShell, in backend\\):

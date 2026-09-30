@@ -352,6 +352,7 @@ class WbsNodeOut(WbsNodeBase):
     id: int
     project_id: int
     assigned_engineer_name: Optional[str] = None
+    created_by_user_id: Optional[int] = None  # an engineer deletes only subtasks they created
     level: int = 1
 
 
@@ -397,6 +398,7 @@ class HoursReviewIn(BaseModel):
     action: Literal["approved", "rejected"]
     week_start_date: date
     employee_id: Optional[int] = None  # one engineer, or everyone on the caller's tasks
+    reason: Optional[str] = None  # required when rejecting
 
 
 class HoursDecisionIn(BaseModel):

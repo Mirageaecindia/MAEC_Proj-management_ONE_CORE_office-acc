@@ -158,7 +158,7 @@ class RejectedHours:
             models.GovernanceAction(
                 project_id=entry.project_id,
                 action=HOURS_REAPPROVED,
-                comments=f"{part} on {entry.work_date.isoformat()} ({task_name}) approved again: {reason} ({was})",
+                comments=f"{part} on {entry.work_date.isoformat()} ({task_name}): {reason} ({was})",
                 created_by=approver,
             )
         )

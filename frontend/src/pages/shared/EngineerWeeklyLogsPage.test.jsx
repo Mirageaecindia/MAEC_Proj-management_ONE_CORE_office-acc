@@ -231,6 +231,27 @@ describe('Reviewing days on the Engineer Weekly Logs page', () => {
     expect(screen.getByText('2.00 hrs')).toBeTruthy();
   });
 
+  it('rejecting a pending day asks for a reason too', async () => {
+    renderPage();
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Reject' }))[0]);
+
+    expect(screen.getByRole('button', { name: 'Confirm reject' }).disabled).toBe(true);
+    expect(fetch.mock.calls.some(([url]) => /\/reject$/.test(url))).toBe(false); // nothing sent without one
+  });
+
+  it('says in plain words what a partial approval left out, and when today becomes reviewable', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    entriesData = [
+      { ...entriesData[0], hours: 2, approval_status: 'approved', trimmed_hours: 6, can_review: false },
+      { ...entriesData[1], work_date: today, finished: false, can_review: false },
+    ];
+    renderPage();
+
+    expect(await screen.findByText('6 h not approved (unattended)')).toBeTruthy();
+    expect(screen.getByText('Reviewable from tomorrow.')).toBeTruthy();
+  });
+
   it('taking approved hours back asks for a reason and shows it', async () => {
     entriesData = [{ ...entriesData[0], approval_status: 'approved' }];
     renderPage();
@@ -238,7 +259,7 @@ describe('Reviewing days on the Engineer Weekly Logs page', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Reject' }));
     const confirm = screen.getByRole('button', { name: 'Confirm reject' });
     expect(confirm.disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText('Reason for rejecting approved hours'), {
+    fireEvent.change(screen.getByLabelText('Reason for rejecting these hours'), {
       target: { value: 'Wrong subtask' },
     });
     fireEvent.click(confirm);

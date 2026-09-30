@@ -21,15 +21,16 @@ const byId = Object.fromEntries(nodes.map((node) => [node.id, node]));
 
 describe('canDelete', () => {
   it('lets a lead delete anything', () => {
-    expect(nodes.every((node) => canDelete(node, byId, { isLead: true, employeeId: null }))).toBe(true);
+    expect(nodes.every((node) => canDelete(node, { isLead: true, userId: null }))).toBe(true);
   });
 
-  it('lets an engineer delete only subtasks under their own tasks', () => {
-    const me = { isLead: false, employeeId: 7 };
-    expect(canDelete(byId[1], byId, me)).toBe(false); // a task, even their own
-    expect(canDelete(byId[11], byId, me)).toBe(true);
-    expect(canDelete(byId[21], byId, me)).toBe(false); // under someone else's task
-    expect(canDelete(sub(99, 404, 7), byId, me)).toBe(false); // parent not loaded
+  it('lets an engineer delete only subtasks they created themselves', () => {
+    const me = { isLead: false, userId: 41 };
+    expect(canDelete({ ...byId[1], created_by_user_id: 41 }, me)).toBe(false); // never a task
+    expect(canDelete({ ...byId[11], created_by_user_id: 41 }, me)).toBe(true);
+    expect(canDelete({ ...byId[12], created_by_user_id: 9 }, me)).toBe(false); // the lead planned it for them
+    expect(canDelete(byId[21], me)).toBe(false); // no creator on record
+    expect(canDelete({ ...byId[11], created_by_user_id: null }, { isLead: false, userId: null })).toBe(false);
   });
 });
 

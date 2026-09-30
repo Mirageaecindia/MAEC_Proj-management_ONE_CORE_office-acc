@@ -249,7 +249,8 @@ def test_the_clock_stops_for_an_automatic_lock_and_restarts_when_an_extension_re
     reopening are the real ones the system records, not hand-written audit rows."""
     project_id, node_a, _, pending = governed
     rejected_id = pending.id
-    assert client.post(f"/api/time-log-entries/{rejected_id}/reject", headers=world.lead_h).status_code == 200
+    first = client.post(f"/api/time-log-entries/{rejected_id}/reject", json={"reason": "Idle"}, headers=world.lead_h)
+    assert first.status_code == 200
     _reach_baseline(client, world, node_a)  # approved hours reach 100%: the automatic lock
     request = client.post(
         f"/api/projects/{project_id}/extension-requests",

@@ -52,15 +52,17 @@ export function MonthlyHoursChart({ months = [], emptyMessage }) {
                     className="ed-chart-month-group"
                     style={{ '--month-index': monthIndex }}
                   >
-                    {SERIES.map((series) => (
-                      <div key={series.key} className="ed-bar-vertical-wrapper">
-                        <div
-                          className={`ed-bar-vertical ${series.className}`}
-                          style={{ height: `${((Number(month[series.key]) || 0) / max) * 100}%` }}
-                          title={`${series.label}: ${formatHours(month[series.key])}`}
-                        />
-                      </div>
-                    ))}
+                    <div className="ed-chart-month-bars">
+                      {SERIES.map((series) => (
+                        <div key={series.key} className="ed-bar-vertical-wrapper">
+                          <div
+                            className={`ed-bar-vertical ${series.className}`}
+                            style={{ height: `${((Number(month[series.key]) || 0) / max) * 100}%` }}
+                            title={`${series.label}: ${formatHours(month[series.key])}`}
+                          />
+                        </div>
+                      ))}
+                    </div>
                     <div className="ed-chart-month-label">{month.month_label}</div>
                   </div>
                 ))}

@@ -19,7 +19,7 @@ REJECTED = "rejected"
 # flagged for the reviewer, and never approved in bulk.
 DAILY_MARK_HOURS = 8
 
-REASON_REQUIRED = "Give a reason for rejecting hours that were already approved."
+REASON_REQUIRED = "Give a reason for rejecting these hours."
 INDIVIDUAL_ONLY = (
     "Only days over 8 hours or with unattended time are waiting for you; those are approved day by day, not in bulk."
 )
@@ -77,13 +77,14 @@ def reviewable(day: date, today: date) -> bool:
 def review_transition(current: str, new: str, reason: str | None) -> str | None:
     """Why a day's hours can't go from `current` to `new`, or None when they can.
 
-    pending -> approved or rejected: normal. approved -> rejected: only with a reason (it is
-    audited and shown to the BU Head). rejected -> approved: never; the hours are corrected
-    instead, which keeps a rejection from being quietly undone."""
+    pending -> approved: normal. Anything -> rejected: only with a reason, which the engineer
+    and whoever looks at the rejection again will read (taking back an approval is also audited
+    and shown to the BU Head). rejected -> approved: not here, only through the second look
+    within seven days (app/services/rejected_hours.py)."""
     if current == new:
         return f"These hours are already {new}."
     if current == REJECTED:
         return NEVER_RE_APPROVED
-    if current == APPROVED and not (reason or "").strip():
+    if new == REJECTED and not (reason or "").strip():
         return REASON_REQUIRED
     return None

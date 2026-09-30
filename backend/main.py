@@ -670,6 +670,7 @@ def nodes_output(db: Session, nodes: list) -> list:
             target_due_date=node.target_due_date,
             end_date=node.end_date,
             phase=node.phase,
+            created_by_user_id=node.created_by_user_id,
             level=level(node),
         )
         for node in nodes
@@ -805,6 +806,7 @@ def time_entries_output(db: Session, entries: list, project: models.Project, use
                     "unattended": unattended_seconds(s) > 0,
                 }
                 for s in row_sessions
+                if s.active_seconds >= 60  # a Login undone at once (a switch, a mis-click) is not worth a line
             ],
             "unattended": unattended > 0,
             "attended_hours": round(entry.hours - unattended, 2) if unattended > 0 else None,
@@ -908,7 +910,7 @@ def review_hours_in_bulk(
     if not any(review.may_decide(user, e, tasks.get(e.task_id)) for e in entries):
         raise HTTPException(status_code=403, detail=NOT_YOUR_HOURS)
     reviewed, over_mark, unattended = review.review_pending(
-        user, entries, tasks, payload.action, datetime.now(timezone.utc)
+        user, entries, tasks, payload.action, datetime.now(timezone.utc), payload.reason
     )
     if not reviewed:
         held_back = over_mark or unattended
@@ -1616,7 +1618,7 @@ def create_wbs_node(
         node_data["assigned_lead"] = user.full_name
         node_data["assigned_lead_user_id"] = user.id
     node_data["phase"] = phase
-    node = models.WbsNode(project_id=project_id, **node_data)
+    node = models.WbsNode(project_id=project_id, created_by_user_id=user.id, **node_data)
     db.add(node)
     db.commit()
     db.refresh(node)
@@ -1630,6 +1632,7 @@ def create_wbs_node(
             parent_id=node.id,
             wbs_code=child_code,
             task_name=payload.subtask.strip(),
+            created_by_user_id=user.id,
             assigned_lead=node.assigned_lead,
             assigned_lead_user_id=node.assigned_lead_user_id,
             estimated_hours=None,
@@ -1716,6 +1719,7 @@ def create_wbs_subtask(
         parent_id=parent.id,
         wbs_code=child_code,
         task_name=payload.task_name.strip(),
+        created_by_user_id=user.id,
         assigned_lead=parent.assigned_lead or (user.full_name if role == "lead" else None),
         assigned_lead_user_id=parent.assigned_lead_user_id or (user.id if role == "lead" else None),
         assigned_engineer_id=payload.assigned_engineer_id
@@ -2026,7 +2030,11 @@ async def upload_wbs(
                 db.commit()
             updated += 1
         else:
-            db.add(models.WbsNode(project_id=project_id, **payload.model_dump(exclude={"subtask"})))
+            db.add(
+                models.WbsNode(
+                    project_id=project_id, created_by_user_id=user.id, **payload.model_dump(exclude={"subtask"})
+                )
+            )
             db.commit()
             created += 1
         saved_node = db.query(models.WbsNode).filter_by(project_id=project_id, wbs_code=code).first()

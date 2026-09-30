@@ -211,6 +211,7 @@ def import_outline(db: Session, project: models.Project, user: models.User, cont
                     deliverable_status=TO_DO,
                     assigned_lead=user.full_name,
                     assigned_lead_user_id=user.id,
+                    created_by_user_id=user.id,
                 )
                 next_root += 1
                 db.add(task)
@@ -234,6 +235,7 @@ def import_outline(db: Session, project: models.Project, user: models.User, cont
             assigned_lead=task.assigned_lead,
             assigned_lead_user_id=task.assigned_lead_user_id,
             assigned_engineer_id=task.assigned_engineer_id,
+            created_by_user_id=user.id,
             start_date=task.start_date,
             target_due_date=task.target_due_date,
             end_date=task.end_date,

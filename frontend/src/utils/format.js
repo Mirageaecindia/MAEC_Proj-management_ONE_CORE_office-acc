@@ -1,3 +1,5 @@
+import { parseApiTimestamp } from './displayTime';
+
 /** Display formatting shared by every page (numbers, money, dates, sizes). */
 
 export const NOT_AVAILABLE = 'Not available';
@@ -31,8 +33,8 @@ export function formatInteger(value, { fallback = '—' } = {}) {
 /** ISO date/time -> locale date and time. */
 export function formatDateTime(value, { fallback = NOT_AVAILABLE } = {}) {
   if (!value) return fallback;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? fallback : parsed.toLocaleString();
+  const parsed = parseApiTimestamp(value); // server times are UTC, shown in the viewer's time zone
+  return !parsed || Number.isNaN(parsed.getTime()) ? fallback : parsed.toLocaleString();
 }
 
 /** 50000, "USD" -> "$50,000.00" */

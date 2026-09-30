@@ -210,7 +210,7 @@ class TrackingService:
         self.db.commit()
         if running is not None:
             enforce_governance(self.db, running.project_id)
-        return self._state(session)
+        return self._state_for(session, user.employee_id, now)  # with the over-8 state, at once
 
     def logout(self, user: models.User) -> dict:
         session = self.sessions.active_session(_employee_id(user))
@@ -299,7 +299,12 @@ class TrackingService:
         if last is None or last.ended_by != NO_VISIT or as_utc(last.logout_at).date() != now.date():
             return None
         day_seconds = self.sessions.banked_seconds(employee_id, as_utc(last.login_at).date())
-        return {"at": as_utc(last.logout_at), "subtask_id": last.subtask_id, "day_hours": round(day_seconds / 3600, 2)}
+        return {
+            "at": as_utc(last.logout_at),
+            "project_id": last.project_id,
+            "subtask_id": last.subtask_id,
+            "day_hours": round(day_seconds / 3600, 2),
+        }
 
     def _resume_after_pause(self, user: models.User, now: datetime) -> models.TimeSession | None:
         """The sweep paused the session while the laptop was off: carry on where it left off."""

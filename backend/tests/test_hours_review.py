@@ -293,3 +293,29 @@ def test_bulk_approval_skips_unattended_days_and_reports_them(client, db, make, 
     assert (_status(db, normal), _status(db, row_e)) == ("approved", "pending_review")
     again = _bulk(client, anita, project_id)  # only the flagged day is left
     assert again.status_code == 409 and "day by day" in again.json()["detail"]
+
+
+def test_every_rejection_needs_a_reason(client, db, world, split):
+    project_id, row_e, _ = split
+    anita = _headers(client, "lead.e")
+
+    assert _row(client, anita, row_e.id, "reject").status_code == 400  # a pending day too
+    assert _row(client, anita, row_e.id, "reject", reason="   ").status_code == 400
+    assert _bulk(client, anita, project_id, action="rejected").status_code == 400
+    assert _status(db, row_e) == "pending_review"
+
+    rejected = _row(client, anita, row_e.id, "reject", reason="No drawings issued that day")
+    assert rejected.status_code == 200 and rejected.json()["review_reason"] == "No drawings issued that day"
+
+
+def test_sessions_under_a_minute_are_not_listed_and_times_carry_their_utc_offset(client, db, make, world, split):
+    project_id, row_e, _ = split
+    _session(make, row_e, login=9, logout=17, last_visit=17, ended_by="engineer")
+    _session(make, row_e, login=17, logout=17.005, last_visit=17, ended_by="engineer")  # 18 seconds: a mis-click
+
+    listed = client.get(f"/api/projects/{project_id}/timesheet?week_start={WEEK.isoformat()}", headers=world.bu_h)
+    (row,) = [r for r in listed.json() if r["id"] == row_e.id]
+
+    assert len(row["sessions"]) == 1
+    for key in ("login_at", "logout_at", "last_visit_at"):
+        assert row["sessions"][0][key].endswith(("+00:00", "Z")), row["sessions"][0][key]  # never read as local time

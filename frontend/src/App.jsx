@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import { MaecHeader } from './components/MaecHeader';
+import { TrackingBar } from './components/TrackingBar';
 import { useLeadsProjects } from './hooks/useProjects';
 import { useTrackingState } from './hooks/useTracking';
 import { canAccess } from './utils/access';
@@ -72,6 +73,7 @@ function WorkspaceRoute({ children, roles, subtitle }) {
   return (
     <ProtectedRoute roles={roles}>
       <MaecHeader subtitle={subtitle} />
+      <TrackingBar />
       {children}
     </ProtectedRoute>
   );

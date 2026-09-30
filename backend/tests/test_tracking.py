@@ -459,3 +459,13 @@ def test_coming_back_after_a_long_gap_past_the_mark_is_not_a_visit_that_saves_th
     closed = db.get(models.TimeSession, session_id)
     assert closed.ended_by == NO_VISIT and closed.logout_at == closed.last_active_at
     assert closed.last_active_at.replace(tzinfo=UTC) == NOON - timedelta(hours=2, minutes=10)
+
+
+def test_login_reports_at_once_that_the_day_is_past_the_mark(client, db, world, subtask):
+    earlier = _login(client, world, subtask)
+    _rewind(db, earlier, logged_in=timedelta(hours=9), last_seen=timedelta(0))
+    _banked_today(db, earlier, 8.5)
+
+    response = client.post(START, json={"subtask_id": subtask.id}, headers=world.eng_h)
+
+    assert response.status_code == 201 and response.json()["over_mark"] is True  # no waiting for a heartbeat

@@ -1,3 +1,5 @@
+import { parseApiTimestamp } from './displayTime';
+
 /**
  * Daily hours: one row per subtask, engineer and day, approved per day by the task's lead
  * (or the BU Head). The week is only the sum of its days.
@@ -38,7 +40,18 @@ const SESSION_END_LABELS = {
   project_archived: 'project archived',
 };
 
-const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+// Server times are UTC; the browser shows them in the viewer's own time zone.
+const clock = (value) =>
+  parseApiTimestamp(value)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) ?? '';
+
+/** Hours in words, to the minute: 8.17 -> "8 h 10 min", 6 -> "6 h", 0.5 -> "30 min". */
+export function formatDuration(hours) {
+  const minutes = Math.round((Number(hours) || 0) * 60);
+  const whole = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (whole && rest) return `${whole} h ${rest} min`;
+  return whole ? `${whole} h` : `${rest} min`;
+}
 
 /** One line per Login/Logout session behind a day's row: "09:00 – 17:00 · last visit 11:00 · laptop off". */
 export function describeSession(session) {
@@ -53,6 +66,15 @@ export const HOURS_STATUS_LABELS = {
   approved: 'Approved',
   rejected: 'Rejected',
 };
+
+/** What a day cell's colour means, in the order of the legend. */
+export const DAY_LEGEND = [
+  ['status-approved', 'Approved'],
+  ['status-pending', 'Pending'],
+  ['status-rejected', 'Rejected'],
+  ['is-over-mark', 'Over 8 h'],
+  ['is-unattended', 'Unattended'],
+];
 
 export const HOURS_STATUS_PILL = {
   pending_review: 'status-pending',
@@ -69,6 +91,20 @@ export function weekdayIndex(isoDate) {
 }
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+/** A day the reviewer must look at on its own: bulk approval leaves it alone. */
+export const needsIndividualReview = (row) => isOverMark(row.hours) || Boolean(row.unattended);
+
+/** "15.5 h approved \u00b7 6 h pending \u00b7 9 h rejected": only the parts that exist. */
+export function describeTotals({ approved, pending, rejected }) {
+  return [
+    approved && `${approved} h approved`,
+    pending && `${pending} h pending`,
+    rejected && `${rejected} h rejected`,
+  ]
+    .filter(Boolean)
+    .join(' \u00b7 ');
+}
 
 /** The status of a set of rows (a day, or a week): all one status, or 'mixed'; 'none' when empty. */
 export function rowsStatus(rows) {
@@ -89,17 +125,26 @@ export function summarizeWeek(rows) {
   const byStatus = (status) =>
     round2(rows.filter((row) => row.approval_status === status).reduce((sum, row) => sum + row.hours, 0));
   const loggedDays = days.filter((day) => day.rows.length > 0);
+  const mine = rows.filter((row) => row.can_review && row.approval_status === 'pending_review');
+  const approved = byStatus('approved');
+  const pending = byStatus('pending_review');
   return {
-    days: days.map((day) => ({ hours: day.hours, status: rowsStatus(day.rows) })),
-    total: round2(rows.reduce((sum, row) => sum + row.hours, 0)),
-    approved: byStatus('approved'),
-    pending: byStatus('pending_review'),
+    days: days.map((day) => ({
+      hours: day.hours,
+      status: rowsStatus(day.rows),
+      unattended: day.rows.some((row) => row.unattended),
+    })),
+    total: round2(approved + pending), // rejected hours never count
+    approved,
+    pending,
     rejected: byStatus('rejected'),
     status: rowsStatus(rows),
     daysLogged: loggedDays.length,
     daysApproved: loggedDays.filter((day) => rowsStatus(day.rows) === 'approved').length,
-    // Pending, finished days that the viewer is the reviewer of: what "Approve week" would decide.
-    reviewable: rows.filter((row) => row.can_review && row.approval_status === 'pending_review').length,
+    // Pending, finished days the viewer reviews: what a bulk approval decides, and what it
+    // leaves for an individual look (over 8 hours, unattended).
+    reviewable: mine.filter((row) => !needsIndividualReview(row)).length,
+    held: mine.filter(needsIndividualReview).length,
   };
 }
 

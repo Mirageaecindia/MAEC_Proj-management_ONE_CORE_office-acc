@@ -1208,6 +1208,32 @@ button.td-pill:active { transform: translateY(1px); }
 .rejected-text small { display: block; color: #6d7e8d; font-size: 11.5px; }
 .rejected-form { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 6px; }
 .rejected-form input { flex: 1 1 260px; height: 30px; padding: 0 8px; font-size: 12px; border: 1px solid #c8d5e1; border-radius: 4px; }
+/* Day cells on the weekly sheet: read-only, coloured by what happened to the day. */
+.day-cell { display: inline-block; min-width: 46px; padding: 6px 6px; border: 1px solid #c8d5e1; border-radius: 4px; background: #fff; color: #1c334b; font-weight: 600; font-size: 12.5px; text-align: center; }
+.day-cell.is-empty { border-color: transparent; background: transparent; color: #b3bfca; font-weight: 400; }
+.day-cell.status-approved { background: #e9f9ef; border-color: #b7e4c7; color: #166534; }
+.day-cell.status-pending { background: #fff4cc; border-color: #e7c76b; color: #7a5200; }
+.day-cell.status-rejected { background: #fee4e2; border-color: #f3b8b3; color: #b42318; text-decoration: line-through; }
+.day-cell.is-over-mark { box-shadow: inset 0 0 0 2px #d98a00; }
+.day-cell.is-unattended { border-style: dashed; border-width: 2px; border-color: #9a2a1f; }
+.day-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 10px 16px; color: #56697b; font-size: 11.5px; }
+.day-legend .day-cell { min-width: 18px; height: 14px; padding: 0; margin-right: 5px; vertical-align: -2px; }
+.sheet-message { margin: 0 16px 10px; padding: 9px 12px; border: 1px solid #b7e4c7; border-radius: 6px; background: #f1fbf4; color: #166534; font-size: 12.5px; }
+.sheet-message.is-error { border-color: #f0c36d; background: #fff8e8; color: #5a4200; }
+.sheet-held { align-self: center; color: #7a5200; font-size: 11.5px; font-weight: 600; }
+.rejected-done { margin: 0 0 10px; padding: 8px 12px; border: 1px solid #b7e4c7; border-radius: 6px; background: #f1fbf4; color: #166534; font-size: 12.5px; }
+.review-progress.is-trimmed { color: #9a2a1f; font-weight: 600; }
+/* The weekly log's approval cell wraps instead of pushing buttons off the page. */
+.details-table td.col-approval { white-space: normal; min-width: 250px; max-width: 360px; }
+.details-table td.col-approval .review-actions { display: flex; flex-wrap: wrap; margin: 6px 0 0; }
+.details-table td.col-approval .review-progress { display: block; white-space: normal; overflow-wrap: anywhere; }
+/* Under the header on every page: what is being tracked, or that the system logged the engineer out. */
+.tracking-bar { display: flex; align-items: center; gap: 10px; padding: 8px 48px; background: #eaf6ee; border-bottom: 1px solid #b7e4c7; color: #14532d; font-size: 12.5px; }
+.tracking-bar a { color: inherit; font-weight: 700; }
+.tracking-bar.is-over-mark { background: #fff8e8; border-bottom-color: #f0c36d; color: #5a4200; }
+.tracking-bar.is-logout { background: #eef4fa; border-bottom-color: #c8d5e1; color: #1c334b; }
+.tracking-dot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: #1f9d55; box-shadow: 0 0 0 3px rgba(31, 157, 85, .2); }
+.tracking-bar.is-over-mark .tracking-dot { background: #d98a00; box-shadow: 0 0 0 3px rgba(217, 138, 0, .2); }
 .tracking-notice { margin: 0 0 14px; padding: 10px 14px; border: 1px solid #f0c36d; border-radius: 6px; background: #fff8e8; color: #5a4200; font-size: 13px; line-height: 1.5; }
 .tracking-notice.is-logout { border-color: #c8d5e1; background: #eef4fa; color: #1c334b; }
 
@@ -1314,14 +1340,16 @@ tr.clickable-row:hover td { background: #f0f7fd !important; }
 .ed-chart-y-axis { display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-width: 60px; padding-right: 8px; padding-top: 4px; padding-bottom: 28px; }
 .ed-chart-y-label { color: #8a93a0; font-size: 10px; text-align: right; line-height: 1; }
 .ed-chart-plot-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.ed-chart-bars-grouped { display: flex; align-items: flex-end; gap: 12px; height: 100%; padding-top: 4px; padding-bottom: 28px; }
+/* Each month is a column: a row of bars that takes the height, then the label (8 + 20 = the axis's 28px). */
+.ed-chart-bars-grouped { display: flex; align-items: stretch; gap: 12px; height: 100%; padding-top: 4px; }
 .ed-chart-month-group { display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 60px; max-width: 120px; }
+.ed-chart-month-bars { flex: 1; min-height: 0; display: flex; align-items: flex-end; }
 .ed-bar-vertical-wrapper { width: 22px; height: 100%; display: flex; align-items: flex-end; margin: 0 4px; }
 .ed-bar-vertical { width: 100%; border-radius: 3px 3px 0 0; transition: height 0.3s ease; }
 .ed-bar-vertical-planned { background: #aeb8c1; opacity: 0.9; }
 .ed-bar-vertical-normal { background: #3b9bd7; }
 .ed-bar-vertical-exceeded { background: #d64550; }
-.ed-chart-month-label { margin-top: 8px; color: #4f6378; font-size: 11px; font-weight: 600; text-align: center; white-space: nowrap; }
+.ed-chart-month-label { height: 20px; margin-top: 8px; color: #4f6378; font-size: 11px; font-weight: 600; text-align: center; white-space: nowrap; }
 
 .ed-alert { display: flex; gap: 10px; margin: 10px 0 14px; padding: 11px 13px; color: #8c2f3a; background: #fef1f1; border: 1px solid #f0cccc; border-radius: 8px; }
 .ed-alert svg { flex: 0 0 auto; margin-top: 1px; color: #d64550; }
