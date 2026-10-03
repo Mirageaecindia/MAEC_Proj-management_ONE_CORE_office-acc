@@ -45,6 +45,13 @@ can't sign in and their bookings and hours stay on record; **Reactivate** brings
 only for an account with no work on record at all, such as one imported by mistake. BU Head accounts are listed
 but not changed here.
 
+**Appointing a BU Head:** **Make BU Head** on an engineer's row, confirmed with your own password. It works only
+if they are on no live project (not a lead, not booked, no tasks on a project that isn't archived); otherwise the
+dialog names the projects and the role they hold there, and they must be removed from those first. A BU Head
+doesn't lead projects, get booked or log hours. **Remove BU Head** turns a promoted BU Head back into an engineer;
+never yourself and never the last BU Head. The person is signed out and signs in again with the new role, and
+the other BU Heads get a notification.
+
 **Forgotten password:** the BU Head enters the work email under **Reset a forgotten password** on the same card
 and gives the person the new temporary password; they set their own at the next sign-in, and any browser
 still signed in as them is signed out. **Changing your password** any time: the account menu (your name, top

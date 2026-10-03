@@ -1,7 +1,13 @@
 import { useMemo, useState } from 'react';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ErrorBanner } from '../../components/Feedback';
-import { useDeletePerson, usePeople, useSetPersonActive, useUpdatePerson } from '../../hooks/usePeople';
+import {
+  useChangeRole,
+  useDeletePerson,
+  usePeople,
+  useSetPersonActive,
+  useUpdatePerson,
+} from '../../hooks/usePeople';
 
 function statusOf(person) {
   if (!person.is_active) return ['Deactivated', 'status-none'];
@@ -15,7 +21,7 @@ const matches = (person, query) =>
   );
 
 /** One person's row, or their edit form. */
-function PersonRow({ person, onDelete }) {
+function PersonRow({ person, onDelete, onChangeRole }) {
   const update = useUpdatePerson();
   const setActive = useSetPersonActive();
   const [editing, setEditing] = useState(null); // { full_name, username, job_role } while editing
@@ -85,8 +91,25 @@ function PersonRow({ person, onDelete }) {
         <span className={`approval-pill ${pill}`}>{status}</span>
       </td>
       <td>
+        {person.can_remove_bu_head && (
+          <span className="review-actions">
+            <button type="button" className="review-btn" onClick={() => onChangeRole(person, false)}>
+              Remove BU Head
+            </button>
+          </span>
+        )}
         {person.can_edit && (
           <span className="review-actions">
+            {person.can_make_bu_head && (
+              <button
+                type="button"
+                className="review-btn"
+                disabled={busy}
+                onClick={() => onChangeRole(person, true)}
+              >
+                Make BU Head
+              </button>
+            )}
             <button
               type="button"
               className="review-btn"
@@ -136,6 +159,8 @@ export function PeopleList() {
   const deletePerson = useDeletePerson();
   const [query, setQuery] = useState('');
   const [deleting, setDeleting] = useState(null);
+  const changeRole = useChangeRole();
+  const [roleChange, setRoleChange] = useState(null); // { person, makeBuHead, password }
 
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -177,7 +202,15 @@ export function PeopleList() {
             </thead>
             <tbody>
               {shown.map((person) => (
-                <PersonRow key={person.id} person={person} onDelete={setDeleting} />
+                <PersonRow
+                  key={person.id}
+                  person={person}
+                  onDelete={setDeleting}
+                  onChangeRole={(target, makeBuHead) => {
+                    changeRole.reset();
+                    setRoleChange({ person: target, makeBuHead, password: '' });
+                  }}
+                />
               ))}
               {shown.length === 0 && (
                 <tr>
@@ -192,8 +225,48 @@ export function PeopleList() {
       )}
       <p className="people-hint">
         Deactivate a leaver: they can&apos;t sign in, and their bookings and hours stay on record. Delete is
-        offered only for an account with no work on record, such as one imported by mistake.
+        offered only for an account with no work on record, such as one imported by mistake. Make BU Head
+        works only for someone on no live project, as engineer or lead.
       </p>
+      {roleChange && (
+        <ConfirmDialog
+          title={
+            roleChange.makeBuHead
+              ? `Make ${roleChange.person.full_name || roleChange.person.username} a BU Head?`
+              : `Remove the BU Head role from ${roleChange.person.full_name || roleChange.person.username}?`
+          }
+          tone="primary"
+          confirmLabel={roleChange.makeBuHead ? 'Make BU Head' : 'Remove BU Head'}
+          busyLabel="Saving…"
+          busy={changeRole.isPending}
+          confirmDisabled={!roleChange.password}
+          error={changeRole.error}
+          onConfirm={() =>
+            changeRole.mutate(
+              { id: roleChange.person.id, makeBuHead: roleChange.makeBuHead, password: roleChange.password },
+              { onSuccess: () => setRoleChange(null) },
+            )
+          }
+          onCancel={() => setRoleChange(null)}
+        >
+          <p className="confirm-modal-subtext">
+            {roleChange.makeBuHead
+              ? 'A BU Head approves bookings and extensions, sees costs and can stop projects. They no longer lead projects, get booked or log hours. Only someone on no live project can be made a BU Head.'
+              : 'They become an engineer again and can be booked and made a lead.'}{' '}
+            They are signed out now and sign in again with the new role. The other BU Heads are notified.
+          </p>
+          <label className="field people-confirm-password">
+            <span className="field-label">Your password, to confirm</span>
+            <input
+              type="password"
+              aria-label="Your password, to confirm"
+              autoComplete="current-password"
+              value={roleChange.password}
+              onChange={(event) => setRoleChange({ ...roleChange, password: event.target.value })}
+            />
+          </label>
+        </ConfirmDialog>
+      )}
       {deleting && (
         <ConfirmDialog
           title={`Delete ${deleting.full_name || deleting.username}?`}

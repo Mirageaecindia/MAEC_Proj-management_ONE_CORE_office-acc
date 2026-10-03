@@ -39,3 +39,8 @@ export function useSetPersonActive() {
 export function useDeletePerson() {
   return usePeopleMutation(peopleApi.remove);
 }
+
+/** `{ id, makeBuHead, password }` */
+export function useChangeRole() {
+  return usePeopleMutation(({ id, makeBuHead, password }) => peopleApi.changeRole(id, makeBuHead, password));
+}

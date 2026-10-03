@@ -1452,6 +1452,8 @@ tr.clickable-row:hover td { background: #f0f7fd !important; }
 .people-table td { text-align: left; white-space: normal; overflow-wrap: anywhere; font-size: 12.5px; }
 .people-table th { text-align: left; }
 .people-role { color: #6d7e8d; font-size: 11px; }
+.people-confirm-password { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; text-align: left; }
+.people-confirm-password input { height: 34px; padding: 0 10px; border: 1px solid #c8d5e1; border-radius: 6px; }
 .people-edit-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
 .people-edit-form label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #56697b; }
 .people-edit-form input { min-width: 220px; height: 32px; padding: 0 8px; border: 1px solid #c8d5e1; border-radius: 4px; font-size: 12.5px; }

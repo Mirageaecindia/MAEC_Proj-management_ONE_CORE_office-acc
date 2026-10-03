@@ -17,6 +17,12 @@ The BU Head also sees everyone with an account, corrects an engineer's name, wor
 or job role, and deactivates a leaver (they can't sign in; their bookings and hours stay,
 since pay is calculated from them). Only an account with no history at all (created by
 mistake) is deleted outright. BU Head accounts are listed but not changed here.
+
+A BU Head may make an engineer a BU Head (decided 2026-10-04): confirmed with their own
+password, and only when the engineer is on no live project (not a lead, not booked, no
+tasks on a project that isn't archived), since a BU Head doesn't lead, get booked or log
+hours. The role can be taken back from a promoted BU Head, never from the last one or
+from oneself. The other BU Heads are notified either way.
 """
 
 import csv
@@ -31,7 +37,8 @@ from sqlalchemy.orm import Session
 import models
 from app.core.errors import BadRequestError, ConflictError, ForbiddenError, NotFoundError
 from app.core.roles import Role
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password
+from app.services import notifications as notify
 
 # Header of the HR export -> the field it fills. Matched without regard to case or spacing.
 COLUMNS = {"employee id": "code", "full name": "name", "work email": "email", "job role": "role_title"}
@@ -48,6 +55,15 @@ ONLY_ENGINEERS = "BU Head accounts are not changed here."
 USERNAME_TAKEN = "Another account already signs in with {}."
 BAD_USERNAME = "Give a work email (or a username without spaces)."
 NAME_NEEDED = "The name can't be empty."
+WRONG_PASSWORD = "Your password is not correct."
+NOT_YOURSELF = "You can't change your own role."
+NOT_ACTIVE = "Reactivate the account first."
+ON_PROJECTS = "{name} is assigned to {projects}. Remove them from these projects before making them a BU Head."
+NOT_A_BU_HEAD = "This account is not a BU Head."
+LAST_BU_HEAD = "There must always be at least one BU Head."
+NO_EMPLOYEE_RECORD = (
+    "This BU Head has no employee record, so they can't work as an engineer. Deactivate the account instead."
+)
 HAS_HISTORY = "{} has work on record (bookings, hours, tasks or a project lead role). Deactivate the account instead."
 # Projects keep their leads' names next to the ids, for display: renaming updates these copies too.
 LEAD_NAME_COLUMNS = (
@@ -180,6 +196,7 @@ class Provisioning:
             .all()
         )
         busy_users, busy_employees = self._with_history()
+        bu_heads = self._active_bu_heads()
         out = []
         for user, employee in rows:
             engineer = user.role == Role.ENGINEER
@@ -197,6 +214,9 @@ class Provisioning:
                     "can_delete": engineer
                     and user.id not in busy_users
                     and (employee is None or employee.id not in busy_employees),
+                    "can_make_bu_head": engineer and user.is_active,
+                    # Only a promoted BU Head (they have an employee record) goes back to engineer.
+                    "can_remove_bu_head": not engineer and employee is not None and bu_heads > 1,
                 }
             )
         return out
@@ -255,6 +275,97 @@ class Provisioning:
         if employee is not None:
             self.db.delete(employee)
         self.db.commit()
+
+    # -- the BU Head role -------------------------------------------------------------------
+
+    def make_bu_head(self, actor: models.User, user_id: int, password: str) -> dict:
+        """Promote an engineer who is on no live project. Signs them out, so they come back as BU Head."""
+        self._confirm(actor, password, user_id)
+        user, employee = self._engineer(user_id)
+        if not user.is_active:
+            raise ConflictError(NOT_ACTIVE)
+        projects = self._live_assignments(user, employee)
+        if projects:
+            listed = " and ".join(f"{name} as {role}" for name, role in projects)
+            raise ConflictError(ON_PROJECTS.format(name=user.full_name or user.username, projects=listed))
+        user.role = Role.BU_HEAD
+        self._changed_role(actor, user, notify.BU_HEAD_APPOINTED, "New BU Head", "made {} a BU Head.")
+        return self._one(user.id)
+
+    def remove_bu_head(self, actor: models.User, user_id: int, password: str) -> dict:
+        """Take the BU Head role back: they become an engineer again. Never the last BU Head."""
+        self._confirm(actor, password, user_id)
+        user = self.db.get(models.User, user_id)
+        if user is None:
+            raise NotFoundError(NOT_FOUND)
+        if user.role != Role.BU_HEAD:
+            raise ConflictError(NOT_A_BU_HEAD)
+        if user.employee_id is None:
+            raise ConflictError(NO_EMPLOYEE_RECORD)
+        if self._active_bu_heads() <= 1:
+            raise ConflictError(LAST_BU_HEAD)
+        user.role = Role.ENGINEER
+        self._changed_role(
+            actor, user, notify.BU_HEAD_REMOVED, "BU Head role removed", "removed the BU Head role from {}."
+        )
+        return self._one(user.id)
+
+    def _confirm(self, actor: models.User, password: str, user_id: int) -> None:
+        if actor.id == user_id:
+            raise ForbiddenError(NOT_YOURSELF)
+        if not verify_password(password or "", actor.password_hash):
+            raise ForbiddenError(WRONG_PASSWORD)
+
+    def _changed_role(self, actor: models.User, user: models.User, kind: str, title: str, message: str) -> None:
+        """Sign the person out everywhere (their pages follow the new role) and tell the BU Heads."""
+        self.db.query(models.LoginSession).filter_by(user_id=user.id).delete(synchronize_session=False)
+        actor_name = actor.full_name or actor.username
+        text = f"{actor_name} " + message.format(user.full_name or user.username)
+        notify.notify_role(self.db, Role.BU_HEAD, kind, title, text, None, actor_name)
+        self.db.commit()
+
+    def _active_bu_heads(self) -> int:
+        return (
+            self.db.query(models.User).filter(models.User.role == Role.BU_HEAD, models.User.is_active.is_(True)).count()
+        )
+
+    def _live_assignments(self, user: models.User, employee: models.Employee | None) -> list[tuple[str, str]]:
+        """(project name, "lead" | "engineer") for every project that isn't archived where the
+        person leads, is booked, or has WBS tasks assigned."""
+        project = models.Project
+        live = project.archived_at.is_(None)
+        roles: dict[int, tuple[str, set[str]]] = {}
+
+        def add(rows, role: str) -> None:
+            for project_id, name in rows:
+                roles.setdefault(project_id, (name, set()))[1].add(role)
+
+        add(
+            self.db.query(project.id, project.project_name).filter(
+                live, or_(*(id_column == user.id for _, id_column in LEAD_NAME_COLUMNS))
+            ),
+            "lead",
+        )
+        if employee is not None:
+            booking, node = models.ResourceBooking, models.WbsNode
+            add(
+                self.db.query(project.id, project.project_name)
+                .join(booking, booking.project_id == project.id)
+                .filter(live, booking.employee_id == employee.id, booking.role != "lead")
+                .distinct(),
+                "engineer",
+            )
+            add(
+                self.db.query(project.id, project.project_name)
+                .join(node, node.project_id == project.id)
+                .filter(live, node.assigned_engineer_id == employee.id)
+                .distinct(),
+                "engineer",
+            )
+        return [
+            (name, " and ".join(sorted(kinds)))
+            for name, kinds in sorted(roles.values(), key=lambda item: (item[0] or "").lower())
+        ]
 
     def _engineer(self, user_id: int) -> tuple[models.User, models.Employee | None]:
         user = self.db.get(models.User, user_id)

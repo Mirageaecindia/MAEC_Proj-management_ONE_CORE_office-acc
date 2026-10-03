@@ -6,8 +6,13 @@ but the change-password screen until it is replaced.
 """
 
 import io
+from datetime import UTC, datetime
+
+import pytest
 
 import models
+from app.core.errors import ConflictError
+from app.services.provisioning import Provisioning
 from factories import PASSWORD
 
 IMPORT, RESET = "/api/people/import", "/api/people/reset-password"
@@ -244,3 +249,105 @@ def test_only_an_account_with_no_work_on_record_is_deleted(client, db, world, go
     assert db.query(models.User).filter_by(username=created["username"]).count() == 0
     assert db.query(models.Employee).filter_by(employee_code="M0101").count() == 0
     assert _upload(client, world.bu_h).json()["created"][0]["username"] == created["username"]  # can come back
+
+
+def _make_bu_head(client, world, person_id, password=PASSWORD, headers=None):
+    return client.post(f"{PEOPLE}/{person_id}/make-bu-head", json={"password": password}, headers=headers or world.bu_h)
+
+
+def test_an_engineer_on_no_live_project_is_made_a_bu_head(client, db, world):
+    created = _upload(client, world.bu_h).json()["created"][0]
+    kavya = _person(client, world, created["username"])
+    session = _bearer(_login(client, created["username"], created["temporary_password"]))
+
+    assert _make_bu_head(client, world, kavya["id"], password="wrong").status_code == 403  # your own password
+    promoted = _make_bu_head(client, world, kavya["id"])
+
+    assert promoted.status_code == 200, promoted.text
+    assert promoted.json()["role"] == "bu_head"
+    assert client.get(ME, headers=session).status_code == 401  # signed out: they come back as BU Head
+    note = db.query(models.Notification).filter_by(notification_type="bu_head_appointed").one()
+    assert (note.recipient_role, note.message) == ("bu_head", "Test BU Head made Kavya Raman a BU Head.")
+    assert _person(client, world, world.bu.username)["can_remove_bu_head"] is False  # created as BU Head
+
+
+def test_someone_on_a_live_project_is_not_promoted_and_the_projects_are_named(client, db, world, governed):
+    project_id, *_ = governed  # Arjun is booked with tasks; Anita leads it
+    project_name = db.get(models.Project, project_id).project_name
+    arjun = _person(client, world, world.engineer.username)
+    anita = _person(client, world, world.lead_e.username)
+
+    refused = _make_bu_head(client, world, arjun["id"])
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == (
+        f"Arjun Mehta is assigned to {project_name} as engineer. "
+        "Remove them from these projects before making them a BU Head."
+    )
+    assert f"{project_name} as lead" in _make_bu_head(client, world, anita["id"]).json()["detail"]
+
+    db.get(models.Project, project_id).archived_at = datetime.now(UTC)  # a finished project doesn't count
+    db.commit()
+    assert _make_bu_head(client, world, arjun["id"]).status_code == 200
+
+
+def test_the_bu_head_role_is_taken_back_from_a_promoted_bu_head_only(client, db, world):
+    created = _upload(client, world.bu_h).json()["created"][0]
+    kavya = _person(client, world, created["username"])
+    _make_bu_head(client, world, kavya["id"])
+    assert _person(client, world, created["username"])["can_remove_bu_head"] is True
+
+    def remove(person_id, headers=None):
+        return client.post(
+            f"{PEOPLE}/{person_id}/remove-bu-head", json={"password": PASSWORD}, headers=headers or world.bu_h
+        )
+
+    assert remove(world.bu.id).status_code == 403  # never your own role
+    assert _make_bu_head(client, world, world.bu.id).status_code == 403
+    back = remove(kavya["id"])
+    assert back.status_code == 200 and back.json()["role"] == "engineer"
+    assert db.query(models.Notification).filter_by(notification_type="bu_head_removed").count() == 1
+
+    # A BU Head created as one has no employee record to go back to: deactivate instead.
+    second = make_bu_head_account(db, "second.head")
+    assert remove(second.id).status_code == 409
+
+
+def test_the_last_bu_head_keeps_the_role(db):
+    """With one active BU Head the role can't be removed (the rule behind the button)."""
+    actor = make_bu_head_account(db, "actor.head")
+    target = make_bu_head_account(db, "target.head", employee=True)
+    target.is_active = False  # only the actor is active
+    db.commit()
+
+    with pytest.raises(ConflictError, match="at least one BU Head"):
+        Provisioning(db).remove_bu_head(actor, target.id, PASSWORD)
+
+
+def make_bu_head_account(db, username, employee=False):
+    from factories import _PASSWORD_HASH
+
+    employee_id = None
+    if employee:
+        record = models.Employee(employee_code=username.upper(), name=username, role_title="Director")
+        db.add(record)
+        db.flush()
+        employee_id = record.id
+    user = models.User(
+        username=username, password_hash=_PASSWORD_HASH, full_name=username, role="bu_head", employee_id=employee_id
+    )
+    db.add(user)
+    db.commit()
+    return user
+
+
+def test_a_bu_head_never_approves_their_own_hours(client, db, make, world, governed):
+    project_id, node_a, _, pending = governed
+    pending.reviewed_at = None
+    db.commit()
+    boss = db.get(models.User, world.bu.id)
+    boss.employee_id = world.emp1.id  # as if Arjun had been promoted with hours still pending
+    db.commit()
+
+    response = client.post(f"/api/time-log-entries/{pending.id}/approve", headers=world.bu_h)
+
+    assert response.status_code == 403

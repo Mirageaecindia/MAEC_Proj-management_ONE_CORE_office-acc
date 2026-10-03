@@ -18,6 +18,7 @@ const IMPORTED = {
 };
 
 let people = [];
+let onLiveProject = false;
 const PERSON = {
   id: 7,
   username: 'kavya.raman@mirageaec.com',
@@ -29,7 +30,13 @@ const PERSON = {
   must_change_password: true,
   can_edit: true,
   can_delete: true,
+  can_make_bu_head: true,
+  can_remove_bu_head: false,
 };
+const error = (status, detail) =>
+  Promise.resolve(
+    new Response(JSON.stringify({ detail }), { status, headers: { 'Content-Type': 'application/json' } }),
+  );
 const json = (body) =>
   Promise.resolve(
     new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }),
@@ -56,6 +63,20 @@ function fakeApi(url, options = {}) {
   if (/\/api\/people\/\d+$/.test(url) && method === 'PATCH') {
     const id = url.match(/(\d+)$/)[1];
     people = people.map((p) => (String(p.id) === id ? { ...p, ...JSON.parse(options.body) } : p));
+    return json(people[0]);
+  }
+  const role = url.match(/\/api\/people\/(\d+)\/(make-bu-head|remove-bu-head)$/);
+  if (role) {
+    const { password } = JSON.parse(options.body);
+    if (password !== 'my password') return error(403, 'Your password is not correct.');
+    if (onLiveProject)
+      return error(
+        409,
+        'Kavya Raman is assigned to Hotel Tower as engineer. Remove them from these projects before making them a BU Head.',
+      );
+    people = people.map((p) =>
+      String(p.id) === role[1] ? { ...p, role: 'bu_head', can_edit: false, can_make_bu_head: false } : p,
+    );
     return json(people[0]);
   }
   if (/\/api\/people\/\d+$/.test(url) && method === 'DELETE') {
@@ -180,6 +201,51 @@ describe('People list (BU Head)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
     await vi.waitFor(() => expect(calls(/\/api\/people\/7$/, 'DELETE')).toHaveLength(1));
+  });
+});
+
+describe('Making someone a BU Head', () => {
+  beforeEach(() => {
+    people = [PERSON];
+    vi.stubGlobal('fetch', vi.fn(fakeApi));
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    onLiveProject = false;
+  });
+
+  const openDialog = async () => {
+    renderCard();
+    fireEvent.click(await screen.findByRole('button', { name: 'Make BU Head' }));
+    return screen.getByRole('dialog');
+  };
+
+  it('names the projects that block it, inside the dialog', async () => {
+    onLiveProject = true;
+    const dialog = await openDialog();
+    const confirm = within(dialog).getByRole('button', { name: 'Make BU Head' });
+
+    expect(confirm.disabled).toBe(true); // your password first
+    fireEvent.change(within(dialog).getByLabelText('Your password, to confirm'), {
+      target: { value: 'my password' },
+    });
+    fireEvent.click(confirm);
+
+    expect(await within(dialog).findByText(/assigned to Hotel Tower as engineer/)).toBeTruthy();
+    expect(screen.getByRole('dialog')).toBeTruthy(); // stays open
+  });
+
+  it('promotes with the right password and closes', async () => {
+    const dialog = await openDialog();
+    fireEvent.change(within(dialog).getByLabelText('Your password, to confirm'), {
+      target: { value: 'my password' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Make BU Head' }));
+
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(await screen.findByText('BU Head')).toBeTruthy();
+    expect(JSON.parse(calls(/make-bu-head$/, 'POST')[0][1].body)).toEqual({ password: 'my password' });
   });
 });
 

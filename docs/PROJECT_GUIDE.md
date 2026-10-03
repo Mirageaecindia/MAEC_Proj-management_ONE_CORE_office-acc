@@ -429,6 +429,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | PATCH | `/api/people/{id}` | BU Head | Correct an engineer's `full_name`, `username` (work email) or `job_role`; a new name also updates the project and task lead name copies |
 | POST | `/api/people/{id}/deactivate` · `/reactivate` | BU Head | A leaver can't sign in (sessions end); data stays |
 | DELETE | `/api/people/{id}` | BU Head | Only an engineer account with no work on record; otherwise 409 |
+| POST | `/api/people/{id}/make-bu-head` · `/remove-bu-head` | BU Head | `{password}` (the caller's own). Promote only an engineer on no live project (409 names the projects and roles); remove only from a promoted BU Head, never yourself or the last one. The person is signed out; BU Heads are notified |
 | GET | `/api/auth/me` | any | Current user (restore session) |
 
 **Projects and SharePoint**

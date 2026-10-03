@@ -22,6 +22,8 @@ PROJECT_ARCHIVED = "project_archived"
 PROJECT_UNARCHIVED = "project_unarchived"
 PROJECT_LEAD_ASSIGNED = "project_lead_assigned"
 PROJECT_LEAD_REMOVED = "project_lead_removed"
+BU_HEAD_APPOINTED = "bu_head_appointed"
+BU_HEAD_REMOVED = "bu_head_removed"
 
 
 def notification_output(notification: models.Notification) -> dict:

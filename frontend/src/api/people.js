@@ -17,4 +17,7 @@ export const peopleApi = {
   update: (id, fields) => api.patch(`/api/people/${id}`, fields),
   setActive: (id, active) => api.post(`/api/people/${id}/${active ? 'reactivate' : 'deactivate'}`),
   remove: (id) => api.delete(`/api/people/${id}`),
+  /** `makeBuHead`: promote (true) or take the role back (false); confirmed with the BU Head's own password. */
+  changeRole: (id, makeBuHead, password) =>
+    api.post(`/api/people/${id}/${makeBuHead ? 'make-bu-head' : 'remove-bu-head'}`, { password }),
 };

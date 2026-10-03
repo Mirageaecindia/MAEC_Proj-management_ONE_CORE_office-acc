@@ -18,7 +18,8 @@ Projects → People. Each gets an engineer account named by their work email, li
 (employee code = HR employee id), with a random temporary password that must be changed at the first login.
 The BU Head resets forgotten passwords on the same card, and sees everyone with an account there:
 corrects an engineer's name, work email or job role, deactivates or reactivates a leaver, and deletes only an
-account with no work on record. See `app/services/provisioning.py`; this moves to
+account with no work on record. A BU Head can make an engineer who is on no live project a BU Head, and
+take the role back from a promoted BU Head, confirmed with their own password. See `app/services/provisioning.py`; this moves to
 the company's global admin application when it exists.
 
 Users are never seeded at startup. From the `backend` directory, the CLI also creates them:

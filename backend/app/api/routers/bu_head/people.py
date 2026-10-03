@@ -23,6 +23,12 @@ class ResetPasswordIn(BaseModel):
     username: str
 
 
+class RoleChangeIn(BaseModel):
+    """The BU Head confirms a role change with their own password."""
+
+    password: str
+
+
 class PersonUpdate(BaseModel):
     """Only the fields given change."""
 
@@ -100,3 +106,25 @@ def delete_person(
     """Only an account with no work on record; otherwise 409, deactivate instead."""
     service.delete_person(user_id)
     return {"ok": True}
+
+
+@router.post("/{user_id}/make-bu-head")
+def make_bu_head(
+    user_id: int,
+    payload: RoleChangeIn,
+    user: models.User = Depends(require_bu_head),
+    service: Provisioning = Depends(get_provisioning),
+):
+    """Only an engineer on no live project; 409 names the projects otherwise."""
+    return service.make_bu_head(user, user_id, payload.password)
+
+
+@router.post("/{user_id}/remove-bu-head")
+def remove_bu_head(
+    user_id: int,
+    payload: RoleChangeIn,
+    user: models.User = Depends(require_bu_head),
+    service: Provisioning = Depends(get_provisioning),
+):
+    """Back to engineer: never the last BU Head, never yourself."""
+    return service.remove_bu_head(user, user_id, payload.password)

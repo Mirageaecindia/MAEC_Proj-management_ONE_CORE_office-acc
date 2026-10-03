@@ -139,6 +139,8 @@ class HoursReview:
     def may_review(
         self, user: models.User, task: models.WbsNode | None, employee_id: int, remembered_lead: int | None = None
     ) -> bool:
+        if user.employee_id is not None and user.employee_id == employee_id:
+            return False  # nobody approves their own hours, a BU Head promoted from engineer included
         reviewer = self.reviewer(task, employee_id, remembered_lead)
         return user.role == Role.BU_HEAD if reviewer is BU_HEAD else reviewer == user.id
 
