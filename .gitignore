@@ -6,6 +6,9 @@
 !.env.example
 backend/data/*.csv
 !backend/data/*.example.csv
+# Employee lists for onboarding (names, emails, phone numbers). Committed once by mistake
+# on 2026-10-03 (1fa602f); purged with S2.
+backend/Employee onboarding data/
 
 # ---------------------------------------------------------------------------
 # Python

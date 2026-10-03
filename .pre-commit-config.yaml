@@ -19,10 +19,14 @@ repos:
   - repo: local
     hooks:
       - id: block-secrets-and-data
-        name: block .env files, databases and data CSVs
+        name: block .env files, databases and data files
         language: fail
         entry: "Do not commit secrets, databases or employee data. Use the *.example files instead."
-        files: '(^|/)\.env$|\.db$|^backend/data/(?!.*\.example\.csv$).*\.csv$'
+        # Any CSV or spreadsheet anywhere, not only in backend/data: an employee list committed
+        # from another folder slipped past the narrower rule on 2026-10-03.
+        files: '(^|/)\.env$|\.db$|\.(csv|xlsx|xls)$'
+        # The few data files that belong in the repo: examples and the WBS templates.
+        exclude: '\.example\.csv$|^_archive/tests/|^backend/data/WBS_Break_Down\.xlsx$|^frontend/public/wbs-upload-template\.xlsx$'
 
       - id: ruff-check
         name: ruff check (backend)
