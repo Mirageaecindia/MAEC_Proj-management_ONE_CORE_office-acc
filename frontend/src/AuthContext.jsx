@@ -24,6 +24,17 @@ async function fetchMe(token) {
   return resp.json();
 }
 
+async function fetchChangePassword(token, currentPassword, newPassword) {
+  const resp = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.detail || 'Could not change the password.');
+  return data;
+}
+
 async function fetchLogout(token) {
   try {
     await fetch(`${API_BASE_URL}/api/auth/logout`, {
@@ -82,9 +93,19 @@ export function AuthProvider({ children }) {
       role: data.role,
       employee_id: data.engineer_id || null,
       leads_projects: Boolean(data.leads_projects),
+      must_change_password: Boolean(data.must_change_password),
     });
     return data;
   }, []);
+
+  // Replace the password (a temporary one at the first login, or any time from the account menu).
+  const changePassword = useCallback(
+    async (currentPassword, newPassword) => {
+      await fetchChangePassword(token, currentPassword, newPassword);
+      setUser((current) => (current ? { ...current, must_change_password: false } : current));
+    },
+    [token],
+  );
 
   const logout = useCallback(async () => {
     if (token) await fetchLogout(token);
@@ -113,6 +134,7 @@ export function AuthProvider({ children }) {
       loading,
       login,
       logout,
+      changePassword,
       authHeaders,
     }}>
       {children}

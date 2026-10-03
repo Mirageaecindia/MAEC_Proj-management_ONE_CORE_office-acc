@@ -13,8 +13,13 @@ There is no role-switcher and no `?role=` URL override.
 
 ## Creating accounts
 
-Users are created manually — none are seeded at startup. From the `backend`
-directory, run the CLI:
+**In the app (normal way, no server access):** the BU Head imports engineers from the HR export on
+Projects → People. Each gets an engineer account named by their work email, linked to an employee record
+(employee code = HR employee id), with a random temporary password that must be changed at the first login.
+The BU Head resets forgotten passwords on the same card. See `app/services/provisioning.py`; this moves to
+the company's global admin application when it exists.
+
+Users are never seeded at startup. From the `backend` directory, the CLI also creates them:
 
 ```
 .venv\Scripts\python.exe create_user.py
@@ -51,7 +56,9 @@ inactive account no longer appears in the Create Project lead dropdowns.
 
 ## Auth flow
 
-- `POST /api/auth/login` → returns `token`, `role`, `full_name`, `engineer_id` and `leads_projects` (whether the person leads at least one project).
+- `POST /api/auth/login` → returns `token`, `role`, `full_name`, `engineer_id`, `leads_projects` (whether the person leads at least one project) and `must_change_password`. Usernames are matched without regard to case.
+- While `must_change_password` is set (a temporary password from onboarding or a reset), every endpoint except `GET /api/auth/me`, `POST /api/auth/change-password` and logout answers 403 with `X-Error-Code: PASSWORD_CHANGE_REQUIRED`.
+- `POST /api/auth/change-password` `{current_password, new_password}` (at least 8 characters, different from the current one) sets the person's own password; their other sessions end.
 - Every other endpoint requires `Authorization: Bearer <token>`.
 - `GET /api/auth/me` restores the session on page refresh.
 - `POST /api/auth/logout` invalidates the token.

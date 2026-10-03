@@ -1,5 +1,5 @@
-import { CircleUserRound, LogOut } from 'lucide-react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { CircleUserRound, KeyRound, LogOut } from 'lucide-react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { useLeadsProjects } from '../hooks/useProjects';
@@ -30,6 +30,7 @@ export function MaecHeader({ subtitle }) {
   const { user, role, logout } = useAuth();
   const leadsProjects = useLeadsProjects();
   const menuRef = useRef(null);
+  const navigate = useNavigate();
 
   const displaySubtitle = subtitle || (location.pathname.startsWith('/resource-booking') ? 'MEP Enterprise Workspace' : 'Project Management');
 
@@ -93,6 +94,16 @@ export function MaecHeader({ subtitle }) {
                 <button type="button" role="menuitem" disabled style={{ opacity: 0.5, cursor: 'default' }}>
                   {displayName}
                   {roleLabel && <small> — {roleLabel}</small>}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    navigate('/change-password');
+                  }}
+                >
+                  <KeyRound size={13} /> Change password
                 </button>
                 <button className="account-logout" type="button" role="menuitem" onClick={handleLogout}>
                   <LogOut size={13} /> Logout

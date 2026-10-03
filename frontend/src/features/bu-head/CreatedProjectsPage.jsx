@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, BarChart3, Pencil, PlusCircle, Search, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, BarChart3, Pencil, PlusCircle, Search, Trash2, Users } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
@@ -12,6 +12,7 @@ import {
   useUnarchiveProject,
 } from '../../hooks/useProjects';
 import { formatAmount, formatInteger } from '../../utils/format';
+import { PeopleCard } from './PeopleCard';
 
 const SEARCH_FIELDS = [
   'project_name',
@@ -135,6 +136,7 @@ export function CreatedProjectsPage() {
     unarchive: useUnarchiveProject(),
     delete: useDeleteProject(),
   };
+  const [showPeople, setShowPeople] = useState(false); // onboarding, until the global admin app
   const [search, setSearch] = useState('');
   const [pending, setPending] = useState(null); // { type, project }
   // A notice handed over by Create Project (e.g. the SharePoint outcome).
@@ -171,10 +173,19 @@ export function CreatedProjectsPage() {
         title="Created Projects"
         description="Projects created under this Business Unit with their commercial baselines and governance settings."
       >
+        <button
+          type="button"
+          className="button button-secondary"
+          onClick={() => setShowPeople((open) => !open)}
+        >
+          <Users size={16} /> {showPeople ? 'Hide people' : 'People'}
+        </button>
         <button type="button" className="button button-primary" onClick={() => navigate('/create-project')}>
           <PlusCircle size={16} /> Create Project
         </button>
       </PageHeader>
+
+      {showPeople && <PeopleCard />}
 
       {notice && <Notice {...notice} onDismiss={() => setNotice(null)} />}
       <ErrorBanner error={error} />

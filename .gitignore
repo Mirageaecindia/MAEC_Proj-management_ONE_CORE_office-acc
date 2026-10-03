@@ -47,6 +47,7 @@ backend/backups/
 # Node / frontend
 # ---------------------------------------------------------------------------
 node_modules/
+.vite/
 frontend/dist/
 .eslintcache
 

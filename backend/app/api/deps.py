@@ -26,6 +26,7 @@ from app.services.governance_monitor import GovernanceMonitor
 from app.services.metrics import ProjectMetricsService
 from app.services.notifications import NotificationService
 from app.services.projects import ProjectService
+from app.services.provisioning import Provisioning
 from app.services.rejected_hours import RejectedHours
 from app.services.tracking import TrackingService
 from app.services.work_summary import WorkSummaryService
@@ -81,6 +82,10 @@ def get_work_summary_service(db: Session = Depends(get_db)) -> WorkSummaryServic
 
 def get_tracking_service(db: Session = Depends(get_db)) -> TrackingService:
     return TrackingService(db, TrackingRepository(db))
+
+
+def get_provisioning(db: Session = Depends(get_db)) -> Provisioning:
+    return Provisioning(db)
 
 
 def get_rejected_hours_service(db: Session = Depends(get_db)) -> RejectedHours:

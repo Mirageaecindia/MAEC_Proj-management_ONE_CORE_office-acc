@@ -241,7 +241,7 @@ MAEC_project_management/
 - **Login:** `POST /api/auth/login` checks the PBKDF2 hash and returns a random 64-character token. The token is stored in `login_sessions` and sent as `Authorization: Bearer <token>`.
 - **Session expiry:** a token stops working `SESSION_TTL_HOURS` (default 12) after login. It is then deleted, and each login purges older expired sessions.
 - **Brute-force protection:** `LOGIN_MAX_FAILED_ATTEMPTS` (default 5) failed logins for one username lock it for `LOGIN_LOCKOUT_MINUTES` (default 15). Further attempts get HTTP 429 with `Retry-After`. The counter is in memory (per process).
-- **`get_current_user`** (in `app/core/security.py`) resolves the token to a user on every request, or returns 401. `GET /api/auth/me` restores the session on page refresh. Logout deletes the token.
+- **`get_current_user`** (in `app/core/security.py`) resolves the token to a user on every request, or returns 401; it returns 403 (`PASSWORD_CHANGE_REQUIRED`) while the account still has a temporary password, so `get_session_user` is used only by `/auth/me` and `/auth/change-password`. `GET /api/auth/me` restores the session on page refresh. Logout deletes the token.
 - **Account gate:** routers in `app/` use the dependency guards `require_bu_head`, `require_staff` (engineer accounts) and `require_any_role`. The endpoints in `main.py` call `require_role(user.role, {...})`. Both return 403 for accounts that aren't allowed. Beyond "is this the BU Head", the account role decides little: lead and engineer are **roles on a project**.
 - **Role on a project** (`project_role` in `app/services/access.py`, decided 2026-09-28): the same person can lead one project and work as an engineer on another, with one login.
   - **BU Head:** all projects.
@@ -422,6 +422,9 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 |---|---|---|---|
 | POST | `/api/auth/login` | public | Log in and get a token |
 | POST | `/api/auth/logout` | any | Delete the token |
+| POST | `/api/auth/change-password` | any (also with a temporary password) | Set your own password; your other sessions end |
+| POST | `/api/people/import` | BU Head | Import engineers from an HR CSV export; returns each new account's temporary password once |
+| POST | `/api/people/reset-password` | BU Head | A new temporary password for an engineer |
 | GET | `/api/auth/me` | any | Current user (restore session) |
 
 **Projects and SharePoint**

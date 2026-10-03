@@ -110,6 +110,8 @@ class User(Base):
     full_name = Column(String(150), nullable=True)
     # bu_head | engineer. "Lead" is a role on a project (app/services/access.py), not an account type.
     role = Column(String(20), nullable=False, index=True)
+    # Set for a temporary password (onboarding, reset): nothing works until the person sets their own.
+    must_change_password = Column(Boolean, nullable=False, default=False, server_default="0")
     # Engineers are linked to an employee row so data scoping (bookings,
     # assigned_engineer_id, hours) resolves server-side.
     employee_id = Column(Integer, nullable=True, index=True)

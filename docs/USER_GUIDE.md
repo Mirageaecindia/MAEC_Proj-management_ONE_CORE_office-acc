@@ -27,7 +27,24 @@ Open **http://localhost:5173** and log in. After pulling new code, run
 automatically at startup.
 
 ### 1.2 Accounts
-Accounts are created from the command line (there is no sign-up page yet), in `backend/`:
+**Onboarding engineers (BU Head, no server access needed).** On **Projects**, press **People**:
+1. Choose the HR export (CSV with the columns Employee Id, Full Name, Work Email and Job Role; other columns,
+   such as phone numbers, are ignored) and press **Import**. Remove anyone who shouldn't have an account first.
+2. Each new person gets an engineer account: the username is their work email and the profile name their full
+   name. Anyone who already has an account, or appears twice, is skipped and the reason is listed.
+3. Press **Download the temporary passwords**. Each person has their own random temporary password. It is shown
+   only this once and is not stored readable: download it right away and give each person theirs.
+4. At the first sign-in the app asks the person to set their own password, and nothing else works until they
+   do. Usernames are not case-sensitive.
+
+**Forgotten password:** the BU Head enters the work email under **Reset a forgotten password** on the same card
+and gives the person the new temporary password; they set their own at the next sign-in, and any browser
+still signed in as them is signed out. **Changing your password** any time: the account menu (your name, top
+right) → **Change password**.
+
+This is temporary: when the company's global admin application exists, people and access are managed there.
+
+Accounts can also be created from the command line, in `backend/`:
 
 ```powershell
 # BU Head

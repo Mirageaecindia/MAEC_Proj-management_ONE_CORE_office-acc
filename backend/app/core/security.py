@@ -64,11 +64,16 @@ def session_is_expired(created_at: datetime | None, ttl_hours: float, now: datet
     return (now or datetime.now(UTC)) - as_utc(created_at) > timedelta(hours=ttl_hours)
 
 
-def get_current_user(
+PASSWORD_CHANGE_REQUIRED = "Set a new password before continuing."
+PASSWORD_CHANGE_CODE = "PASSWORD_CHANGE_REQUIRED"  # X-Error-Code
+
+
+def get_session_user(
     authorization: str | None = Header(None),
     db: Session = Depends(get_db),
 ) -> models.User:
-    """FastAPI dependency returning the authenticated user, or 401.
+    """The signed-in user, or 401, even while they still have to replace a temporary password.
+    Only the account endpoints use this directly (who am I, change my password).
 
     Expired sessions are deleted on first use, so a stolen or forgotten token
     stops working after SESSION_TTL_HOURS.
@@ -86,6 +91,17 @@ def get_current_user(
     user = db.get(models.User, session.user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail=SESSION_ERROR)
+    return user
+
+
+def get_current_user(user: models.User = Depends(get_session_user)) -> models.User:
+    """FastAPI dependency returning the authenticated user, or 401; 403 while a temporary
+    password (onboarding, reset) has not been replaced, so it opens nothing but the
+    change-password screen."""
+    if user.must_change_password:
+        raise HTTPException(
+            status_code=403, detail=PASSWORD_CHANGE_REQUIRED, headers={"X-Error-Code": PASSWORD_CHANGE_CODE}
+        )
     return user
 
 

@@ -8,17 +8,22 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import models
 import schemas
 from app.core.config import Settings, get_settings
-from app.core.errors import TooManyRequestsError, UnauthorizedError
+from app.core.errors import BadRequestError, TooManyRequestsError, UnauthorizedError
 from app.core.roles import Role
 from app.services.access import leads_any_project
-from app.core.security import verify_password
+from app.core.security import hash_password, verify_password
 
 INVALID_CREDENTIALS = "Invalid username or password."
+MIN_PASSWORD_LENGTH = 8
+WRONG_CURRENT_PASSWORD = "The current password is not correct."
+PASSWORD_TOO_SHORT = f"Use at least {MIN_PASSWORD_LENGTH} characters."
+SAME_PASSWORD = "Choose a password different from the current one."
 
 
 def _utc_now() -> datetime:
@@ -80,7 +85,8 @@ class AuthService:
     def login(self, username: str, password: str) -> schemas.LoginResponse:
         username = username.strip()
         self.throttle.check(username)
-        user = self.db.query(models.User).filter_by(username=username).first()
+        # Usernames are work emails: matched without regard to case.
+        user = self.db.query(models.User).filter(func.lower(models.User.username) == username.lower()).first()
         if not user or not verify_password(password, user.password_hash) or not user.is_active:
             self.throttle.record_failure(username)
             raise UnauthorizedError(INVALID_CREDENTIALS)
@@ -98,7 +104,23 @@ class AuthService:
             full_name=user.full_name,
             engineer_id=user.employee_id if user.role == Role.ENGINEER else None,
             leads_projects=leads_any_project(self.db, user),
+            must_change_password=user.must_change_password,
         )
+
+    def change_password(self, user: models.User, token: str | None, current: str, new: str) -> None:
+        """The person sets their own password. Every other session of theirs ends."""
+        if not verify_password(current, user.password_hash):
+            raise BadRequestError(WRONG_CURRENT_PASSWORD)
+        if len(new) < MIN_PASSWORD_LENGTH:
+            raise BadRequestError(PASSWORD_TOO_SHORT)
+        if new == current:
+            raise BadRequestError(SAME_PASSWORD)
+        user.password_hash, user.must_change_password = hash_password(new), False
+        others = models.LoginSession.user_id == user.id
+        if token:
+            others &= models.LoginSession.token != token
+        self.db.query(models.LoginSession).filter(others).delete(synchronize_session=False)
+        self.db.commit()
 
     def logout(self, token: str | None) -> None:
         """Idempotent: a missing or already-deleted token is fine."""

@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import { MaecHeader } from './components/MaecHeader';
+import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { TrackingBar } from './components/TrackingBar';
 import { useLeadsProjects } from './hooks/useProjects';
 import { useTrackingState } from './hooks/useTracking';
@@ -82,7 +83,7 @@ function WorkspaceRoute({ children, roles, subtitle }) {
 function AppRoutes() {
   const { user, role, loading } = useAuth();
   // An engineer's Login/Logout heartbeat runs on every page, not just Task Details.
-  useTrackingState({ enabled: role === 'engineer' });
+  useTrackingState({ enabled: role === 'engineer' && !user?.must_change_password });
 
   if (loading) {
     return (
@@ -104,10 +105,21 @@ function AppRoutes() {
     );
   }
 
+  // A temporary password (onboarding, reset) opens nothing but this screen until it is replaced.
+  if (user.must_change_password) return <ChangePasswordPage forced />;
+
   return (
     <Suspense fallback={<div className="empty-state">Loading…</div>}>
       <Routes>
         <Route path="/" element={<HomeRedirect />} />
+        <Route
+          path="/change-password"
+          element={
+            <WorkspaceRoute roles={['bu_head', 'engineer']} subtitle="Account">
+              <ChangePasswordPage />
+            </WorkspaceRoute>
+          }
+        />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route
           path="/created-projects"
