@@ -156,3 +156,91 @@ def test_the_bu_head_resets_a_forgotten_password(client, db, world):
     assert again.json()["must_change_password"] is True
     assert client.post(RESET, json={"username": world.bu.username}, headers=world.bu_h).status_code == 403
     assert client.post(RESET, json={"username": "nobody@mirageaec.com"}, headers=world.bu_h).status_code == 404
+
+
+PEOPLE = "/api/people"
+
+
+def _person(client, world, username):
+    return next(p for p in client.get(PEOPLE, headers=world.bu_h).json() if p["username"] == username)
+
+
+def test_the_bu_head_sees_everyone_with_an_account_but_never_a_password(client, world):
+    _upload(client, world.bu_h)
+
+    people = client.get(PEOPLE, headers=world.bu_h)
+
+    assert people.status_code == 200, people.text
+    kavya = next(p for p in people.json() if p["username"] == "kavya.raman@mirageaec.com")
+    assert {k: kavya[k] for k in ("full_name", "employee_code", "job_role", "is_active", "must_change_password")} == {
+        "full_name": "Kavya Raman",
+        "employee_code": "M0101",
+        "job_role": "Senior Electrical Engineer",
+        "is_active": True,
+        "must_change_password": True,  # hasn't signed in yet
+    }
+    assert (kavya["can_edit"], kavya["can_delete"]) == (True, True)  # nothing on record yet
+    assert not any("password_hash" in p or "temporary_password" in p for p in people.json())
+    bu_head = next(p for p in people.json() if p["role"] == "bu_head")
+    assert (bu_head["can_edit"], bu_head["can_delete"]) == (False, False)
+    assert client.get(PEOPLE, headers=world.lead_h).status_code == 403
+
+
+def test_correcting_a_name_email_or_job_role(client, db, world, governed):
+    project_id, node_a, *_ = governed
+    lead = _person(client, world, world.lead_e.username)  # leads the project, so her name is copied there
+
+    renamed = client.patch(
+        f"{PEOPLE}/{lead['id']}",
+        json={"full_name": " Anita  K. ", "username": "Anita.K@MirageAEC.com", "job_role": "Electrical Lead"},
+        headers=world.bu_h,
+    )
+
+    assert renamed.status_code == 200, renamed.text
+    assert (renamed.json()["full_name"], renamed.json()["username"], renamed.json()["job_role"]) == (
+        "Anita K.",
+        "anita.k@mirageaec.com",
+        "Electrical Lead",
+    )
+    db.expire_all()
+    assert db.get(models.Project, project_id).project_lead_electrical == "Anita K."  # the copies follow
+    assert db.get(models.WbsNode, node_a.id).assigned_lead == "Anita K."
+    assert db.get(models.Employee, world.lead_e.employee_id).name == "Anita K."
+    assert _login(client, "anita.k@mirageaec.com", PASSWORD).status_code == 200  # she signs in with the new email
+
+    taken = client.patch(f"{PEOPLE}/{lead['id']}", json={"username": world.engineer.username}, headers=world.bu_h)
+    assert taken.status_code == 409
+    assert client.patch(f"{PEOPLE}/{lead['id']}", json={"full_name": "  "}, headers=world.bu_h).status_code == 400
+    assert client.patch(f"{PEOPLE}/{lead['id']}", json={"username": "two words"}, headers=world.bu_h).status_code == 400
+    bu_head = _person(client, world, world.bu.username)
+    assert client.patch(f"{PEOPLE}/{bu_head['id']}", json={"full_name": "X"}, headers=world.bu_h).status_code == 403
+
+
+def test_a_deactivated_person_is_signed_out_and_kept_on_record(client, db, world):
+    session = _bearer(_login(client, world.engineer.username, PASSWORD))
+    arjun = _person(client, world, world.engineer.username)
+
+    off = client.post(f"{PEOPLE}/{arjun['id']}/deactivate", headers=world.bu_h)
+
+    assert off.status_code == 200 and off.json()["is_active"] is False
+    assert client.get(ME, headers=session).status_code == 401
+    assert _login(client, world.engineer.username, PASSWORD).status_code == 401
+    assert db.get(models.Employee, world.emp1.id) is not None
+    on = client.post(f"{PEOPLE}/{arjun['id']}/reactivate", headers=world.bu_h)
+    assert on.json()["is_active"] is True
+    assert _login(client, world.engineer.username, PASSWORD).status_code == 200
+
+
+def test_only_an_account_with_no_work_on_record_is_deleted(client, db, world, governed):
+    created = _upload(client, world.bu_h).json()["created"][0]
+    mistake = _person(client, world, created["username"])
+    arjun = _person(client, world, world.engineer.username)  # booked, with hours: governed
+
+    assert arjun["can_delete"] is False
+    refused = client.delete(f"{PEOPLE}/{arjun['id']}", headers=world.bu_h)
+    assert refused.status_code == 409 and "Deactivate the account instead" in refused.json()["detail"]
+
+    assert client.delete(f"{PEOPLE}/{mistake['id']}", headers=world.bu_h).status_code == 200
+    assert db.query(models.User).filter_by(username=created["username"]).count() == 0
+    assert db.query(models.Employee).filter_by(employee_code="M0101").count() == 0
+    assert _upload(client, world.bu_h).json()["created"][0]["username"] == created["username"]  # can come back

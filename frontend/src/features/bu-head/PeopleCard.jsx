@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { ErrorBanner } from '../../components/Feedback';
 import { useImportPeople, useResetPassword } from '../../hooks/usePeople';
 import { credentialsCsv } from './peopleCsv';
+import { PeopleList } from './PeopleList';
 
 /** Hand the temporary passwords over as a CSV file, built in the browser: never sent anywhere else. */
 function downloadCredentials(created) {
@@ -16,7 +17,8 @@ function downloadCredentials(created) {
 
 /**
  * Onboarding for the BU Head, until the company's global admin application takes it over:
- * import engineers from the HR export, and reset a forgotten password.
+ * import engineers from the HR export, see and correct everyone with an account, deactivate
+ * a leaver, and reset a forgotten password.
  */
 export function PeopleCard() {
   const importPeople = useImportPeople();
@@ -117,6 +119,8 @@ export function PeopleCard() {
           sign in.
         </p>
       )}
+
+      <PeopleList />
     </section>
   );
 }

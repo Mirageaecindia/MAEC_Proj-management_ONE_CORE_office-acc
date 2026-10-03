@@ -37,6 +37,14 @@ automatically at startup.
 4. At the first sign-in the app asks the person to set their own password, and nothing else works until they
    do. Usernames are not case-sensitive.
 
+**Seeing and correcting people:** the same card lists everyone with an account (name, work email, employee ID,
+job role and status: active, not signed in yet, or deactivated), with a search box. Passwords are never shown.
+For an engineer the BU Head can **Edit** the name, the work email they sign in with (tell them) or the job role;
+a new name also replaces it where the person is shown as a project or task lead. **Deactivate** a leaver: they
+can't sign in and their bookings and hours stay on record; **Reactivate** brings them back. **Delete** appears
+only for an account with no work on record at all, such as one imported by mistake. BU Head accounts are listed
+but not changed here.
+
 **Forgotten password:** the BU Head enters the work email under **Reset a forgotten password** on the same card
 and gives the person the new temporary password; they set their own at the next sign-in, and any browser
 still signed in as them is signed out. **Changing your password** any time: the account menu (your name, top

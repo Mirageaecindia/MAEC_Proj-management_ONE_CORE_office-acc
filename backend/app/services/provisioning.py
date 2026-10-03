@@ -12,6 +12,11 @@ in the upload screen:
   with the reason; an existing employee record without an account gets one;
 - each new account has its own random temporary password, returned once and never
   stored readable, and must be changed at the first login.
+
+The BU Head also sees everyone with an account, corrects an engineer's name, work email
+or job role, and deactivates a leaver (they can't sign in; their bookings and hours stay,
+since pay is calculated from them). Only an account with no history at all (created by
+mistake) is deleted outright. BU Head accounts are listed but not changed here.
 """
 
 import csv
@@ -20,11 +25,11 @@ import re
 import secrets
 from dataclasses import asdict, dataclass
 
-from sqlalchemy import func
+from sqlalchemy import func, or_, update
 from sqlalchemy.orm import Session
 
 import models
-from app.core.errors import BadRequestError, ForbiddenError, NotFoundError
+from app.core.errors import BadRequestError, ConflictError, ForbiddenError, NotFoundError
 from app.core.roles import Role
 from app.core.security import hash_password
 
@@ -38,6 +43,18 @@ PASSWORD_LENGTH = 12
 MISSING_COLUMNS = "The file needs the columns {}. Found: {}."
 NOT_A_STAFF_ACCOUNT = "Only engineer accounts are reset here."
 NO_SUCH_ACCOUNT = "No engineer account with that username."
+NOT_FOUND = "No such account."
+ONLY_ENGINEERS = "BU Head accounts are not changed here."
+USERNAME_TAKEN = "Another account already signs in with {}."
+BAD_USERNAME = "Give a work email (or a username without spaces)."
+NAME_NEEDED = "The name can't be empty."
+HAS_HISTORY = "{} has work on record (bookings, hours, tasks or a project lead role). Deactivate the account instead."
+# Projects keep their leads' names next to the ids, for display: renaming updates these copies too.
+LEAD_NAME_COLUMNS = (
+    (models.Project.project_lead_electrical, models.Project.project_lead_electrical_user_id),
+    (models.Project.project_lead_mechanical, models.Project.project_lead_mechanical_user_id),
+    (models.Project.project_lead_bim, models.Project.project_lead_bim_user_id),
+)
 
 
 @dataclass(frozen=True)
@@ -151,6 +168,130 @@ class Provisioning:
         self.db.query(models.LoginSession).filter_by(user_id=user.id).delete(synchronize_session=False)
         self.db.commit()
         return {"username": user.username, "full_name": user.full_name, "temporary_password": password}
+
+    # -- the people already in the app ------------------------------------------------------
+
+    def list_people(self) -> list[dict]:
+        """Everyone with an account, by name: no passwords. A fixed number of queries."""
+        rows = (
+            self.db.query(models.User, models.Employee)
+            .outerjoin(models.Employee, models.Employee.id == models.User.employee_id)
+            .order_by(func.lower(func.coalesce(models.User.full_name, models.User.username)))
+            .all()
+        )
+        busy_users, busy_employees = self._with_history()
+        out = []
+        for user, employee in rows:
+            engineer = user.role == Role.ENGINEER
+            out.append(
+                {
+                    "id": user.id,
+                    "username": user.username,
+                    "full_name": user.full_name,
+                    "role": user.role,
+                    "employee_code": employee.employee_code if employee else None,
+                    "job_role": employee.role_title if employee else None,
+                    "is_active": user.is_active,
+                    "must_change_password": user.must_change_password,
+                    "can_edit": engineer,
+                    "can_delete": engineer
+                    and user.id not in busy_users
+                    and (employee is None or employee.id not in busy_employees),
+                }
+            )
+        return out
+
+    def update_person(self, user_id: int, full_name: str | None, username: str | None, job_role: str | None) -> dict:
+        """Correct an engineer's name, work email (their username) or job role."""
+        user, employee = self._engineer(user_id)
+        if full_name is not None:
+            name = _clean(full_name)
+            if not name:
+                raise BadRequestError(NAME_NEEDED)
+            user.full_name = name
+            if employee is not None:
+                employee.name = name
+            for name_column, id_column in LEAD_NAME_COLUMNS:
+                self.db.execute(update(models.Project).where(id_column == user.id).values({name_column: name}))
+            self.db.execute(
+                update(models.WbsNode).where(models.WbsNode.assigned_lead_user_id == user.id).values(assigned_lead=name)
+            )
+        if username is not None:
+            new = username.strip().lower()
+            if not new or " " in new:
+                raise BadRequestError(BAD_USERNAME)
+            taken = (
+                self.db.query(models.User.id)
+                .filter(func.lower(models.User.username) == new, models.User.id != user.id)
+                .first()
+            )
+            if taken:
+                raise ConflictError(USERNAME_TAKEN.format(new))
+            user.username = new
+        if job_role is not None and employee is not None:
+            employee.role_title = employee.discipline = _clean(job_role)
+        self.db.commit()
+        return self._one(user.id)
+
+    def set_active(self, user_id: int, active: bool) -> dict:
+        """Deactivate a leaver (signed out everywhere, kept on record) or bring them back."""
+        user, _ = self._engineer(user_id)
+        user.is_active = active
+        if not active:
+            self.db.query(models.LoginSession).filter_by(user_id=user.id).delete(synchronize_session=False)
+        self.db.commit()
+        return self._one(user.id)
+
+    def delete_person(self, user_id: int) -> None:
+        """Remove an account created by mistake, and its employee record, only if neither has any
+        work on record. Anything else is deactivated, so hours and approvals stay intact."""
+        user, employee = self._engineer(user_id)
+        busy_users, busy_employees = self._with_history()
+        if user.id in busy_users or (employee is not None and employee.id in busy_employees):
+            raise ConflictError(HAS_HISTORY.format(user.full_name or user.username))
+        self.db.query(models.LoginSession).filter_by(user_id=user.id).delete(synchronize_session=False)
+        self.db.query(models.Notification).filter_by(recipient_user_id=user.id).delete(synchronize_session=False)
+        self.db.delete(user)
+        if employee is not None:
+            self.db.delete(employee)
+        self.db.commit()
+
+    def _engineer(self, user_id: int) -> tuple[models.User, models.Employee | None]:
+        user = self.db.get(models.User, user_id)
+        if user is None:
+            raise NotFoundError(NOT_FOUND)
+        if user.role != Role.ENGINEER:
+            raise ForbiddenError(ONLY_ENGINEERS)
+        return user, self.db.get(models.Employee, user.employee_id) if user.employee_id else None
+
+    def _one(self, user_id: int) -> dict:
+        return next(person for person in self.list_people() if person["id"] == user_id)
+
+    def _with_history(self) -> tuple[set[int], set[int]]:
+        """(user ids, employee ids) that have any work on record: what makes deleting unsafe."""
+        employees: set[int] = set()
+        for column in (
+            models.ResourceBooking.employee_id,
+            models.TimeLogEntry.employee_id,
+            models.TimeSession.employee_id,
+            models.WbsNode.assigned_engineer_id,
+            models.GanttTask.assigned_engineer_id,
+        ):
+            employees.update(value for (value,) in self.db.query(column).distinct() if value is not None)
+        users: set[int] = set()
+        for column in (
+            models.WbsNode.assigned_lead_user_id,
+            models.WbsNode.created_by_user_id,
+            models.WbsNodeHistory.user_id,
+            models.TimeLogEntry.reviewed_by_user_id,
+            models.TimeLogEntry.task_lead_user_id,
+        ):
+            users.update(value for (value,) in self.db.query(column).distinct() if value is not None)
+        leads = self.db.query(*(id_column for _, id_column in LEAD_NAME_COLUMNS)).filter(
+            or_(*(id_column.is_not(None) for _, id_column in LEAD_NAME_COLUMNS))
+        )
+        users.update(value for row in leads for value in row if value is not None)
+        return users, employees
 
     def _create(self, person: Person, employee: models.Employee | None) -> Created:
         if employee is None:

@@ -16,7 +16,9 @@ There is no role-switcher and no `?role=` URL override.
 **In the app (normal way, no server access):** the BU Head imports engineers from the HR export on
 Projects → People. Each gets an engineer account named by their work email, linked to an employee record
 (employee code = HR employee id), with a random temporary password that must be changed at the first login.
-The BU Head resets forgotten passwords on the same card. See `app/services/provisioning.py`; this moves to
+The BU Head resets forgotten passwords on the same card, and sees everyone with an account there:
+corrects an engineer's name, work email or job role, deactivates or reactivates a leaver, and deletes only an
+account with no work on record. See `app/services/provisioning.py`; this moves to
 the company's global admin application when it exists.
 
 Users are never seeded at startup. From the `backend` directory, the CLI also creates them:

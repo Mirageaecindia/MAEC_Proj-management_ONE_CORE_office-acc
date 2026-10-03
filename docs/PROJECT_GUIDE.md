@@ -425,6 +425,10 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 | POST | `/api/auth/change-password` | any (also with a temporary password) | Set your own password; your other sessions end |
 | POST | `/api/people/import` | BU Head | Import engineers from an HR CSV export; returns each new account's temporary password once |
 | POST | `/api/people/reset-password` | BU Head | A new temporary password for an engineer |
+| GET | `/api/people` | BU Head | Everyone with an account, status and what may be done (never passwords) |
+| PATCH | `/api/people/{id}` | BU Head | Correct an engineer's `full_name`, `username` (work email) or `job_role`; a new name also updates the project and task lead name copies |
+| POST | `/api/people/{id}/deactivate` · `/reactivate` | BU Head | A leaver can't sign in (sessions end); data stays |
+| DELETE | `/api/people/{id}` | BU Head | Only an engineer account with no work on record; otherwise 409 |
 | GET | `/api/auth/me` | any | Current user (restore session) |
 
 **Projects and SharePoint**

@@ -1,7 +1,10 @@
 import { api } from './client';
 
-/** Onboarding (BU Head), until the company's global admin application takes it over. */
+/** People (BU Head), until the company's global admin application takes it over. */
 export const peopleApi = {
+  /** Everyone with an account: `[{ id, username, full_name, role, employee_code, job_role, is_active,
+   *  must_change_password, can_edit, can_delete }]`. Never passwords. */
+  list: () => api.get('/api/people'),
   /** The HR export as a file: `{ created: [{ username, full_name, employee_code, temporary_password }], skipped }`. */
   import: (file) => {
     const form = new FormData();
@@ -10,4 +13,8 @@ export const peopleApi = {
   },
   /** `{ username, full_name, temporary_password }` */
   resetPassword: (username) => api.post('/api/people/reset-password', { username }),
+  /** Only the fields given change: `{ full_name, username, job_role }`. */
+  update: (id, fields) => api.patch(`/api/people/${id}`, fields),
+  setActive: (id, active) => api.post(`/api/people/${id}/${active ? 'reactivate' : 'deactivate'}`),
+  remove: (id) => api.delete(`/api/people/${id}`),
 };
