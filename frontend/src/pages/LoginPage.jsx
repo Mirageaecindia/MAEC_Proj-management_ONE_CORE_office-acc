@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../AuthContext';
+import { PasswordInput } from '../components/PasswordInput';
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -41,8 +42,7 @@ export function LoginPage() {
           </label>
           <label className="field">
             <span className="field-label">Password</span>
-            <input
-              type="password"
+            <PasswordInput
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="Your password"

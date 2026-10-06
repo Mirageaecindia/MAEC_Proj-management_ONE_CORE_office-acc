@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
+import { PasswordInput } from '../components/PasswordInput';
 
 const MIN_LENGTH = 8;
 
@@ -58,8 +59,7 @@ export function ChangePasswordPage({ forced = false }) {
           <form className="login-form" onSubmit={handleSubmit}>
             <label className="field">
               <span className="field-label">{forced ? 'Temporary password' : 'Current password'}</span>
-              <input
-                type="password"
+              <PasswordInput
                 value={current}
                 aria-label={forced ? 'Temporary password' : 'Current password'}
                 onChange={(event) => setCurrent(event.target.value)}
@@ -69,8 +69,7 @@ export function ChangePasswordPage({ forced = false }) {
             </label>
             <label className="field">
               <span className="field-label">New password</span>
-              <input
-                type="password"
+              <PasswordInput
                 value={next}
                 aria-label="New password"
                 onChange={(event) => setNext(event.target.value)}
@@ -83,8 +82,7 @@ export function ChangePasswordPage({ forced = false }) {
             </label>
             <label className="field">
               <span className="field-label">Repeat the new password</span>
-              <input
-                type="password"
+              <PasswordInput
                 value={repeat}
                 aria-label="Repeat the new password"
                 onChange={(event) => setRepeat(event.target.value)}

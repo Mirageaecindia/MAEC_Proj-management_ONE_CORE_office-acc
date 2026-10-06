@@ -8,6 +8,7 @@ import {
   useSetPersonActive,
   useUpdatePerson,
 } from '../../hooks/usePeople';
+import { PasswordInput } from '../../components/PasswordInput';
 
 function statusOf(person) {
   if (!person.is_active) return ['Deactivated', 'status-none'];
@@ -257,8 +258,7 @@ export function PeopleList() {
           </p>
           <label className="field people-confirm-password">
             <span className="field-label">Your password, to confirm</span>
-            <input
-              type="password"
+            <PasswordInput
               aria-label="Your password, to confirm"
               autoComplete="current-password"
               value={roleChange.password}
