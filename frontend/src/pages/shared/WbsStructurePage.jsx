@@ -185,6 +185,10 @@ export function WbsStructurePage() {
     return list;
   }, [engineers, nodeForm.assigned_engineer_id, tasks]);
 
+  // A sub-subtask's form: its parent is itself a subtask (adding under a subtask, or editing a step).
+  const formParent = tasks.find((task) => task.id === Number(nodeForm.parent_id));
+  const formIsStep = nodeMode !== 'node' && formParent?.parent_id != null;
+
   // Estimated Hours preview: inclusive weekdays (Mon–Fri) between Start and
   // End × 8 hrs per working day. Weekends are not working days — same rule the
   // backend enforces, so the shown value always matches what gets saved.
@@ -208,7 +212,9 @@ export function WbsStructurePage() {
         return;
       }
       let hours = null;
-      if (nodeMode === 'subtask' || (nodeMode === 'edit' && nodeForm.parent_id)) {
+      if (formIsStep) {
+        hours = null; // a sub-subtask is for reference: no estimate, no hours
+      } else if (nodeMode === 'subtask' || (nodeMode === 'edit' && nodeForm.parent_id)) {
         const rawHours = String(nodeForm.estimated_hours === null || nodeForm.estimated_hours === '' ? '' : nodeForm.estimated_hours).trim();
         if (rawHours === '') {
           setError('Subtask planned hours must be between 1 and 8 hours.');
@@ -272,7 +278,7 @@ export function WbsStructurePage() {
       setShowNodeForm(false);
       setEditNodeId(null);
       await loadTasks();
-      setToast({ type: 'success', message: isEdit ? 'WBS node updated successfully.' : nodeMode === 'subtask' ? 'Subtask created successfully.' : 'WBS node created successfully.' });
+      setToast({ type: 'success', message: isEdit ? 'WBS node updated successfully.' : formIsStep ? 'Sub-subtask created successfully.' : nodeMode === 'subtask' ? 'Subtask created successfully.' : 'WBS node created successfully.' });
     } catch (err) {
       setError(err.message);
       setToast({ type: 'error', message: err.message });
@@ -487,20 +493,21 @@ export function WbsStructurePage() {
   // The row's buttons, always in four fixed places (add, duplicate, edit, delete): a button
   // this viewer doesn't get leaves its place empty, so the others never move.
   const slot = <span className="wbs-icon-slot" aria-hidden="true" />;
-  const canAddChild = (task) => task.depth === 1 && (isLead || task.assigned_engineer_id === employeeId);
+  const canAddChild = (task) => task.depth < 3 && (isLead || task.assigned_engineer_id === employeeId);
+  const kind = (task) => ['task', 'subtask', 'sub-subtask'][task.depth - 1] || 'item';
   const rowActions = (task) => (
     <div className="wbs-cell-actions">
       {canAddChild(task) ? (
-        <button className="wbs-icon-btn wbs-icon-add" type="button" title="Add a subtask" aria-label={`Add a subtask to ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openSubtaskForm(task); }}><Plus size={14} /></button>
+        <button className="wbs-icon-btn wbs-icon-add" type="button" title={task.depth === 1 ? 'Add a subtask' : 'Add a sub-subtask'} aria-label={`Add a ${task.depth === 1 ? 'subtask' : 'sub-subtask'} to ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openSubtaskForm(task); }}><Plus size={14} /></button>
       ) : slot}
       {duplicable(task) ? (
-        <button className="wbs-icon-btn wbs-icon-copy" type="button" title={task.depth === 1 ? 'Duplicate task and its subtasks' : 'Duplicate subtask'} aria-label={`Duplicate ${task.task_name}`} disabled={duplicating} onClick={(e) => { e.stopPropagation(); duplicateNode(task); }}><Copy size={14} /></button>
+        <button className="wbs-icon-btn wbs-icon-copy" type="button" title={task.depth === 1 ? 'Duplicate task and its subtasks' : `Duplicate ${kind(task)}`} aria-label={`Duplicate ${task.task_name}`} disabled={duplicating} onClick={(e) => { e.stopPropagation(); duplicateNode(task); }}><Copy size={14} /></button>
       ) : slot}
       {isLead ? (
         <button className="wbs-icon-btn wbs-icon-edit" type="button" title="Edit task" aria-label={`Edit ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openEditForm(task); }}><Pencil size={14} /></button>
       ) : slot}
       {deletable(task) ? (
-        <button className="wbs-icon-btn wbs-icon-delete" type="button" title={task.depth === 1 ? 'Delete task and its subtasks' : 'Delete subtask'} aria-label={`Delete ${task.task_name}`} disabled={deleting} onClick={(e) => { e.stopPropagation(); requestDelete([task.id]); }}><Trash2 size={14} /></button>
+        <button className="wbs-icon-btn wbs-icon-delete" type="button" title={task.depth === 1 ? 'Delete task and its subtasks' : `Delete ${kind(task)}`} aria-label={`Delete ${task.task_name}`} disabled={deleting} onClick={(e) => { e.stopPropagation(); requestDelete([task.id]); }}><Trash2 size={14} /></button>
       ) : slot}
     </div>
   );
@@ -618,7 +625,7 @@ export function WbsStructurePage() {
         <div className="modal-backdrop" role="presentation">
           <form className="wbs-node-form wbs-node-modal" onSubmit={addNode}>
             <div className="modal-heading">
-              <h2>{nodeMode === 'edit' ? 'Edit WBS Node' : nodeMode === 'subtask' ? 'Add WBS Subtask' : 'Add WBS Node'}</h2>
+              <h2>{nodeMode === 'edit' ? 'Edit WBS Node' : formIsStep ? 'Add WBS Sub-subtask' : nodeMode === 'subtask' ? 'Add WBS Subtask' : 'Add WBS Node'}</h2>
               <button className="modal-close" type="button" aria-label="Close" onClick={() => { setShowNodeForm(false); setNodeForm(EMPTY_NODE); setEditNodeId(null); setError(''); }}>X</button>
             </div>
             {error && <div className="modal-error" role="alert">{error}</div>}
@@ -655,7 +662,9 @@ export function WbsStructurePage() {
               <span>End Date</span>
               <input type="date" value={nodeForm.end_date} onChange={(e) => setNodeForm({ ...nodeForm, end_date: e.target.value })} />
             </label>
-            {nodeMode === 'subtask' || (nodeMode === 'edit' && nodeForm.parent_id) ? (
+            {formIsStep ? (
+              <div className="wbs-hours-calc">For reference: a step of the subtask, with no Login/Logout and no hours.</div>
+            ) : nodeMode === 'subtask' || (nodeMode === 'edit' && nodeForm.parent_id) ? (
               <div className="wbs-subtask-fields">
                 <label className="wbs-field-sm">
                   <span>Estimated Hours <em className="req">*</em></span>

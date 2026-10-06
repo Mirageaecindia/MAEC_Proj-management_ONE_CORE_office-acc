@@ -310,7 +310,8 @@ export function TaskDetailsPage() {
                         <div className="td-head">
                             <div className="td-title td-card-heading">Task Details</div>
                             <div className="td-stepper">
-                                {isEngineer && node.node_type === 'subtask' && (
+                                {/* A sub-subtask is for reference: it takes no Login/Logout. */}
+                                {isEngineer && node.node_type === 'subtask' && !node.reference_only && (
                                     <button
                                         type="button"
                                         className={`td-login-btn${loggedInHere ? ' logged-in' : ''}`}
@@ -554,7 +555,7 @@ export function TaskDetailsPage() {
                                     <p className="confirm-modal-text">
                                         Are you sure you want to change the task status to <strong>{pendingStatus}</strong>?
                                     </p>
-                                    {pendingStatus === 'Done' && node.node_type === 'subtask' && (
+                                    {pendingStatus === 'Done' && node.node_type === 'subtask' && !node.reference_only && (
                                         <p className="confirm-modal-subtext">
                                             {loggedInHere
                                                 ? 'You will be logged out of this subtask; the time until now is kept. '

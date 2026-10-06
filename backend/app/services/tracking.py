@@ -58,7 +58,7 @@ from app.core.errors import (
 )
 from app.core.security import as_utc
 from app.domain.timesheets import DAILY_MARK_HOURS, PENDING_REVIEW
-from app.domain.wbs import is_finished
+from app.domain.wbs import is_finished, is_sub_subtask
 from app.repositories.tracking import ACTIVE, ENDED, TrackingRepository
 from app.services.access import user_can_access_project
 from app.services.governance_monitor import enforce_governance
@@ -79,6 +79,7 @@ SUBTASK_DELETED = "subtask_deleted"  # the subtask was deleted while the enginee
 PROJECT_ARCHIVED = "project_archived"  # the BU Head archived the project while the engineer was logged in
 SUBTASK_DONE = "subtask_done"  # the subtask was set to Done while the engineer was logged in
 SUBTASK_IS_DONE = "This subtask is Done, so no more time can be logged on it."
+NOT_FOR_TIME = "Sub-subtasks are for reference only: log in on the subtask above it."
 
 
 def utcnow() -> datetime:
@@ -341,6 +342,8 @@ class TrackingService:
         elsewhere is `start`'s business: it may be a switch)."""
         if node.parent_id is None:
             return BadRequestError("Login/Logout is for subtasks. Open one of this task's subtasks.")
+        if is_sub_subtask(self.sessions.node(node.parent_id)):
+            return BadRequestError(NOT_FOR_TIME)
         if node.assigned_engineer_id != user.employee_id:
             return ForbiddenError("You can only log in to subtasks assigned to you.")
         if is_finished(node.deliverable_status):

@@ -211,6 +211,8 @@ back in draft.
 - **Upload WBS (Excel)** / **Download the Excel template** for bulk import. The template (same layout as the company's WBS breakdown sheet) has two columns: **column A the phase** (one of the five, written once at the top of its merged block; a block left unnamed takes the phase by its position, so the company's breakdown sheet uploads as it is), **column B the tasks and subtasks**: a **bold** row is a task, a normal row is a subtask of the task above it. Codes are assigned automatically (1., 1.1, 1.2 …); dates, hours and engineers are set in the app afterwards. Uploading the same workbook again adds nothing: rows that already exist are kept. The older header-based CSV (`WBS Code, Task Name, Parent WBS Code, …`) still works.
 - **+ Add WBS Node**: task name, WBS code (unique in the project), phase, assigned engineer (only engineers booked on the project), start/end dates (estimated hours are calculated from the dates).
 - **+** on a task row: add a subtask, a child item for the engineer's day-to-day work.
+- **+** on a subtask row: add a **sub-subtask**, a step of that subtask (codes 1.1.1, 1.1.2 …). It is **for reference only**: it moves To Do → In-Progress → Done, but takes no Login/Logout, no hours and no estimate, and the subtask can be Done whatever its steps' status. Deleting or duplicating a subtask takes its sub-subtasks along. Three levels at most.
+- The buttons on a row always sit in the same four places: **+**, duplicate, edit, delete; a button you don't get on a row leaves its place empty.
 - **Duplicate** (the copy icon) on a task or subtask row: a copy with the same name, engineer, hours and dates, the **next free WBS code** at its level (copying 1.1 when the task's last subtask is 1.4 gives 1.5; copying task 3 when the last task is 7 gives 8, its subtasks 8.1, 8.2 …) and status **To Do**, with no hours or comments. A task's copy brings copies of its subtasks. Rename or re-date the copy with **Edit**. Engineers can duplicate their own subtasks under a task assigned to them.
 - **Edit / Delete** a task or subtask (deleting a task deletes its subtasks). **Hours already worked are kept**: the day rows stay in the timesheet under the subtask's name, still count toward the engineer's working time, and the task's lead still reviews any that are pending. Anyone logged in to a deleted subtask is logged out and their time is saved.
 - **Delete many at once**: tick the boxes in front of tasks and subtasks (a phase's box ticks the whole phase, the header box everything; ticking a task ticks its subtasks), then **Delete N tasks and M subtasks** above the table. One confirmation lists what goes; nothing is deleted if any item is refused.
@@ -278,8 +280,10 @@ their dashboard. You are notified of the decision.
 ## 5. Engineer features
 
 ### 5.1 WBS Structure
-Only the tasks and subtasks assigned to you (with their parent tasks). Click one
-to open Task Details. You can **delete subtasks you created yourself** (one with the bin icon, or tick several and
+Every task you work on (on the task or on one of its subtasks), **whole**: all its subtasks with the
+**Assigned Engineer** of each, so you can see whose subtask is still open before the task can close and ask
+them. **Reporter** is the task's lead. Click one of your own items to open Task Details; a colleague's is shown
+only. **+** on your task adds a subtask, on your subtask a sub-subtask (for reference, see 4.2). You can **delete subtasks you created yourself** (one with the bin icon, or tick several and
 **Delete N subtasks**); only the project's lead deletes main tasks. Hours you already worked on a deleted
 subtask are kept and still count.
 

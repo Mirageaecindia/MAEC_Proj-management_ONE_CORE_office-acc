@@ -28,6 +28,7 @@ const SUBTASK = {
 
 let heartbeatExtra = {};
 let subtaskStatus = 'In-Progress';
+let referenceOnly = false; // a sub-subtask
 let activeSession;
 const session = (subtaskId) => ({
   id: 7,
@@ -40,7 +41,8 @@ const session = (subtaskId) => ({
 
 function fakeApi(url, options = {}) {
   let body;
-  if (/\/api\/wbs-nodes\/5$/.test(url)) body = { ...SUBTASK, deliverable_status: subtaskStatus };
+  if (/\/api\/wbs-nodes\/5$/.test(url))
+    body = { ...SUBTASK, deliverable_status: subtaskStatus, reference_only: referenceOnly };
   else if (/\/api\/wbs-nodes\/5\/advance-status$/.test(url)) {
     subtaskStatus = JSON.parse(options.body).new_status;
     if (subtaskStatus === 'Done' && activeSession?.subtask_id === 5) activeSession = null; // the server logs out
@@ -80,6 +82,7 @@ describe('Task Details: subtask Login/Logout', () => {
   beforeEach(() => {
     activeSession = null;
     subtaskStatus = 'In-Progress';
+    referenceOnly = false;
     heartbeatExtra = {};
     vi.stubGlobal('fetch', vi.fn(fakeApi));
   });
@@ -178,5 +181,13 @@ describe('Task Details: subtask Login/Logout', () => {
     const login = await screen.findByRole('button', { name: 'Login' }, WAIT);
     expect(login.disabled).toBe(true);
     expect(login.title).toBe('This subtask is Done, so no more time can be logged on it.');
+  });
+
+  it('a sub-subtask moves through its statuses but offers no Login', async () => {
+    referenceOnly = true;
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: 'Change status to Done' }, WAIT)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Login' })).toBeNull();
   });
 });

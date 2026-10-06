@@ -3,7 +3,7 @@
 Who may delete: the project's lead deletes any task or subtask on the project;
 an engineer deletes only subtasks they created themselves, never a task and
 never a subtask the lead planned for them.
-Deleting a task deletes its subtasks. A selection is deleted as a whole or
+Deleting a task deletes its subtasks, and a subtask its sub-subtasks. A selection is deleted as a whole or
 not at all: one refused item and nothing changes.
 
 Hours already worked are never deleted or changed. An open Login session on a
@@ -71,8 +71,12 @@ def delete_nodes(
     if refused:
         raise ForbiddenError("Nothing was deleted. " + "; ".join(refused))
 
-    children = db.query(node).filter(node.parent_id.in_(ids)).all()  # the tree is two levels deep
-    doomed = {n.id: n for n in [*nodes, *children]}
+    doomed = {n.id: n for n in nodes}
+    frontier = list(doomed)
+    while frontier:  # subtasks, then their sub-subtasks: at most two more queries
+        below = [n for n in db.query(node).filter(node.parent_id.in_(frontier)) if n.id not in doomed]
+        doomed.update({n.id: n for n in below})
+        frontier = [n.id for n in below]
     doomed_ids = list(doomed)
     subtasks = sum(1 for n in doomed.values() if n.parent_id is not None)
 

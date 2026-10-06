@@ -201,4 +201,5 @@ def test_deleting_many_costs_a_fixed_number_of_queries(client, make, world, gove
     with counted() as count:
         assert client.post(BULK.format(project_id), json={"node_ids": many}, headers=world.lead_h).status_code == 200
 
-    assert count["n"] == few_queries <= 14, (few_queries, count["n"])
+    # One query per level of the tree (task, subtask, sub-subtask), never per item.
+    assert count["n"] == few_queries <= 15, (few_queries, count["n"])

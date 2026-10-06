@@ -537,6 +537,7 @@ class WbsNodeDetailOut(WbsNodeOut):
     actual_start_datetime: Optional[str] = None
     actual_end_datetime: Optional[str] = None
     node_type: str = "task"
+    reference_only: bool = False  # a sub-subtask: no Login/Logout, no hours
     linked_code: Optional[str] = None
     linked_task_name: Optional[str] = None
     history: List["WbsNodeHistoryOut"] = []

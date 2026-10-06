@@ -56,4 +56,13 @@ describe('selection', () => {
     expect(describeCount({ tasks: 0, subtasks: 1 })).toBe('1 subtask');
     expect(describeCount({ tasks: 0, subtasks: 0 })).toBe('nothing');
   });
+
+  it('a ticked task implies its sub-subtasks too, listed after their parent or before it', () => {
+    const nodes = [
+      { id: 3, parent_id: 2 }, // a sub-subtask listed before its subtask
+      { id: 1, parent_id: null },
+      { id: 2, parent_id: 1 },
+    ];
+    expect([...impliedSelection([1], nodes)].sort()).toEqual([1, 2, 3]);
+  });
 });

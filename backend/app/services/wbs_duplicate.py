@@ -1,7 +1,8 @@
 """Duplicating a WBS task or subtask (decided 2026-10-06).
 
 The copy sits next to the original: a subtask's copy under the same task, a task's
-copy as a new task with a copy of each of its subtasks. It keeps the name, phase,
+copy as a new task. Everything under the original is copied with it (a task's
+subtasks, a subtask's sub-subtasks), numbered in order under the copy's code. It keeps the name, phase,
 lead, engineer, estimated hours and dates, and gets the next free WBS code at its
 level ("1.4" -> "1.5"; task "3" -> "4", its subtasks "4.1", "4.2", ...), so codes stay
 unique. It starts fresh: To Do, no hours, no comments, no history.
@@ -55,22 +56,31 @@ def duplicate_node(db: Session, node: models.WbsNode, role: str, user: models.Us
     reason = refusal(role, node, parent, user)
     if reason:
         raise ForbiddenError(reason)
-    codes = [code for (code,) in db.query(models.WbsNode.wbs_code).filter_by(project_id=node.project_id)]
+    project_nodes = db.query(models.WbsNode).filter_by(project_id=node.project_id).order_by(models.WbsNode.id).all()
+    codes = [n.wbs_code for n in project_nodes]
+    below: dict[int, list[models.WbsNode]] = {}
+    for n in project_nodes:
+        below.setdefault(n.parent_id, []).append(n)
 
     if parent is not None:
         prefix = child_prefix(parent.wbs_code)
-        copy = _copy(node, user, parent.id, next_code(prefix, codes) if prefix else None)
-        db.add(copy)
+        code = next_code(prefix, codes) if prefix else None
     else:
-        copy = _copy(node, user, None, next_code("", codes) if child_prefix(node.wbs_code) else None)
-        db.add(copy)
-        db.flush()  # the subtasks need the new task's id
-        prefix = child_prefix(copy.wbs_code)
-        subtasks = db.query(models.WbsNode).filter_by(parent_id=node.id).order_by(models.WbsNode.id)
-        for number, subtask in enumerate(subtasks, start=1):
-            db.add(_copy(subtask, user, copy.id, f"{prefix}{number}" if prefix else None))
+        code = next_code("", codes) if child_prefix(node.wbs_code) else None
+    copy = _copy_tree(db, node, user, parent.id if parent is not None else None, code, below)
     db.commit()
     db.refresh(copy)
+    return copy
+
+
+def _copy_tree(db, node, user, parent_id, code, below) -> models.WbsNode:
+    """Copy `node` and everything under it; the items are numbered in order under the new code."""
+    copy = _copy(node, user, parent_id, code)
+    db.add(copy)
+    db.flush()  # the items under it need its id
+    prefix = child_prefix(copy.wbs_code)
+    for number, child in enumerate(below.get(node.id, []), start=1):
+        _copy_tree(db, child, user, copy.id, f"{prefix}{number}" if prefix else None, below)
     return copy
 
 

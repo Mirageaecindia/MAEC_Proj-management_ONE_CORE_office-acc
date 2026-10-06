@@ -42,6 +42,16 @@ def is_finished(status: str | None) -> bool:
     return normalize_status(status, is_subtask=False) in FINISHED
 
 
+NO_DEEPER = "A sub-subtask can't have items of its own."
+
+
+def is_sub_subtask(parent) -> bool:
+    """A node whose parent is a subtask: a sub-subtask. Sub-subtasks are for reference:
+    they split a subtask into smaller steps (To Do -> In-Progress -> Done) but take no
+    Login/Logout, no hours and no estimate, and don't hold up their subtask."""
+    return parent is not None and parent.parent_id is not None
+
+
 def next_code(prefix: str, codes: Iterable[str | None]) -> str:
     """The next free WBS code at one level, after the highest number used there: tasks
     (prefix "") "3" -> "4", subtasks of task 1 (prefix "1.") "1.4" -> "1.5". Gaps left by

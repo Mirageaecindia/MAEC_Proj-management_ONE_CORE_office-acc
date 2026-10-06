@@ -43,6 +43,13 @@ const ROUTES = [
   [/\/api\/projects\/1\/wbs-structure/, () => nodes],
   [/\/api\/projects\/1\/booked-engineers$/, () => []],
   [
+    /\/api\/wbs-nodes\/11\/subtasks$/,
+    () => {
+      nodes = [...nodes, node(13, '1.1.1', 'Sleeves', 11)];
+      return nodes.at(-1);
+    },
+  ],
+  [
     /\/api\/wbs-nodes\/11\/duplicate$/,
     () => {
       nodes = [...nodes, node(12, '1.2', 'Risers', 10)];
@@ -131,6 +138,37 @@ describe('WBS rows (lead)', () => {
   });
 });
 
+describe('Sub-subtasks (lead)', () => {
+  beforeEach(() => {
+    nodes = [node(10, '1', 'Cable routing'), node(11, '1.1', 'Risers', 10)];
+    vi.stubGlobal('fetch', vi.fn(fakeApi));
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('"+" on a subtask adds a reference step under it, with no hours', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a sub-subtask to Risers' }, WAIT));
+    expect(screen.getByRole('heading', { name: 'Add WBS Sub-subtask' })).toBeTruthy();
+    expect(screen.queryByPlaceholderText('1-8')).toBeNull(); // no hours to enter
+    const form = screen.getByRole('heading', { name: 'Add WBS Sub-subtask' }).closest('form');
+    fireEvent.change(screen.getByPlaceholderText('Enter task name'), { target: { value: 'Sleeves' } });
+    fireEvent.submit(form);
+
+    expect(await screen.findByText('1.1.1', {}, WAIT)).toBeTruthy();
+    const [, options] = fetch.mock.calls.find(([url]) => url.endsWith('/api/wbs-nodes/11/subtasks'));
+    expect(JSON.parse(options.body)).toMatchObject({
+      task_name: 'Sleeves',
+      parent_id: 11,
+      estimated_hours: null,
+    });
+    expect(screen.queryByRole('button', { name: 'Add a sub-subtask to Sleeves' })).toBeNull(); // three levels at most
+  });
+});
+
 describe('WBS rows (engineer)', () => {
   beforeEach(() => {
     myRole = 'engineer';
@@ -176,6 +214,6 @@ describe('WBS rows (engineer)', () => {
     const places = [...mine.querySelector('.wbs-cell-actions').children].map((el) =>
       el.getAttribute('aria-label'),
     );
-    expect(places).toEqual([null, 'Duplicate Risers', null, 'Delete Risers']); // no add or edit here
+    expect(places).toEqual(['Add a sub-subtask to Risers', 'Duplicate Risers', null, 'Delete Risers']); // no edit
   });
 });

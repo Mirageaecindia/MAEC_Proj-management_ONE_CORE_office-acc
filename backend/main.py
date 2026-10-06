@@ -30,7 +30,7 @@ from app.core.security import require_role
 from app.domain.calendar import distribute_hours_over_months as _distribute_hours_over_months
 from app.domain.calendar import month_key as _get_month_key
 from app.domain.timesheets import APPROVED, INDIVIDUAL_ONLY, PENDING_REVIEW, today_utc, total_hours
-from app.domain.wbs import TO_DO, child_prefix, is_finished, next_code, whole_tasks
+from app.domain.wbs import NO_DEEPER, TO_DO, child_prefix, is_finished, is_sub_subtask, next_code, whole_tasks
 from app.domain.allocation import peak_allocation, planned_hours
 from app.repositories.bookings import BookingRepository
 from app.services.allocation import over_capacity_message
@@ -716,11 +716,8 @@ def validate_node_payload(db: Session, project_id: int, payload: schemas.WbsNode
         parent = db.query(models.WbsNode).filter_by(id=payload.parent_id, project_id=project_id).first()
         if not parent:
             raise HTTPException(status_code=400, detail="Parent WBS node does not belong to this project.")
-        if parent.parent_id is not None:
-            raise HTTPException(
-                status_code=400,
-                detail="A subtask cannot have its own subtasks. Only main tasks can have subtasks.",
-            )
+        if is_sub_subtask(db.get(models.WbsNode, parent.parent_id) if parent.parent_id else None):
+            raise HTTPException(status_code=400, detail=NO_DEEPER)  # parent is a sub-subtask
     if payload.assigned_engineer_id is not None and not db.query(models.Employee).filter_by(id=payload.assigned_engineer_id).first():
         raise HTTPException(status_code=400, detail="Engineer not found.")
     if payload.assigned_lead_user_id is not None and not db.query(models.User).filter(models.User.id == payload.assigned_lead_user_id, models.User.role != "bu_head").first():
@@ -1679,11 +1676,10 @@ def create_wbs_subtask(
     elif role != "lead":
         raise HTTPException(status_code=403, detail="This action is not allowed for the current role.")
 
-    if parent.parent_id is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="A subtask cannot have its own subtasks. Only main tasks can have subtasks.",
-        )
+    # Under a task: a subtask. Under a subtask: a sub-subtask, for reference only (no hours).
+    reference = parent.parent_id is not None
+    if reference and is_sub_subtask(db.get(models.WbsNode, parent.parent_id)):
+        raise HTTPException(status_code=400, detail=NO_DEEPER)
 
     if payload.assigned_engineer_id is not None and not db.query(models.Employee).filter_by(
         id=payload.assigned_engineer_id
@@ -1696,9 +1692,7 @@ def create_wbs_subtask(
                 status_code=403,
                 detail="Only the Lead can assign engineers to a task — you can only plan your own subtasks.",
             )
-        validate_subtask_rules(payload.estimated_hours, payload.start_date, payload.end_date)
-
-    if role == "lead":
+    if not reference:
         validate_subtask_rules(payload.estimated_hours, payload.start_date, payload.end_date)
 
     phase = payload.phase or parent.phase or "Space Planning"
@@ -1722,7 +1716,7 @@ def create_wbs_subtask(
         assigned_engineer_id=payload.assigned_engineer_id
         if payload.assigned_engineer_id is not None
         else parent.assigned_engineer_id,
-        estimated_hours=payload.estimated_hours,
+        estimated_hours=None if reference else payload.estimated_hours,
         deliverable_status="To Do",
         start_date=payload.start_date if payload.start_date else parent.start_date,
         target_due_date=payload.target_due_date if payload.target_due_date else parent.target_due_date,
@@ -1754,7 +1748,10 @@ def update_wbs_node(
         raise HTTPException(status_code=409, detail="WBS code already exists in this project.")
     for field, value in payload.model_dump(exclude={"subtask", "phase", "parent_id"}).items():
         setattr(node, field, value)
-    if node.parent_id is not None:
+    parent = db.get(models.WbsNode, node.parent_id) if node.parent_id is not None else None
+    if is_sub_subtask(parent):
+        node.estimated_hours = None  # for reference: no estimate
+    elif parent is not None:
         merged_hours = payload.estimated_hours if payload.estimated_hours is not None else node.estimated_hours
         merged_start = payload.start_date if payload.start_date is not None else node.start_date
         merged_end = payload.end_date if payload.end_date is not None else node.end_date
@@ -2108,7 +2105,7 @@ def get_node_detail(db: Session, node_id: int, user: models.User):
 
     linked_code = parent_node.wbs_code if parent_node else None
     linked_task_name = parent_node.task_name if parent_node else None
-    ntype = "subtask" if node.parent_id else "task"
+    ntype = "subtask" if node.parent_id else "task"  # a sub-subtask moves like a subtask
     display_status = map_status_for_display(node.deliverable_status)
 
     children_out = [
@@ -2147,6 +2144,7 @@ def get_node_detail(db: Session, node_id: int, user: models.User):
         actual_start_datetime=node.actual_start_datetime.isoformat() if node.actual_start_datetime else None,
         actual_end_datetime=node.actual_end_datetime.isoformat() if node.actual_end_datetime else None,
         node_type=ntype,
+        reference_only=is_sub_subtask(parent_node),
         linked_code=linked_code,
         linked_task_name=linked_task_name,
         history=[schemas.WbsNodeHistoryOut.model_validate(h) for h in history],
