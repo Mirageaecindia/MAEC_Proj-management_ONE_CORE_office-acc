@@ -1,6 +1,6 @@
-import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { useServerToday } from '../../hooks/useServerToday';
@@ -33,7 +33,6 @@ function clampPct(value) {
 }
 
 export function TimelineLogsPage() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { role, authHeaders } = useAuth();
   const targetProjectId = searchParams.get('projectId') ? Number(searchParams.get('projectId')) : null;
@@ -590,23 +589,6 @@ export function TimelineLogsPage() {
         {projectId && (isLead || isBuHead) && (
           <RejectedHoursPanel projectId={projectId} onChanged={() => loadProjectData(projectId, weekStartStr)} />
         )}
-
-        <div className="timesheet-footer">
-          <div className="footer-info">
-            <span>
-              {isEngineer
-                ? 'Hours are recorded per subtask from Login/Logout: the time between them counts, except while the laptop was off.'
-                : 'Each day is approved by the task’s lead once it is over; the week is the sum of its days.'}
-            </span>
-          </div>
-          <button
-            type="button"
-            className="button button-primary button-next"
-            onClick={() => navigate(isBuHead || isLead ? '/executive-dashboard' : '/engineer-performance-dashboard')}
-          >
-            NEXT <ArrowRight size={16} />
-          </button>
-        </div>
       </section>
     </main>
   );
