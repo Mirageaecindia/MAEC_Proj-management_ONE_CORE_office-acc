@@ -70,10 +70,10 @@ function ProtectedRoute({ children, roles }) {
   return children;
 }
 
-function WorkspaceRoute({ children, roles, subtitle }) {
+function WorkspaceRoute({ children, roles }) {
   return (
     <ProtectedRoute roles={roles}>
-      <MaecHeader subtitle={subtitle} />
+      <MaecHeader />
       <TrackingBar />
       {children}
     </ProtectedRoute>
@@ -115,7 +115,7 @@ function AppRoutes() {
         <Route
           path="/change-password"
           element={
-            <WorkspaceRoute roles={['bu_head', 'engineer']} subtitle="Account">
+            <WorkspaceRoute roles={['bu_head', 'engineer']}>
               <ChangePasswordPage />
             </WorkspaceRoute>
           }
@@ -124,7 +124,7 @@ function AppRoutes() {
         <Route
           path="/created-projects"
           element={
-            <WorkspaceRoute roles={['bu_head']} subtitle="Created Projects">
+            <WorkspaceRoute roles={['bu_head']}>
               <CreatedProjectsPage />
             </WorkspaceRoute>
           }
@@ -156,7 +156,7 @@ function AppRoutes() {
         <Route
           path="/timeline-logs"
           element={
-            <WorkspaceRoute roles={['lead', 'engineer', 'bu_head']} subtitle="Timeline & Logs">
+            <WorkspaceRoute roles={['lead', 'engineer', 'bu_head']}>
               <TimelineLogsPage />
             </WorkspaceRoute>
           }
@@ -164,7 +164,7 @@ function AppRoutes() {
         <Route
           path="/weekly-logs"
           element={
-            <WorkspaceRoute roles={['lead', 'engineer', 'bu_head']} subtitle="Engineer Weekly Logs">
+            <WorkspaceRoute roles={['lead', 'engineer', 'bu_head']}>
               <EngineerWeeklyLogsPage />
             </WorkspaceRoute>
           }
@@ -172,7 +172,7 @@ function AppRoutes() {
         <Route
           path="/wbs-structure"
           element={
-            <WorkspaceRoute roles={['lead', 'engineer', 'bu_head']} subtitle="MEP Enterprise Workspace">
+            <WorkspaceRoute roles={['lead', 'engineer', 'bu_head']}>
               <WbsStructurePage />
             </WorkspaceRoute>
           }
@@ -180,7 +180,7 @@ function AppRoutes() {
         <Route
           path="/task-details"
           element={
-            <WorkspaceRoute roles={['lead', 'engineer', 'bu_head']} subtitle="WBS & Task Details">
+            <WorkspaceRoute roles={['lead', 'engineer', 'bu_head']}>
               <TaskDetailsPage />
             </WorkspaceRoute>
           }
@@ -188,7 +188,7 @@ function AppRoutes() {
         <Route
           path="/engineer-performance-dashboard"
           element={
-            <WorkspaceRoute roles={['engineer']} subtitle="Engineer Performance Dashboard">
+            <WorkspaceRoute roles={['engineer']}>
               <EngineerPerformanceDashboardPage />
             </WorkspaceRoute>
           }
@@ -196,7 +196,7 @@ function AppRoutes() {
         <Route
           path="/executive-dashboard"
           element={
-            <WorkspaceRoute roles={['lead', 'bu_head']} subtitle="Executive Dashboard">
+            <WorkspaceRoute roles={['lead', 'bu_head']}>
               <ExecutiveDashboardRouter />
             </WorkspaceRoute>
           }
@@ -204,7 +204,7 @@ function AppRoutes() {
         <Route
           path="/project-work-summary"
           element={
-            <WorkspaceRoute roles={['bu_head']} subtitle="Project Work Summary">
+            <WorkspaceRoute roles={['bu_head']}>
               <ProjectWorkSummaryPage />
             </WorkspaceRoute>
           }
@@ -212,7 +212,7 @@ function AppRoutes() {
         <Route
           path="/sharepoint-mirror"
           element={
-            <WorkspaceRoute roles={['lead', 'engineer', 'bu_head']} subtitle="SharePoint Integration">
+            <WorkspaceRoute roles={['lead', 'engineer', 'bu_head']}>
               <SharePointMirrorPage />
             </WorkspaceRoute>
           }

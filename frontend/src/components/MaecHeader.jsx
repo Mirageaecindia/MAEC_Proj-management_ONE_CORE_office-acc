@@ -1,5 +1,5 @@
 import { CircleUserRound, KeyRound, LogOut } from 'lucide-react';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { useLeadsProjects } from '../hooks/useProjects';
@@ -24,15 +24,15 @@ const ROLE_LABELS = {
   engineer: 'Engineer',
 };
 
-export function MaecHeader({ subtitle }) {
+/** The application's name, the same on every page. */
+const APP_NAME = 'ProManage';
+
+export function MaecHeader() {
   const [accountOpen, setAccountOpen] = useState(false);
-  const location = useLocation();
   const { user, role, logout } = useAuth();
   const leadsProjects = useLeadsProjects();
   const menuRef = useRef(null);
   const navigate = useNavigate();
-
-  const displaySubtitle = subtitle || (location.pathname.startsWith('/resource-booking') ? 'MEP Enterprise Workspace' : 'Project Management');
 
   const visibleTabs = allTabs.filter((tab) => canAccess(tab.roles, { role, leadsProjects }));
 
@@ -72,7 +72,7 @@ export function MaecHeader({ subtitle }) {
         <NavLink to="/" className="brand" aria-label="MAEC home">
           <img src={maecLogo} alt="MAEC" className="logo" />
           <span className="brand-divider" aria-hidden="true" />
-          <strong className="brand-title">{displaySubtitle}</strong>
+          <strong className="brand-title">{APP_NAME}</strong>
         </NavLink>
         <div className="user-menu">
           {notified && <NotificationBell />}
