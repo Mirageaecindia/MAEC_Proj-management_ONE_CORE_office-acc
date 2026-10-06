@@ -818,7 +818,7 @@ export function WbsStructurePage() {
                 <tr>
                   <th>WBS CODE &amp; TASK NAME</th>
                   <th>ASSIGNED ENGINEER</th>
-                  <th>ASSIGNED LEAD</th>
+                  <th>REPORTER</th>
                   <th>ESTIMATED HOURS</th>
                   <th>DELIVERABLE STATUS</th>
                   <th>TARGET DUE DATE</th>
