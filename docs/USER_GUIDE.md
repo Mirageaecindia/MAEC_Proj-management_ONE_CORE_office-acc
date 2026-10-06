@@ -295,6 +295,7 @@ subtask are kept and still count.
   - **More than 8 hours in a day** (all your subtasks and projects together): every hour still counts and your Lead reviews the day. Past the 8-hour mark, **visit MAEC at least every 30 minutes**: switch to its tab, click or press a key there. Task Details shows an "Over 8 hours today" note. If 30 minutes pass without a visit, you are logged out at your last visit, the time up to then is saved, and MAEC does not log you in again by itself. Task Details tells you when it happened; log in again if you are still working.
   - **Forgot to log out** with the laptop on: before the 8-hour mark the time keeps counting until you log out; after it, the rule above stops the clock within 30 minutes of your last visit (or of the mark, if that came later). The server checks every 5 minutes, so this also happens when the laptop is closed or MAEC is not open.
   - One subtask at a time. **Logout** adds the time to that day's row for the subtask (the day you logged in).
+  - **Done means no more time:** setting a subtask to **Done** logs out whoever is logged in to it (the time up to then is kept), and **Login** stays off on it. If more work turns up, ask your Lead to move it back to In-Progress.
   - Edge "sleeping tabs" and Chrome "Memory Saver" can freeze a background tab. Add the MAEC address under *Always keep these sites active* in the browser settings.
 
 ### 5.3 Timeline & Logs

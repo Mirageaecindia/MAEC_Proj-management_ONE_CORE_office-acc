@@ -31,6 +31,10 @@ so yesterday's subtask never carries on by itself. A day's row that has been
 reviewed is never changed by a later Logout (review waits for the day's
 sessions to close, see app/services/hours_review.py).
 
+A subtask that is Done takes no more time: setting it to Done (by the engineer,
+a lead's edit or a re-upload) ends a session open on it at that moment, its
+time banked, and nobody can log in to it until a lead moves it back.
+
 One rule (`settle`) decides all of this, applied by the heartbeat when the
 engineer is back and by a server-side sweep every few minutes when they are
 not, so a closed browser never leaves a session open for long.
@@ -54,6 +58,7 @@ from app.core.errors import (
 )
 from app.core.security import as_utc
 from app.domain.timesheets import DAILY_MARK_HOURS, PENDING_REVIEW
+from app.domain.wbs import is_finished
 from app.repositories.tracking import ACTIVE, ENDED, TrackingRepository
 from app.services.access import user_can_access_project
 from app.services.governance_monitor import enforce_governance
@@ -72,6 +77,8 @@ LAPTOP_OFF = "laptop_off"  # heartbeats stopped; closed at the last one and resu
 NO_VISIT = "no_visit"  # past the daily mark without a visit for VISIT_GRACE; closed at the last visit
 SUBTASK_DELETED = "subtask_deleted"  # the subtask was deleted while the engineer was logged in
 PROJECT_ARCHIVED = "project_archived"  # the BU Head archived the project while the engineer was logged in
+SUBTASK_DONE = "subtask_done"  # the subtask was set to Done while the engineer was logged in
+SUBTASK_IS_DONE = "This subtask is Done, so no more time can be logged on it."
 
 
 def utcnow() -> datetime:
@@ -128,6 +135,15 @@ def end_session(
     session.logout_at, session.status, session.active_seconds, session.ended_by = at, ENDED, seconds, ended_by
     upsert_subtask_time_log(db, session.project_id, session.subtask_id, session.employee_id, login_at.date(), seconds)
     return seconds
+
+
+def end_sessions_if_done(db: Session, node: models.WbsNode, now: datetime | None = None) -> None:
+    """A subtask that is now Done ends any session open on it, its time banked. The caller commits."""
+    if node.parent_id is None or not is_finished(node.deliverable_status):
+        return
+    now = now or utcnow()
+    for session in TrackingRepository(db).open_on_subtask(node.id):
+        end_session(db, session, now, SUBTASK_DONE)
 
 
 def last_visit(session: models.TimeSession) -> datetime:
@@ -327,6 +343,8 @@ class TrackingService:
             return BadRequestError("Login/Logout is for subtasks. Open one of this task's subtasks.")
         if node.assigned_engineer_id != user.employee_id:
             return ForbiddenError("You can only log in to subtasks assigned to you.")
+        if is_finished(node.deliverable_status):
+            return ConflictError(SUBTASK_IS_DONE)
         project = self.sessions.project(node.project_id)
         if project is None or not user_can_access_project(self.db, user, project):
             return ForbiddenError(NO_PROJECT_ACCESS)

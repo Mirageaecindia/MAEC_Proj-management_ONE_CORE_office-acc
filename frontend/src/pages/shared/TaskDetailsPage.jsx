@@ -58,6 +58,8 @@ export function TaskDetailsPage() {
     const loggedInHere = activeSession?.subtask_id === nodeId;
     const loggedInElsewhere = Boolean(activeSession) && !loggedInHere;
     const trackingBusy = startTracking.isPending || logoutTracking.isPending;
+    // A Done subtask takes no more time: setting it to Done logs out whoever is logged in to it.
+    const subtaskDone = node?.node_type === 'subtask' && node.deliverable_status === 'Done';
     const [confirmSwitch, setConfirmSwitch] = useState(false);
 
     const showToast = useCallback((type, message) => {
@@ -164,6 +166,7 @@ export function TaskDetailsPage() {
             setConfirmError('');
             showToast('success', `Status updated to '${pendingStatus}'.`);
             loadData({ quiet: true });
+            if (pendingStatus === 'Done' && loggedInHere) tracking.refetch(); // the server logged us out
         } catch (err) {
             setConfirmError(err.message);
             showToast('error', err.message);
@@ -311,10 +314,12 @@ export function TaskDetailsPage() {
                                     <button
                                         type="button"
                                         className={`td-login-btn${loggedInHere ? ' logged-in' : ''}`}
-                                        disabled={trackingBusy}
+                                        disabled={trackingBusy || (subtaskDone && !loggedInHere)}
                                         title={loggedInHere
                                             ? 'Logout: stop working on this subtask'
-                                            : loggedInElsewhere
+                                            : subtaskDone
+                                                ? 'This subtask is Done, so no more time can be logged on it.'
+                                                : loggedInElsewhere
                                                 ? `You are logged in to ${activeSession.subtask_name || 'another subtask'}. Login here switches to this subtask.`
                                                 : 'Login: start working on this subtask'}
                                         onClick={toggleTracking}
@@ -549,6 +554,14 @@ export function TaskDetailsPage() {
                                     <p className="confirm-modal-text">
                                         Are you sure you want to change the task status to <strong>{pendingStatus}</strong>?
                                     </p>
+                                    {pendingStatus === 'Done' && node.node_type === 'subtask' && (
+                                        <p className="confirm-modal-subtext">
+                                            {loggedInHere
+                                                ? 'You will be logged out of this subtask; the time until now is kept. '
+                                                : ''}
+                                            No more time can be logged on a Done subtask.
+                                        </p>
+                                    )}
                                     {confirmError && <div className="resource-error" role="alert">{confirmError}</div>}
                                 </div>
                                 <div className="modal-actions">

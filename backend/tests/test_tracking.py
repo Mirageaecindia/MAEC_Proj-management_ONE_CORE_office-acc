@@ -469,3 +469,57 @@ def test_login_reports_at_once_that_the_day_is_past_the_mark(client, db, world, 
     response = client.post(START, json={"subtask_id": subtask.id}, headers=world.eng_h)
 
     assert response.status_code == 201 and response.json()["over_mark"] is True  # no waiting for a heartbeat
+
+
+ADVANCE = "/api/wbs-nodes/{}/advance-status"
+
+
+def _advance(client, headers, node, *statuses):
+    for status in statuses:
+        response = client.post(ADVANCE.format(node.id), json={"new_status": status}, headers=headers)
+        assert response.status_code == 200, response.text
+
+
+def test_setting_a_subtask_done_logs_the_engineer_out_and_banks_the_time(client, db, world, subtask):
+    session_id = _login(client, world, subtask)
+    _rewind(db, session_id, logged_in=timedelta(hours=2), last_seen=timedelta(minutes=1))
+
+    _advance(client, world.eng_h, subtask, "In-Progress", "Done")
+
+    db.expire_all()
+    session = db.get(models.TimeSession, session_id)
+    assert (session.status, session.ended_by) == ("ended", tracking.SUBTASK_DONE)
+    assert _banked_hours(db, subtask) == 2.0  # every minute until Done counts
+    assert client.post(HEARTBEAT, headers=world.eng_h).json()["active_session"] is None
+
+
+def test_a_done_subtask_refuses_login_until_a_lead_reopens_it(client, db, world, subtask):
+    _advance(client, world.eng_h, subtask, "In-Progress", "Done")
+
+    refused = client.post(START, json={"subtask_id": subtask.id}, headers=world.eng_h)
+
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == tracking.SUBTASK_IS_DONE
+
+    db.get(models.WbsNode, subtask.id).deliverable_status = "In-Progress"  # a lead moved it back
+    db.commit()
+    _login(client, world, subtask)
+
+
+def test_a_lead_editing_a_subtask_to_done_logs_the_engineer_out(client, db, world, subtask):
+    session_id = _login(client, world, subtask)
+    edit = {
+        "task_name": subtask.task_name,
+        "parent_id": subtask.parent_id,
+        "assigned_engineer_id": subtask.assigned_engineer_id,
+        "estimated_hours": subtask.estimated_hours,
+        "start_date": "2026-09-01",
+        "end_date": "2026-09-01",
+        "deliverable_status": "Done",
+    }
+
+    response = client.put(f"/api/wbs-nodes/{subtask.id}", json=edit, headers=world.lead_h)
+
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    assert db.get(models.TimeSession, session_id).ended_by == tracking.SUBTASK_DONE

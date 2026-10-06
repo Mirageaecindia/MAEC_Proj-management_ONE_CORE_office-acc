@@ -56,7 +56,7 @@ from app.services.hours_review import (
     tasks_by_id,
     trimmed_hours,
 )
-from app.services.tracking import last_visit, unattended_seconds
+from app.services.tracking import end_sessions_if_done, last_visit, unattended_seconds
 from app.services.wbs_outline import import_outline, looks_like_outline
 from app.services.wbs_delete import delete_nodes
 from app.services.tracking import sweep_forever
@@ -1780,6 +1780,7 @@ def update_wbs_node(
     phase_changed = payload.phase is not None and payload.phase != node.phase
     if payload.phase is not None:
         node.phase = payload.phase
+    end_sessions_if_done(db, node)
     db.commit()
     if phase_changed:
         cascade_phase(db, node.id, node.phase)
@@ -2032,6 +2033,7 @@ async def upload_wbs(
             updated_phase = node.phase != phase
             for field, value in payload.model_dump(exclude={"subtask"}).items():
                 setattr(node, field, value)
+            end_sessions_if_done(db, node)
             db.commit()
             if updated_phase:
                 cascade_phase(db, node.id, phase)
@@ -2230,6 +2232,7 @@ def advance_wbs_node_status(
         node.actual_start_datetime = datetime.now(timezone.utc)
     if is_subtask and payload.new_status == "Done" and node.actual_end_datetime is None:
         node.actual_end_datetime = datetime.now(timezone.utc)
+    end_sessions_if_done(db, node)  # Done takes no more time: whoever is logged in to it is logged out
 
     history_entry = models.WbsNodeHistory(
         node_id=node_id,

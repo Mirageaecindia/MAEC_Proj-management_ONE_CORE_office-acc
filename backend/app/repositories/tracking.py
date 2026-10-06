@@ -17,6 +17,9 @@ class TrackingRepository:
     def active_session(self, employee_id: int) -> models.TimeSession | None:
         return self.db.query(models.TimeSession).filter_by(employee_id=employee_id, status=ACTIVE).first()
 
+    def open_on_subtask(self, subtask_id: int) -> list[models.TimeSession]:
+        return self.db.query(models.TimeSession).filter_by(subtask_id=subtask_id, status=ACTIVE).all()
+
     def banked_seconds(self, employee_id: int, day: date) -> int:
         """Seconds banked by the engineer's ended sessions that started on `day` (UTC), in one query."""
         start = datetime.combine(day, time.min, tzinfo=UTC)

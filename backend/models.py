@@ -340,7 +340,7 @@ class TimeSession(Base):
     logout_at = Column(UTCDateTime, nullable=True)
     active_seconds = Column(Integer, nullable=False, default=0)
     status = Column(String(20), nullable=False, default="active", index=True)
-    ended_by = Column(String(20), nullable=True)  # engineer | laptop_off | no_visit | subtask_deleted
+    ended_by = Column(String(20), nullable=True)  # engineer | laptop_off | no_visit | subtask_deleted | subtask_done | project_archived
     version_id = Column(Integer, nullable=False)
     created_at = Column(UTCDateTime, server_default=func.now())
     updated_at = Column(UTCDateTime, onupdate=func.now())

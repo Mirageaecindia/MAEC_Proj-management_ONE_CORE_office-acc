@@ -43,6 +43,7 @@ function fakeApi(url, options = {}) {
   if (/\/api\/wbs-nodes\/5$/.test(url)) body = { ...SUBTASK, deliverable_status: subtaskStatus };
   else if (/\/api\/wbs-nodes\/5\/advance-status$/.test(url)) {
     subtaskStatus = JSON.parse(options.body).new_status;
+    if (subtaskStatus === 'Done' && activeSession?.subtask_id === 5) activeSession = null; // the server logs out
     body = { ok: true };
   } else if (/\/api\/projects\/1$/.test(url))
     body = { id: 1, project_name: 'Hotel Tower', my_role: 'engineer' };
@@ -78,6 +79,7 @@ function renderPage() {
 describe('Task Details: subtask Login/Logout', () => {
   beforeEach(() => {
     activeSession = null;
+    subtaskStatus = 'In-Progress';
     heartbeatExtra = {};
     vi.stubGlobal('fetch', vi.fn(fakeApi));
   });
@@ -161,5 +163,20 @@ describe('Task Details: subtask Login/Logout', () => {
     expect(screen.queryByText(/Loading task details/)).toBeNull(); // the card stayed on screen
     expect(screen.getAllByText('Cable schedule', { exact: false }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Change status to Done' })).toBeNull(); // shows Done at once
+  });
+
+  it('setting Done logs out of the subtask, says so first, and Login stays off', async () => {
+    subtaskStatus = 'In-Progress';
+    activeSession = session(5);
+    renderPage();
+    await screen.findByRole('button', { name: 'Logout' }, WAIT);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change status to Done' }));
+    expect(screen.getByText(/You will be logged out of this subtask/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    const login = await screen.findByRole('button', { name: 'Login' }, WAIT);
+    expect(login.disabled).toBe(true);
+    expect(login.title).toBe('This subtask is Done, so no more time can be logged on it.');
   });
 });

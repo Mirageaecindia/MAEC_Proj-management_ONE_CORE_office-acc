@@ -38,6 +38,7 @@ const SESSION_END_LABELS = {
   no_visit: 'logged out by the system (no visit)',
   subtask_deleted: 'subtask deleted',
   project_archived: 'project archived',
+  subtask_done: 'subtask set to Done',
 };
 
 // Server times are UTC; the browser shows them in the viewer's own time zone.
