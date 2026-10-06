@@ -1,3 +1,7 @@
+/* Layout stability (2026-10-06 usability pass): the page keeps its width when a scrollbar
+   appears (expanding a table, data arriving), so nothing slides sideways. */
+html { scrollbar-gutter: stable; }
+
 :root {
   font-family: 'Segoe UI', Arial, sans-serif;
   color: #21334a;
@@ -450,7 +454,7 @@ input[type='date'] { color: #52687c; }
   grid-template-columns: 240px 1fr;
   align-items: center;
   border-bottom: 1px solid #edf2f6;
-  min-height: 48px;
+  min-height: 56px; /* room for the status line, shown once the role is known */
 }
 
 .gantt-row:hover {
@@ -1228,7 +1232,10 @@ button.td-pill:active { transform: translateY(1px); }
 .details-table td.col-approval .review-actions { display: flex; flex-wrap: wrap; margin: 6px 0 0; }
 .details-table td.col-approval .review-progress { display: block; white-space: normal; overflow-wrap: anywhere; }
 /* Under the header on every page: what is being tracked, or that the system logged the engineer out. */
-.tracking-bar { display: flex; align-items: center; gap: 10px; padding: 8px 48px; background: #eaf6ee; border-bottom: 1px solid #b7e4c7; color: #14532d; font-size: 12.5px; }
+/* Engineers always have this line under the header: it fills and empties, it never appears or vanishes. */
+.tracking-slot { height: 36px; overflow: hidden; }
+.tracking-bar { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 48px; background: #eaf6ee; border-bottom: 1px solid #b7e4c7; color: #14532d; font-size: 12.5px; white-space: nowrap; }
+.tracking-bar > span { overflow: hidden; text-overflow: ellipsis; }
 .tracking-bar a { color: inherit; font-weight: 700; }
 .tracking-bar.is-over-mark { background: #fff8e8; border-bottom-color: #f0c36d; color: #5a4200; }
 .tracking-bar.is-logout { background: #eef4fa; border-bottom-color: #c8d5e1; color: #1c334b; }
@@ -1315,7 +1322,8 @@ tr.clickable-row:hover td { background: #f0f7fd !important; }
 
 .ed-two-panels { display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px; margin-bottom: 18px; }
 .ed-chart-panel, .ed-controls-panel { padding: 16px 18px 18px; }
-.ed-chart-empty { padding: 20px 12px; }
+/* The empty or loading chart takes the chart's own height, so nothing below jumps when bars arrive. */
+.ed-chart-empty { min-height: 320px; display: grid; place-items: center; padding: 20px 12px; }
 
 .ed-chart { display: flex; flex-direction: column; gap: 14px; margin: 8px 0 14px; }
 .ed-chart-row { display: grid; grid-template-columns: 150px 1fr; gap: 12px; align-items: center; }
@@ -1552,3 +1560,8 @@ tr.clickable-row:hover td { background: #f0f7fd !important; }
 /* Resource Booking table: one line per cell, icon-only row actions */
 .resource-table td.resource-name-cell { white-space: nowrap; }
 .booking-actions .icon-action { padding: 5px 7px; }
+
+/* A page whose data is still on its way: one quiet block of the page's usual height. */
+.page-loading { min-height: 480px; display: grid; place-items: center; color: #6d8090; font-size: 13px; }
+/* Data for a newly chosen project is on its way: the old figures stay, dimmed, instead of vanishing. */
+.is-refreshing { opacity: .55; transition: opacity .15s; }

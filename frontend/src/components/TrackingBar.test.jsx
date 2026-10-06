@@ -88,15 +88,18 @@ describe('the tracking bar under the header', () => {
 
   it('shows nothing when nothing is tracked, and nothing at all for the BU Head', async () => {
     heartbeat = { active_session: null, system_logout: null };
-    renderBar();
+    const engineer = renderBar();
     await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
     expect(screen.queryByRole('status')).toBeNull();
+    // The line keeps its space for an engineer, so the page doesn't move on Login or Logout.
+    expect(engineer.container.querySelector('.tracking-slot')).not.toBeNull();
     cleanup();
 
     role = 'bu_head';
     fetch.mockClear();
-    renderBar();
+    const buHead = renderBar();
     expect(screen.queryByRole('status')).toBeNull();
+    expect(buHead.container.querySelector('.tracking-slot')).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
   });
 });

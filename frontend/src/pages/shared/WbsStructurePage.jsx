@@ -57,6 +57,7 @@ export function WbsStructurePage() {
   const [engineers, setEngineers] = useState([]);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
+  const loaded = lastUpdated !== null; // the tree is drawn once, complete, not phase rows first
   const [expanded, setExpanded] = useState({});
   const [phaseFilters, setPhaseFilters] = useState({});
   const [nodeForm, setNodeForm] = useState(EMPTY_NODE);
@@ -440,8 +441,8 @@ export function WbsStructurePage() {
       if (phaseFilters[phase] !== false) walk((children[0] || []).filter((node) => node.phase === phase), 1);
       sections.push({ agg, rows });
     });
-    return sections;
-  }, [children, expanded, phaseFilters, phaseAggregates]);
+    return loaded ? sections : [];
+  }, [children, expanded, phaseFilters, phaseAggregates, loaded]);
 
   const expandAll = () => {
     setPhaseFilters(Object.fromEntries(PHASES.map((phase) => [phase, true])));
@@ -781,7 +782,8 @@ export function WbsStructurePage() {
                         {rows.map((r) => rowTask(r, false))}
                       </Fragment>
                     ))}
-                  {tasks.length === 0 && (
+                  {!loaded && <tr><td colSpan={6} className="timesheet-empty-cell">Loading…</td></tr>}
+                  {loaded && tasks.length === 0 && (
                     <tr><td colSpan={6}>No WBS nodes uploaded or created for this project.</td></tr>
                   )}
                 </tbody>
@@ -820,7 +822,8 @@ export function WbsStructurePage() {
                     {rows.map((r) => rowTask(r, false, true))}
                   </Fragment>
                 ))}
-                {tasks.length === 0 && (
+                {!loaded && <tr><td colSpan={7} className="timesheet-empty-cell">Loading…</td></tr>}
+                {loaded && tasks.length === 0 && (
                   <tr><td colSpan={7}>No WBS nodes available for this project.</td></tr>
                 )}
               </tbody>
@@ -868,7 +871,8 @@ export function WbsStructurePage() {
                           .map((r) => rowTask(r, true))}
                       </Fragment>
                     ))}
-                    {tasks.length === 0 && (
+                    {!loaded && <tr><td colSpan={6} className="timesheet-empty-cell">Loading…</td></tr>}
+                    {loaded && tasks.length === 0 && (
                       <tr><td colSpan={6}>No WBS nodes loaded for this project.</td></tr>
                     )}
                     {tasks.length > 0 && visibleSections.every(({ rows }) => rows.filter((r) => isAssignedToMe(r)).length === 0) && (

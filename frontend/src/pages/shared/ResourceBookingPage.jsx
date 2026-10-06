@@ -65,6 +65,8 @@ export function ResourceBookingPage() {
   const [employees, setEmployees] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const [loadedFor, setLoadedFor] = useState(null); // the project whose figures are on screen
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('All Roles');
   const [modalOpen, setModalOpen] = useState(false);
@@ -98,6 +100,10 @@ export function ResourceBookingPage() {
 
   const project = projects.find((p) => String(p.id) === String(selectedId));
   const isLead = project?.my_role === 'lead'; // a role on the selected project, not on the account
+  // Draw the figures, the roster and the timeline only once the project's data is in: no $0,
+  // no wrong columns, nothing that jumps when the real values arrive.
+  const ready = Boolean(project) && summary !== null;
+  const refreshing = ready && loadedFor !== String(project.id);
   const projectId = project?.id;
 
   const approvalStatus = useMemo(() => {
@@ -130,6 +136,7 @@ export function ResourceBookingPage() {
       if (!bookingResponse.ok || !summaryResponse.ok) throw new Error('Could not load resource data.');
       setBookings(await bookingResponse.json());
       setSummary(await summaryResponse.json());
+      setLoadedFor(String(id));
     } catch (loadError) {
       setError(loadError.message);
     }
@@ -158,6 +165,7 @@ export function ResourceBookingPage() {
       })
       .then((projectData) => {
         setProjects(projectData);
+        setProjectsLoaded(true);
         if (Array.isArray(projectData) && projectData.length > 0) {
           const selected = targetProjectId
             ? projectData.find((p) => p.id === targetProjectId)
@@ -509,6 +517,12 @@ export function ResourceBookingPage() {
           })}
         </div>
       )}
+      {!ready ? (
+        <div className="page-loading">
+          {projectsLoaded && projects.length === 0 ? 'No projects to show yet.' : 'Loading the project…'}
+        </div>
+      ) : (
+      <div className={refreshing ? 'is-refreshing' : undefined}>
       <div className={`summary-grid${isLead ? ' lead-summary-grid' : ''}`}>
         <div className="summary-card"><span className="summary-label">Target Baseline Hours</span><strong>{summary?.target_baseline_hours ?? 0}<small> Hrs</small></strong><span className="summary-caption">Commercial Limit</span></div>
         <div className="summary-card"><span className="summary-label">Total Booked Hours</span><strong className="blue-value">{summary?.total_booked_hours ?? 0}<small> Hrs</small></strong><span className="summary-caption blue-caption">{Number(summary?.allocated_pct || 0).toFixed(0)}% Allocated</span></div>
@@ -688,6 +702,8 @@ export function ResourceBookingPage() {
           </div>
         </div>
       </section>
+      </div>
+      )}
 
       {isLead && modalOpen && (
         <div className="modal-backdrop" role="presentation">

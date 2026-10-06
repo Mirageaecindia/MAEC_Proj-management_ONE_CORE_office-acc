@@ -10,9 +10,10 @@ const clock = (value) =>
 /**
  * Under the header on every page, for engineers: which subtask is being tracked and since
  * when, the "over 8 hours" rule once it applies, or that the system logged them out.
- * Renders nothing when there is nothing to say.
+ * For engineers the line is always there, empty when there is nothing to say, so the page
+ * never moves when they log in or out of a subtask.
  */
-export function TrackingBar() {
+function TrackingMessage() {
   const { role } = useAuth();
   const { data } = useTrackingState({ enabled: role === 'engineer' });
   const session = data?.active_session;
@@ -55,4 +56,14 @@ export function TrackingBar() {
     );
   }
   return null;
+}
+
+export function TrackingBar() {
+  const { role } = useAuth();
+  if (role !== 'engineer') return null;
+  return (
+    <div className="tracking-slot">
+      <TrackingMessage />
+    </div>
+  );
 }

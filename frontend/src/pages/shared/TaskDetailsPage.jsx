@@ -65,9 +65,11 @@ export function TaskDetailsPage() {
         setTimeout(() => setToast(null), 5000);
     }, []);
 
-    const loadData = useCallback(async () => {
+    // The first load shows "Loading"; later refreshes (after a status change, a comment) keep
+    // the page on screen and swap the data in, so nothing flashes or jumps.
+    const loadData = useCallback(async ({ quiet = false } = {}) => {
         if (!nodeId) return;
-        setLoading(true);
+        if (!quiet) setLoading(true);
         setError('');
         try {
             const resp = await fetch(`${API_BASE_URL}/api/wbs-nodes/${nodeId}`, { headers: authHeaders() });
@@ -129,7 +131,7 @@ export function TaskDetailsPage() {
             setCommentText('');
             setStatusSelect('');
             showToast('success', `Status updated to '${statusSelect}'.`);
-            loadData();
+            loadData({ quiet: true });
         } catch (err) {
             setError(err.message);
             showToast('error', err.message);
@@ -143,7 +145,7 @@ export function TaskDetailsPage() {
         if (pendingStatus === node.deliverable_status) {
             setPendingStatus(null);
             setConfirmError('');
-            loadData();
+            loadData({ quiet: true });
             return;
         }
         setUpdating(true);
@@ -157,10 +159,11 @@ export function TaskDetailsPage() {
             const body = await resp.json().catch(() => ({}));
             if (resp.status === 401) { await logout(); return; }
             if (!resp.ok) throw new Error(body.detail || 'Could not update status.');
+            setNode((current) => (current ? { ...current, deliverable_status: pendingStatus } : current));
             setPendingStatus(null);
             setConfirmError('');
             showToast('success', `Status updated to '${pendingStatus}'.`);
-            loadData();
+            loadData({ quiet: true });
         } catch (err) {
             setConfirmError(err.message);
             showToast('error', err.message);
@@ -184,7 +187,7 @@ export function TaskDetailsPage() {
             if (!resp.ok) throw new Error(body.detail || 'Could not approve the task.');
             setCommentText('');
             showToast('success', 'Task approved.');
-            loadData();
+            loadData({ quiet: true });
         } catch (err) {
             setError(err.message);
             showToast('error', err.message);
@@ -206,7 +209,7 @@ export function TaskDetailsPage() {
             if (!resp.ok) throw new Error(body.detail || 'Could not add comment.');
             setCommentText('');
             showToast('success', 'Comment added.');
-            loadData();
+            loadData({ quiet: true });
         } catch (err) {
             setError(err.message);
             showToast('error', err.message);
@@ -295,11 +298,9 @@ export function TaskDetailsPage() {
 
             {error && <div className="resource-error">{error}</div>}
 
-            {loading && (
-                <div className="resource-error">Loading task details...</div>
-            )}
+            {loading && !node && <div className="page-loading">Loading task details…</div>}
 
-            {node && !loading && (
+            {node && (
                 <>
                     <section className="allocation-card td-card">
                         {/* Header: title (left) + compact horizontal stepper (right) */}

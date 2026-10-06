@@ -27,6 +27,7 @@ const SUBTASK = {
 };
 
 let heartbeatExtra = {};
+let subtaskStatus = 'In-Progress';
 let activeSession;
 const session = (subtaskId) => ({
   id: 7,
@@ -39,8 +40,11 @@ const session = (subtaskId) => ({
 
 function fakeApi(url, options = {}) {
   let body;
-  if (/\/api\/wbs-nodes\/5$/.test(url)) body = SUBTASK;
-  else if (/\/api\/projects\/1$/.test(url))
+  if (/\/api\/wbs-nodes\/5$/.test(url)) body = { ...SUBTASK, deliverable_status: subtaskStatus };
+  else if (/\/api\/wbs-nodes\/5\/advance-status$/.test(url)) {
+    subtaskStatus = JSON.parse(options.body).new_status;
+    body = { ok: true };
+  } else if (/\/api\/projects\/1$/.test(url))
     body = { id: 1, project_name: 'Hotel Tower', my_role: 'engineer' };
   else if (/\/subtask-tracking\/start$/.test(url)) {
     activeSession = session(JSON.parse(options.body).subtask_id);
@@ -145,5 +149,17 @@ describe('Task Details: subtask Login/Logout', () => {
     expect(await screen.findByRole('button', { name: 'Logout' }, WAIT)).toBeTruthy();
     expect(JSON.parse(posts('/subtask-tracking/start')[0][1].body)).toEqual({ subtask_id: 5, switch: true });
     expect(screen.queryByText('Switch subtask?')).toBeNull();
+  });
+
+  it('changes a status without blanking the page', async () => {
+    subtaskStatus = 'In-Progress';
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Change status to Done' }, WAIT));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull(), WAIT);
+    expect(screen.queryByText(/Loading task details/)).toBeNull(); // the card stayed on screen
+    expect(screen.getAllByText('Cable schedule', { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Change status to Done' })).toBeNull(); // shows Done at once
   });
 });

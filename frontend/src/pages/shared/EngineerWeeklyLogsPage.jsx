@@ -92,7 +92,7 @@ export function EngineerWeeklyLogsPage() {
     async (projectIdNum, weekStr) => {
       try {
         setError('');
-        setLoaded(false);
+        // Only the first load says "Loading"; after an approval the table stays and updates.
         const requests = [
           fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/wbs-structure`, { headers: authHeaders() }),
           fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timesheet?week_start=${weekStr}`, {
