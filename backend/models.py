@@ -346,3 +346,17 @@ class TimeSession(Base):
     updated_at = Column(UTCDateTime, onupdate=func.now())
 
     __mapper_args__ = {"version_id_col": version_id}
+
+
+class TeamMember(Base):
+    """A lead's team on a project (decided 2026-10-07): the people they picked from everyone
+    in the app. Assign Engineer on Resource Booking lists only them, so the lead doesn't
+    search the whole company each time. Each lead of a project keeps their own team."""
+    __tablename__ = "team_members"
+    __table_args__ = (UniqueConstraint("project_id", "lead_user_id", "employee_id", name="uq_team_member"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, nullable=False, index=True)
+    lead_user_id = Column(Integer, nullable=False, index=True)
+    employee_id = Column(Integer, nullable=False)
+    added_at = Column(UTCDateTime, server_default=func.now())

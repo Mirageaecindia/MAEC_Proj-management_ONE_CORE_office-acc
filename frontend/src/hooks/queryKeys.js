@@ -11,5 +11,6 @@ export const queryKeys = {
   people: ['people'],
   serverDate: ['server-date'],
   rejectedHours: (projectId) => ['rejected-hours', String(projectId)],
+  teamMembers: (projectId) => ['team-members', String(projectId)],
   sharepointMirror: (projectId) => ['sharepoint-mirror', projectId],
 };

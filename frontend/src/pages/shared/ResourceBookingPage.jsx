@@ -1,4 +1,4 @@
-import { ChevronDown, Pencil, Search, Trash2, UserPlus, X } from 'lucide-react';
+import { ChevronDown, Pencil, Search, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
@@ -6,6 +6,8 @@ import { useAuth } from '../../AuthContext';
 import { useServerToday } from '../../hooks/useServerToday';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useRejectResourceBookings } from '../../hooks/useResourceBookings';
+import { useSaveTeamMembers, useTeamMembers } from '../../hooks/useTeamMembers';
+import { TeamMembersDialog } from '../lead/TeamMembersDialog';
 import { bookingPlannedHours, countWorkingDays } from '../../lib/hours';
 
 function formatMonthHeader(dateObj) {
@@ -147,6 +149,11 @@ export function ResourceBookingPage() {
 
   const project = projects.find((p) => String(p.id) === String(selectedId));
   const isLead = project?.my_role === 'lead'; // a role on the selected project, not on the account
+  // The lead's team: Assign Engineer offers only these people, and waits until there are some.
+  const team = useTeamMembers(project?.id, { enabled: isLead });
+  const saveTeam = useSaveTeamMembers(project?.id);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const teamIds = useMemo(() => new Set(team.data ?? []), [team.data]);
   // Draw the figures, the roster and the timeline only once the project's data is in: no $0,
   // no wrong columns, nothing that jumps when the real values arrive.
   const ready = Boolean(project) && summary !== null;
@@ -579,9 +586,20 @@ export function ResourceBookingPage() {
             <p>Assigned resources and utilization against the project baseline.</p>
           </div>
           {isLead && (
-            <button className="button button-primary" type="button" onClick={openCreateModal}>
-              <UserPlus size={16} /> Assign Engineer
-            </button>
+            <div className="booking-header-actions">
+              <button className="button button-secondary" type="button" onClick={() => { saveTeam.reset(); setTeamOpen(true); }}>
+                <Users size={16} /> Team Members{teamIds.size ? ` (${teamIds.size})` : ''}
+              </button>
+              <button
+                className="button button-primary"
+                type="button"
+                disabled={teamIds.size === 0}
+                title={teamIds.size === 0 ? 'Add people to your team first (Team Members).' : undefined}
+                onClick={openCreateModal}
+              >
+                <UserPlus size={16} /> Assign Engineer
+              </button>
+            </div>
           )}
         </div>
         <div className="resource-toolbar"><div className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search engineer or discipline..." /></div><div className="role-filter"><select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>{roles.map((roleOption) => <option key={roleOption}>{roleOption}</option>)}</select><ChevronDown size={15} /></div></div>
@@ -747,11 +765,22 @@ export function ResourceBookingPage() {
       </div>
       )}
 
+      {isLead && teamOpen && (
+        <TeamMembersDialog
+          employees={employees}
+          teamIds={team.data ?? []}
+          saving={saveTeam.isPending}
+          error={saveTeam.error}
+          onSave={(ids) => saveTeam.mutate(ids, { onSuccess: () => setTeamOpen(false) })}
+          onCancel={() => setTeamOpen(false)}
+        />
+      )}
+
       {isLead && modalOpen && (
         <div className="modal-backdrop" role="presentation">
           <form className="booking-modal" onSubmit={assignEngineer}>
             <div className="modal-heading"><h2>{modalMode === 'edit' ? 'Edit Resource Booking' : 'Assign Engineer'}</h2><button type="button" aria-label="Close" onClick={() => setModalOpen(false)}><X size={18} /></button></div>
-            <label className="field"><span className="field-label">Engineer *</span><select value={form.employee_id} onChange={(event) => setForm({ ...form, employee_id: event.target.value })} required><option value="">Select employee</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} · {employee.role_title}</option>)}</select></label>
+            <label className="field"><span className="field-label">Engineer *</span><select value={form.employee_id} onChange={(event) => setForm({ ...form, employee_id: event.target.value })} required><option value="">Select employee</option>{employees.filter((employee) => teamIds.has(employee.id) || String(employee.id) === form.employee_id).map((employee) => <option key={employee.id} value={employee.id}>{employee.name} · {employee.role_title}</option>)}</select></label>
             <label className="field"><span className="field-label">Start Date *</span><input type="date" value={form.start_date} onChange={(event) => setForm({ ...form, start_date: event.target.value })} required /></label>
             <label className="field"><span className="field-label">End Date *</span><input type="date" min={form.start_date || undefined} value={form.end_date} onChange={(event) => setForm({ ...form, end_date: event.target.value })} required /></label>
             <p className="wbs-field-hint">Planned Hours: {computedPlannedHours} Hrs ({bookingDays} working days × 8 hrs/day × {Number(form.utilization_rate) || 0}%)</p>

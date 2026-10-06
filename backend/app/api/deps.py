@@ -28,6 +28,7 @@ from app.services.notifications import NotificationService
 from app.services.projects import ProjectService
 from app.services.provisioning import Provisioning
 from app.services.rejected_hours import RejectedHours
+from app.services.team_members import TeamMembers
 from app.services.tracking import TrackingService
 from app.services.work_summary import WorkSummaryService
 
@@ -90,3 +91,7 @@ def get_provisioning(db: Session = Depends(get_db)) -> Provisioning:
 
 def get_rejected_hours_service(db: Session = Depends(get_db)) -> RejectedHours:
     return RejectedHours(db)
+
+
+def get_team_members_service(db: Session = Depends(get_db)) -> TeamMembers:
+    return TeamMembers(db)

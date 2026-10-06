@@ -198,9 +198,10 @@ project, read-only. SharePoint Mirror shows the project's folder tree and files.
 
 ### 4.1 Resource Booking
 1. Pick one of your projects.
-2. **Assign engineer**: choose the employee, start and end date and utilisation %. Planned hours are calculated from the dates (weekdays × 8). An engineer can't be booked beyond **100% across all active projects** (archived projects don't count).
-3. **Edit / Delete** a booking. Editing is possible at any status, and an approved booking stays approved after an edit (to be changed, TODO C6).
-4. **Submit for Approval**: every booking becomes pending; the BU Head is notified.
+2. **Team Members**: tick the people you work with on this project, from everyone in the app (search by name, employee ID or job role), and **Save team**. Each lead of a project keeps their own team. **Assign Engineer** stays greyed out until your team has someone, and its list shows only your team, so you don't search the whole company each time. Picking someone grants nothing by itself: the booking and the BU Head's approval do.
+3. **Assign engineer**: choose the employee, start and end date and utilisation %. Planned hours are calculated from the dates (weekdays × 8). An engineer can't be booked beyond **100% across all active projects** (archived projects don't count).
+4. **Edit / Delete** a booking. Editing is possible at any status, and an approved booking stays approved after an edit (to be changed, TODO C6).
+5. **Submit for Approval**: every booking becomes pending; the BU Head is notified.
 
 **Effect on others:** after the BU Head approves, the engineers see the project.
 After a rejection you get a notification with the reason, and the bookings are
