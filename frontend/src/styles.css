@@ -1006,8 +1006,6 @@ input[type='date'] { color: #52687c; }
 /* Each cell keeps to its own column: long names wrap inside the first column instead of
    running over the next one (no visible column lines). */
 table.wbs-table { table-layout: fixed; width: 100%; }
-.wbs-table th:first-child { width: 40%; }
-.wbs-table th:last-child { width: 180px; } /* the action buttons never wrap */
 .wbs-table td:first-child { white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .wbs-table td:first-child > span { display: flex; align-items: flex-start; gap: 6px; }
 .wbs-table td:first-child > span > strong { flex: 0 0 auto; }
@@ -1020,33 +1018,11 @@ table.wbs-table td { padding: 9px 8px; }
 table.wbs-table th:first-child, table.wbs-table td:first-child { text-align: left; }
 table.wbs-table th:not(:first-child), table.wbs-table td:not(:first-child) { text-align: center; }
 table.wbs-table td:not(:first-child) .wbs-readonly { justify-content: center; min-width: 0; padding: 0; }
-/* Shared 6-column WBS tables (Lead, BU Head, Engineer): fix column layout so
-   expanding/collapsing rows never changes header positions. Widths match the
-   natural auto-layout sizes. Has() gates on exactly 6 header columns. */
-table.wbs-table:has(> thead > tr > th:nth-child(6)) { table-layout: fixed; }
-table.wbs-table:has(> thead > tr > th:nth-child(6)) th { width: 115px; }
-table.wbs-table:has(> thead > tr > th:nth-child(6)) th:first-child { width: 290px; }
-table.wbs-table:has(> thead > tr > th:nth-child(6)) th:last-child { width: 95px; }
-/* 7-column WBS tables (Lead / BU Head): compact fixed widths so the full table
-   fits the page width without horizontal scrolling. Col1 keeps room for the tree. */
-table.wbs-table:has(> thead > tr > th:nth-child(7)) { table-layout: fixed; }
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th { width: 115px; }
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th:first-child { width: 270px; min-width: 270px; }
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th:nth-child(2) { width: 120px; }
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th:nth-child(3) { width: 110px; }
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th:nth-child(4) { width: 80px; }
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th:nth-child(5) { width: 105px; }
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th:nth-child(6) { width: 100px; }
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th:last-child { width: 200px; }
-/* Lead WBS table (6 cols, no ASSIGNED ENGINEER): same column order as the
-   Engineer view, but ACTIONS must fit 3-4 buttons, so widen col1/col2/ACTIONS. */
-table.wbs-lead-table:has(> thead > tr > th:nth-child(6)) { table-layout: fixed; }
-table.wbs-lead-table:has(> thead > tr > th:nth-child(6)) th:first-child { width: 270px; min-width: 270px; }
-table.wbs-lead-table:has(> thead > tr > th:nth-child(6)) th:nth-child(2) { width: 130px; }
-table.wbs-lead-table:has(> thead > tr > th:nth-child(6)) th:nth-child(3) { width: 85px; }
-table.wbs-lead-table:has(> thead > tr > th:nth-child(6)) th:nth-child(4) { width: 110px; }
-table.wbs-lead-table:has(> thead > tr > th:nth-child(6)) th:nth-child(5) { width: 105px; }
-table.wbs-lead-table:has(> thead > tr > th:nth-child(6)) th:last-child { width: 210px; }
+/* Column widths, every WBS table whatever its columns: the task name and the action
+   buttons get a fixed share, the other columns split the rest evenly. The layout is
+   fixed, so expanding or collapsing rows never moves a column. */
+table.wbs-table th:first-child { width: 28%; min-width: 260px; }
+table.wbs-table th.wbs-col-actions { width: 160px; }
 .wbs-expand { width: 22px; height: 22px; margin-right: 7px; padding: 0; color: #1671ad; background: #eef7fd; border: 1px solid #c5d9ea; border-radius: 4px; font-weight: 700; }
 .wbs-expand:hover { background: #dceefa; }
 .wbs-connector { display: inline-block; width: 22px; margin-right: 4px; color: #94a3b8; font-family: "Segoe UI Symbol", "Courier New", monospace; font-size: 14px; line-height: 1; white-space: pre; text-align: left; }

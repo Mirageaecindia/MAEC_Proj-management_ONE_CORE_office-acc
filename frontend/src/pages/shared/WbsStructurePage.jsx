@@ -432,6 +432,7 @@ export function WbsStructurePage() {
     const totalHours = phaseTasks.reduce((sum, task) => sum + (Number(task.estimated_hours) || 0), 0);
     const statuses = [...new Set(phaseTasks.map((task) => task.deliverable_status).filter(Boolean))];
     const dueDates = phaseTasks.map((task) => task.target_due_date || task.end_date).filter(Boolean).sort();
+    const startDates = phaseTasks.map((task) => task.start_date).filter(Boolean).sort();
     return {
       phase,
       count: phaseTasks.length,
@@ -439,6 +440,7 @@ export function WbsStructurePage() {
       assignedEngineers: assignedEngineers.length ? assignedEngineers.join(' / ') : '',
       totalHours,
       status: statuses.length === 1 ? statuses[0] : phaseTasks.length === 0 ? '' : 'Mixed',
+      targetStartDate: startDates[0] || '', // the phase starts with its earliest item
       targetDueDate: dueDates.length ? dueDates[dueDates.length - 1] : '',
     };
   }), [tasks]);
@@ -509,6 +511,7 @@ export function WbsStructurePage() {
             <td><div className="wbs-readonly">{task.assigned_lead || '\u2014'}</div></td>
             <td><div className="wbs-readonly">{task.estimated_hours === null || task.estimated_hours === '' ? '\u2014' : task.estimated_hours}</div></td>
             <td><div className="wbs-readonly">{task.deliverable_status || '\u2014'}</div></td>
+            <td><div className="wbs-readonly">{task.start_date || '\u2014'}</div></td>
             <td><div className="wbs-readonly">{task.target_due_date || task.end_date || '\u2014'}</div></td>
             <td>
               <div className="wbs-cell-actions">
@@ -526,6 +529,7 @@ export function WbsStructurePage() {
           <td><div className="wbs-readonly">{task.assigned_lead || '\u2014'}</div></td>
           <td><div className="wbs-readonly">{task.estimated_hours === null || task.estimated_hours === '' ? '' : `${task.estimated_hours} hrs`}</div></td>
           <td><div className="wbs-readonly">{task.deliverable_status || ''}</div></td>
+          <td><div className="wbs-readonly">{task.start_date || ''}</div></td>
           <td><div className="wbs-readonly">{task.target_due_date || task.end_date || ''}</div></td>
           <td><div className="wbs-readonly">{'\u2014'}</div></td>
         </>
@@ -534,6 +538,7 @@ export function WbsStructurePage() {
           <td><div className="wbs-readonly">{task.assigned_engineer_name || ''}</div></td>
           <td><div className="wbs-readonly">{task.estimated_hours === null || task.estimated_hours === '' ? '' : `${task.estimated_hours} hrs`}</div></td>
           <td><div className="wbs-readonly">{task.deliverable_status || ''}</div></td>
+          <td><div className="wbs-readonly">{task.start_date || ''}</div></td>
           <td><div className="wbs-readonly">{task.target_due_date || task.end_date || ''}</div></td>
           <td>
             <div className="wbs-cell-actions">
@@ -571,6 +576,7 @@ export function WbsStructurePage() {
             <td><div className="wbs-readonly">{agg.assignedLead}</div></td>
             <td><div className="wbs-readonly">{agg.totalHours ? `${agg.totalHours} hrs` : ''}</div></td>
             <td><div className="wbs-readonly">{agg.status}</div></td>
+            <td><div className="wbs-readonly">{agg.targetStartDate}</div></td>
             <td><div className="wbs-readonly">{agg.targetDueDate}</div></td>
             <td><div className="wbs-readonly"></div></td>
           </>
@@ -580,6 +586,7 @@ export function WbsStructurePage() {
           <td><div className="wbs-readonly">{agg.assignedLead}</div></td>
           <td><div className="wbs-readonly">{agg.totalHours ? `${agg.totalHours} hrs` : ''}</div></td>
           <td><div className="wbs-readonly">{agg.status}</div></td>
+          <td><div className="wbs-readonly">{agg.targetStartDate}</div></td>
           <td><div className="wbs-readonly">{agg.targetDueDate}</div></td>
           <td><div className="wbs-readonly">{'\u2014'}</div></td>
         </>
@@ -588,6 +595,7 @@ export function WbsStructurePage() {
           <td><div className="wbs-readonly">{agg.assignedEngineers}</div></td>
           <td><div className="wbs-readonly">{agg.totalHours ? `${agg.totalHours} hrs` : ''}</div></td>
           <td><div className="wbs-readonly">{agg.status}</div></td>
+          <td><div className="wbs-readonly">{agg.targetStartDate}</div></td>
           <td><div className="wbs-readonly">{agg.targetDueDate}</div></td>
           <td><div className="wbs-readonly"></div></td>
         </>
@@ -781,8 +789,9 @@ export function WbsStructurePage() {
                     <th>ASSIGNED ENGINEER</th>
                     <th>ESTIMATED HOURS</th>
                     <th>DELIVERABLE STATUS</th>
-                    <th>TARGET DUE DATE</th>
-                    <th aria-label="Actions" />
+                    <th>TARGET START DATE</th>
+                    <th>TARGET END DATE</th>
+                    <th className="wbs-col-actions" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -792,9 +801,9 @@ export function WbsStructurePage() {
                         {rows.map((r) => rowTask(r, false))}
                       </Fragment>
                     ))}
-                  {!loaded && <tr><td colSpan={6} className="timesheet-empty-cell">Loading…</td></tr>}
+                  {!loaded && <tr><td colSpan={7} className="timesheet-empty-cell">Loading…</td></tr>}
                   {loaded && tasks.length === 0 && (
-                    <tr><td colSpan={6}>No WBS nodes uploaded or created for this project.</td></tr>
+                    <tr><td colSpan={7}>No WBS nodes uploaded or created for this project.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -821,8 +830,9 @@ export function WbsStructurePage() {
                   <th>REPORTER</th>
                   <th>ESTIMATED HOURS</th>
                   <th>DELIVERABLE STATUS</th>
-                  <th>TARGET DUE DATE</th>
-                  <th aria-label="Actions" />
+                  <th>TARGET START DATE</th>
+                  <th>TARGET END DATE</th>
+                  <th className="wbs-col-actions" aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
@@ -832,9 +842,9 @@ export function WbsStructurePage() {
                     {rows.map((r) => rowTask(r, false, true))}
                   </Fragment>
                 ))}
-                {!loaded && <tr><td colSpan={7} className="timesheet-empty-cell">Loading…</td></tr>}
+                {!loaded && <tr><td colSpan={8} className="timesheet-empty-cell">Loading…</td></tr>}
                 {loaded && tasks.length === 0 && (
-                  <tr><td colSpan={7}>No WBS nodes available for this project.</td></tr>
+                  <tr><td colSpan={8}>No WBS nodes available for this project.</td></tr>
                 )}
               </tbody>
             </table>
@@ -868,8 +878,9 @@ export function WbsStructurePage() {
                         <th>ASSIGNED LEAD</th>
                         <th>EST. HOURS</th>
                         <th>DELIVERABLE STATUS</th>
-                        <th>TARGET DUE DATE</th>
-                        <th aria-label="Actions" />
+                        <th>TARGET START DATE</th>
+                        <th>TARGET END DATE</th>
+                        <th className="wbs-col-actions" aria-label="Actions" />
                       </tr>
                     </thead>
                   <tbody>
@@ -881,12 +892,12 @@ export function WbsStructurePage() {
                           .map((r) => rowTask(r, true))}
                       </Fragment>
                     ))}
-                    {!loaded && <tr><td colSpan={6} className="timesheet-empty-cell">Loading…</td></tr>}
+                    {!loaded && <tr><td colSpan={7} className="timesheet-empty-cell">Loading…</td></tr>}
                     {loaded && tasks.length === 0 && (
-                      <tr><td colSpan={6}>No WBS nodes loaded for this project.</td></tr>
+                      <tr><td colSpan={7}>No WBS nodes loaded for this project.</td></tr>
                     )}
                     {tasks.length > 0 && visibleSections.every(({ rows }) => rows.filter((r) => isAssignedToMe(r)).length === 0) && (
-                      <tr><td colSpan={6}>No WBS nodes assigned to you in this project.</td></tr>
+                      <tr><td colSpan={7}>No WBS nodes assigned to you in this project.</td></tr>
                     )}
                   </tbody>
                 </table>

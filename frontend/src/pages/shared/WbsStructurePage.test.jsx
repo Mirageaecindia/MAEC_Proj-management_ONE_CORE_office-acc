@@ -27,6 +27,8 @@ const node = (id, code, name, parentId = null) => ({
   phase: 'Space Planning',
   deliverable_status: 'To Do',
   estimated_hours: 4,
+  start_date: '2026-10-05',
+  target_due_date: '2026-10-09',
 });
 let nodes = [];
 
@@ -84,6 +86,20 @@ describe('WBS phase cards (lead)', () => {
 });
 
 describe('WBS rows (lead)', () => {
+  it('shows the target start and end date of each row under their headers', async () => {
+    nodes = [node(10, '1', 'Cable routing'), node(11, '1.1', 'Risers', 10)];
+    renderPage();
+
+    const row = (await screen.findByText('Risers', {}, WAIT)).closest('tr');
+    const headers = [...document.querySelectorAll('table.wbs-table thead th')].map((th) =>
+      th.textContent.trim(),
+    );
+    const cell = (header) => row.children[headers.indexOf(header)].textContent;
+    expect(headers).not.toContain('TARGET DUE DATE');
+    expect(cell('TARGET START DATE')).toBe('2026-10-05');
+    expect(cell('TARGET END DATE')).toBe('2026-10-09');
+  });
+
   beforeEach(() => {
     nodes = [node(10, '1', 'Cable routing'), node(11, '1.1', 'Risers', 10)];
     vi.stubGlobal('fetch', vi.fn(fakeApi));
