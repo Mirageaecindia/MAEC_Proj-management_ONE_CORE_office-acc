@@ -30,7 +30,7 @@ from app.core.security import require_role
 from app.domain.calendar import distribute_hours_over_months as _distribute_hours_over_months
 from app.domain.calendar import month_key as _get_month_key
 from app.domain.timesheets import APPROVED, INDIVIDUAL_ONLY, PENDING_REVIEW, today_utc, total_hours
-from app.domain.wbs import TO_DO, child_prefix, is_finished, next_code
+from app.domain.wbs import TO_DO, child_prefix, is_finished, next_code, whole_tasks
 from app.domain.allocation import peak_allocation, planned_hours
 from app.repositories.bookings import BookingRepository
 from app.services.allocation import over_capacity_message
@@ -739,26 +739,14 @@ def list_wbs_structure(
     if role == "engineer":
         if not user.employee_id:
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
-        assigned_nodes = query.filter(
-            engineer_wbs_condition(user.employee_id)
-        ).all()
         if not include_ancestors:
-            return nodes_output(db, assigned_nodes)
-
-        nodes_by_id = {node.id: node for node in assigned_nodes}
-        pending_nodes = list(assigned_nodes)
-        while pending_nodes:
-            node = pending_nodes.pop()
-            parent_id = node.parent_id
-            if parent_id and parent_id not in nodes_by_id:
-                parent = db.query(models.WbsNode).filter_by(
-                    id=parent_id,
-                    project_id=project_id,
-                ).first()
-                if parent:
-                    nodes_by_id[parent.id] = parent
-                    pending_nodes.append(parent)
-        scoped_nodes = list(nodes_by_id.values())
+            return nodes_output(db, query.filter(engineer_wbs_condition(user.employee_id)).all())
+        # The WBS page: each task the engineer works on, whole (every subtask and who has it),
+        # so they see which subtasks are still open before the task can close. One query.
+        scoped_nodes = whole_tasks(
+            query.order_by(models.WbsNode.wbs_code).all(),
+            lambda node: node.assigned_engineer_id == user.employee_id,
+        )
     else:
         scoped_nodes = query.order_by(models.WbsNode.wbs_code).all()
     return nodes_output(db, scoped_nodes)

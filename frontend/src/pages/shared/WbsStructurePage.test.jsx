@@ -15,7 +15,12 @@ const PHASES = [
 ];
 
 vi.mock('../../AuthContext', () => {
-  const auth = { user: { id: 1 }, role: 'engineer', authHeaders: () => ({}), logout: vi.fn() };
+  const auth = {
+    user: { id: 1, employee_id: 3 },
+    role: 'engineer',
+    authHeaders: () => ({}),
+    logout: vi.fn(),
+  };
   return { useAuth: () => auth };
 });
 
@@ -31,9 +36,10 @@ const node = (id, code, name, parentId = null) => ({
   target_due_date: '2026-10-09',
 });
 let nodes = [];
+let myRole = 'lead'; // the viewer's role on the project
 
 const ROUTES = [
-  [/\/api\/projects$/, () => [{ id: 1, project_name: 'test', project_code: 'MAEC-001', my_role: 'lead' }]],
+  [/\/api\/projects$/, () => [{ id: 1, project_name: 'test', project_code: 'MAEC-001', my_role: myRole }]],
   [/\/api\/projects\/1\/wbs-structure/, () => nodes],
   [/\/api\/projects\/1\/booked-engineers$/, () => []],
   [
@@ -122,5 +128,54 @@ describe('WBS rows (lead)', () => {
     expect(await screen.findByText('1.2', {}, WAIT)).toBeTruthy(); // the list is reloaded
     const [, options] = fetch.mock.calls.find(([url]) => url.endsWith('/api/wbs-nodes/11/duplicate'));
     expect(options.method).toBe('POST');
+  });
+});
+
+describe('WBS rows (engineer)', () => {
+  beforeEach(() => {
+    myRole = 'engineer';
+    nodes = [
+      {
+        ...node(10, '1', 'Cable routing'),
+        assigned_engineer_id: 3,
+        assigned_engineer_name: 'Me',
+        assigned_lead: 'Lead A',
+      },
+      {
+        ...node(11, '1.1', 'Risers', 10),
+        assigned_engineer_id: 3,
+        assigned_engineer_name: 'Me',
+        created_by_user_id: 1,
+      },
+      { ...node(12, '1.2', 'Trays', 10), assigned_engineer_id: 4, assigned_engineer_name: 'Ravi Kumar' },
+    ];
+    vi.stubGlobal('fetch', vi.fn(fakeApi));
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    myRole = 'lead';
+  });
+
+  it('shows who has each subtask, the reporter, and keeps every button in its place', async () => {
+    renderPage();
+
+    const colleague = (await screen.findByText('Trays', {}, WAIT)).closest('tr');
+    const headers = [...document.querySelectorAll('table.wbs-table thead th')].map((th) =>
+      th.textContent.trim(),
+    );
+    expect(headers.slice(1, 3)).toEqual(['ASSIGNED ENGINEER', 'REPORTER']);
+    expect(colleague.textContent).toContain('Ravi Kumar');
+    expect(colleague.className).not.toContain('wbs-row-clickable'); // a colleague's subtask doesn't open
+
+    for (const row of document.querySelectorAll('tbody tr')) {
+      const actions = row.querySelector('.wbs-cell-actions');
+      if (actions) expect(actions.children).toHaveLength(4); // add, duplicate, edit, delete: fixed places
+    }
+    const mine = screen.getByText('Risers').closest('tr');
+    const places = [...mine.querySelector('.wbs-cell-actions').children].map((el) =>
+      el.getAttribute('aria-label'),
+    );
+    expect(places).toEqual([null, 'Duplicate Risers', null, 'Delete Risers']); // no add or edit here
   });
 });

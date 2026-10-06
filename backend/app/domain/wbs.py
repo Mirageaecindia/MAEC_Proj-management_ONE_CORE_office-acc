@@ -8,7 +8,7 @@ Older code and the Excel upload used other names ("Not Started",
 (see models.WbsNode) and migration 0002 converted existing rows.
 """
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 TO_DO = "To Do"
 IN_PROGRESS = "In-Progress"
@@ -57,3 +57,19 @@ def child_prefix(parent_code: str | None) -> str | None:
     """ "1" or "1." -> "1."; None when the task has no code (its subtasks then have none either)."""
     code = (parent_code or "").strip().rstrip(".")
     return f"{code}." if code else None
+
+
+def whole_tasks(nodes: Iterable, involved: Callable[[object], bool]) -> list:
+    """Every node of each task tree that has an `involved` node anywhere in it: the task,
+    all its subtasks and their items. An engineer sees who else works on their tasks and
+    which subtasks are still open, so they know whom to ask before the task can close."""
+    nodes = list(nodes)
+    parent_of = {node.id: node.parent_id for node in nodes}
+
+    def root(node_id: int) -> int:
+        while parent_of.get(node_id) is not None and parent_of[node_id] in parent_of:
+            node_id = parent_of[node_id]
+        return node_id
+
+    roots = {root(node.id) for node in nodes if involved(node)}
+    return [node for node in nodes if root(node.id) in roots]

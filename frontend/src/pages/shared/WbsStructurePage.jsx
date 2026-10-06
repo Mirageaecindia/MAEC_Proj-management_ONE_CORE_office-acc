@@ -484,8 +484,34 @@ export function WbsStructurePage() {
 
   const togglePhase = (phase) => setPhaseCollapsed(phase, phaseFilters[phase] === false);
 
-  const rowTask = (task, engineerView = false, buHeadView = false) => (
-    <tr key={task.id} className={engineerView ? 'wbs-row-clickable' : undefined} style={{ cursor: 'pointer' }} onClick={() => navigate(`/task-details?nodeId=${task.id}&projectId=${selectedId}`)}>
+  // The row's buttons, always in four fixed places (add, duplicate, edit, delete): a button
+  // this viewer doesn't get leaves its place empty, so the others never move.
+  const slot = <span className="wbs-icon-slot" aria-hidden="true" />;
+  const canAddChild = (task) => task.depth === 1 && (isLead || task.assigned_engineer_id === employeeId);
+  const rowActions = (task) => (
+    <div className="wbs-cell-actions">
+      {canAddChild(task) ? (
+        <button className="wbs-icon-btn wbs-icon-add" type="button" title="Add a subtask" aria-label={`Add a subtask to ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openSubtaskForm(task); }}><Plus size={14} /></button>
+      ) : slot}
+      {duplicable(task) ? (
+        <button className="wbs-icon-btn wbs-icon-copy" type="button" title={task.depth === 1 ? 'Duplicate task and its subtasks' : 'Duplicate subtask'} aria-label={`Duplicate ${task.task_name}`} disabled={duplicating} onClick={(e) => { e.stopPropagation(); duplicateNode(task); }}><Copy size={14} /></button>
+      ) : slot}
+      {isLead ? (
+        <button className="wbs-icon-btn wbs-icon-edit" type="button" title="Edit task" aria-label={`Edit ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openEditForm(task); }}><Pencil size={14} /></button>
+      ) : slot}
+      {deletable(task) ? (
+        <button className="wbs-icon-btn wbs-icon-delete" type="button" title={task.depth === 1 ? 'Delete task and its subtasks' : 'Delete subtask'} aria-label={`Delete ${task.task_name}`} disabled={deleting} onClick={(e) => { e.stopPropagation(); requestDelete([task.id]); }}><Trash2 size={14} /></button>
+      ) : slot}
+    </div>
+  );
+
+  const hours = (task) => (task.estimated_hours === null || task.estimated_hours === '' ? '' : `${task.estimated_hours} hrs`);
+
+  const rowTask = (task, engineerView = false, buHeadView = false) => {
+    // An engineer opens only what is theirs; a colleague's subtask is shown for who has it and its status.
+    const opens = !engineerView || task.assigned_engineer_id === employeeId;
+    return (
+    <tr key={task.id} className={opens ? 'wbs-row-clickable' : undefined} onClick={opens ? () => navigate(`/task-details?nodeId=${task.id}&projectId=${selectedId}`) : undefined}>
       <td>
         <span style={{ paddingLeft: `${(task.depth - 1) * 24}px` }}>
           {!buHeadView && deletable(task) && (
@@ -498,60 +524,24 @@ export function WbsStructurePage() {
           )}
           {children[task.id]?.length ? (
             <button className="wbs-expand" type="button" onClick={(e) => { e.stopPropagation(); setExpanded((prev) => ({ ...prev, [task.id]: prev[task.id] === false })); }}>
-              {expanded[task.id] === false ? '\u25b6' : '\u25bc'}
+              {expanded[task.id] === false ? '▶' : '▼'}
             </button>
           ) : (
-            <span className="wbs-connector" aria-hidden="true">{'\u2514\u2500'}</span>
+            <span className="wbs-connector" aria-hidden="true">{'└─'}</span>
           )}
           <strong>{task.wbs_code}</strong> {task.task_name}
         </span>
       </td>
-{engineerView ? (
-          <>
-            <td><div className="wbs-readonly">{task.assigned_lead || '\u2014'}</div></td>
-            <td><div className="wbs-readonly">{task.estimated_hours === null || task.estimated_hours === '' ? '\u2014' : task.estimated_hours}</div></td>
-            <td><div className="wbs-readonly">{task.deliverable_status || '\u2014'}</div></td>
-            <td><div className="wbs-readonly">{task.start_date || '\u2014'}</div></td>
-            <td><div className="wbs-readonly">{task.target_due_date || task.end_date || '\u2014'}</div></td>
-            <td>
-              <div className="wbs-cell-actions">
-                {task.depth === 1 ? <button className="wbs-icon-btn wbs-icon-add" type="button" title="Add a subtask" aria-label={`Add a subtask to ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openSubtaskForm(task); }}><Plus size={14} /></button> : <span className="wbs-icon-slot" aria-hidden="true" />}
-                {duplicable(task) ? <button className="wbs-icon-btn wbs-icon-copy" type="button" title={task.depth === 1 ? 'Duplicate task and its subtasks' : 'Duplicate subtask'} aria-label={`Duplicate ${task.task_name}`} disabled={duplicating} onClick={(e) => { e.stopPropagation(); duplicateNode(task); }}><Copy size={14} /></button> : <span className="wbs-icon-slot" aria-hidden="true" />}
-                {deletable(task) && (
-                  <button className="wbs-icon-btn wbs-icon-delete" type="button" title="Delete subtask" aria-label={`Delete ${task.task_name}`} disabled={deleting} onClick={(e) => { e.stopPropagation(); requestDelete([task.id]); }}><Trash2 size={14} /></button>
-                )}
-              </div>
-            </td>
-          </>
-        ) : buHeadView ? (
-        <>
-          <td><div className="wbs-readonly">{task.assigned_engineer_name || ''}</div></td>
-          <td><div className="wbs-readonly">{task.assigned_lead || '\u2014'}</div></td>
-          <td><div className="wbs-readonly">{task.estimated_hours === null || task.estimated_hours === '' ? '' : `${task.estimated_hours} hrs`}</div></td>
-          <td><div className="wbs-readonly">{task.deliverable_status || ''}</div></td>
-          <td><div className="wbs-readonly">{task.start_date || ''}</div></td>
-          <td><div className="wbs-readonly">{task.target_due_date || task.end_date || ''}</div></td>
-          <td><div className="wbs-readonly">{'\u2014'}</div></td>
-        </>
-      ) : (
-        <>
-          <td><div className="wbs-readonly">{task.assigned_engineer_name || ''}</div></td>
-          <td><div className="wbs-readonly">{task.estimated_hours === null || task.estimated_hours === '' ? '' : `${task.estimated_hours} hrs`}</div></td>
-          <td><div className="wbs-readonly">{task.deliverable_status || ''}</div></td>
-          <td><div className="wbs-readonly">{task.start_date || ''}</div></td>
-          <td><div className="wbs-readonly">{task.target_due_date || task.end_date || ''}</div></td>
-          <td>
-            <div className="wbs-cell-actions">
-              {task.depth === 1 ? <button className="wbs-icon-btn wbs-icon-add" type="button" title="Add a subtask" aria-label={`Add a subtask to ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openSubtaskForm(task); }}><Plus size={14} /></button> : <span className="wbs-icon-slot" aria-hidden="true" />}
-              <button className="wbs-icon-btn wbs-icon-copy" type="button" title={task.depth === 1 ? 'Duplicate task and its subtasks' : 'Duplicate subtask'} aria-label={`Duplicate ${task.task_name}`} disabled={duplicating} onClick={(e) => { e.stopPropagation(); duplicateNode(task); }}><Copy size={14} /></button>
-              <button className="wbs-icon-btn wbs-icon-edit" type="button" title="Edit task" aria-label={`Edit ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openEditForm(task); }}><Pencil size={14} /></button>
-              <button className="wbs-icon-btn wbs-icon-delete" type="button" title={task.depth === 1 ? 'Delete task and its subtasks' : 'Delete subtask'} aria-label={`Delete ${task.task_name}`} disabled={deleting} onClick={(e) => { e.stopPropagation(); requestDelete([task.id]); }}><Trash2 size={14} /></button>
-            </div>
-          </td>
-        </>
-      )}
+      <td><div className="wbs-readonly">{task.assigned_engineer_name || ''}</div></td>
+      {(engineerView || buHeadView) && <td><div className="wbs-readonly">{task.assigned_lead || '—'}</div></td>}
+      <td><div className="wbs-readonly">{hours(task)}</div></td>
+      <td><div className="wbs-readonly">{task.deliverable_status || ''}</div></td>
+      <td><div className="wbs-readonly">{task.start_date || ''}</div></td>
+      <td><div className="wbs-readonly">{task.target_due_date || task.end_date || ''}</div></td>
+      <td>{buHeadView ? <div className="wbs-readonly">{'—'}</div> : rowActions(task)}</td>
     </tr>
-  );
+    );
+  };
 
   const phaseDeletableIds = (phase) => deletableIds.filter((id) => byId[id]?.phase === phase);
 
@@ -571,35 +561,13 @@ export function WbsStructurePage() {
         </button>
         <strong className="wbs-phase-name">{agg.phase}</strong>
       </td>
-{engineerView ? (
-          <>
-            <td><div className="wbs-readonly">{agg.assignedLead}</div></td>
-            <td><div className="wbs-readonly">{agg.totalHours ? `${agg.totalHours} hrs` : ''}</div></td>
-            <td><div className="wbs-readonly">{agg.status}</div></td>
-            <td><div className="wbs-readonly">{agg.targetStartDate}</div></td>
-            <td><div className="wbs-readonly">{agg.targetDueDate}</div></td>
-            <td><div className="wbs-readonly"></div></td>
-          </>
-        ) : buHeadView ? (
-        <>
-          <td><div className="wbs-readonly">{agg.assignedEngineers}</div></td>
-          <td><div className="wbs-readonly">{agg.assignedLead}</div></td>
-          <td><div className="wbs-readonly">{agg.totalHours ? `${agg.totalHours} hrs` : ''}</div></td>
-          <td><div className="wbs-readonly">{agg.status}</div></td>
-          <td><div className="wbs-readonly">{agg.targetStartDate}</div></td>
-          <td><div className="wbs-readonly">{agg.targetDueDate}</div></td>
-          <td><div className="wbs-readonly">{'\u2014'}</div></td>
-        </>
-      ) : (
-        <>
-          <td><div className="wbs-readonly">{agg.assignedEngineers}</div></td>
-          <td><div className="wbs-readonly">{agg.totalHours ? `${agg.totalHours} hrs` : ''}</div></td>
-          <td><div className="wbs-readonly">{agg.status}</div></td>
-          <td><div className="wbs-readonly">{agg.targetStartDate}</div></td>
-          <td><div className="wbs-readonly">{agg.targetDueDate}</div></td>
-          <td><div className="wbs-readonly"></div></td>
-        </>
-      )}
+      <td><div className="wbs-readonly">{agg.assignedEngineers}</div></td>
+      {(engineerView || buHeadView) && <td><div className="wbs-readonly">{agg.assignedLead}</div></td>}
+      <td><div className="wbs-readonly">{agg.totalHours ? `${agg.totalHours} hrs` : ''}</div></td>
+      <td><div className="wbs-readonly">{agg.status}</div></td>
+      <td><div className="wbs-readonly">{agg.targetStartDate}</div></td>
+      <td><div className="wbs-readonly">{agg.targetDueDate}</div></td>
+      <td><div className="wbs-readonly">{buHeadView ? '—' : ''}</div></td>
     </tr>
   );
 
@@ -633,7 +601,7 @@ export function WbsStructurePage() {
             <span>Project Controls</span><i>/</i><strong>WBS Structure</strong>
           </div>
           <h1>WBS Structure</h1>
-          <p>{isLead ? 'Decompose MEP scope into disciplined phases, assign engineers, and set milestone budget allocations.' : isBuHead ? 'Read-only visibility of WBS nodes and Engineer assignments.' : 'Only WBS nodes assigned to you are shown.'}</p>
+          <p>{isLead ? 'Decompose MEP scope into disciplined phases, assign engineers, and set milestone budget allocations.' : isBuHead ? 'Read-only visibility of WBS nodes and Engineer assignments.' : 'Your tasks, each with all its subtasks and who has them.'}</p>
         </div>
         <label className="project-switcher">
           <span>Project Name</span>
@@ -875,8 +843,9 @@ export function WbsStructurePage() {
 <thead>
                       <tr>
                         <th>{selectAllBox('Select all my subtasks')} WBS CODE & TASK NAME</th>
-                        <th>ASSIGNED LEAD</th>
-                        <th>EST. HOURS</th>
+                        <th>ASSIGNED ENGINEER</th>
+                        <th>REPORTER</th>
+                        <th>ESTIMATED HOURS</th>
                         <th>DELIVERABLE STATUS</th>
                         <th>TARGET START DATE</th>
                         <th>TARGET END DATE</th>
@@ -887,17 +856,13 @@ export function WbsStructurePage() {
                     {visibleSections.map(({ agg, rows }) => (
                       <Fragment key={agg.phase}>
                         {agg.count > 0 && phaseRow(agg, true)}
-                        {rows
-                          .filter((r) => isAssignedToMe(r))
-                          .map((r) => rowTask(r, true))}
+                        {/* The server sends each of the engineer's tasks whole: colleagues' subtasks too. */}
+                        {rows.map((r) => rowTask(r, true))}
                       </Fragment>
                     ))}
-                    {!loaded && <tr><td colSpan={7} className="timesheet-empty-cell">Loading…</td></tr>}
+                    {!loaded && <tr><td colSpan={8} className="timesheet-empty-cell">Loading…</td></tr>}
                     {loaded && tasks.length === 0 && (
-                      <tr><td colSpan={7}>No WBS nodes loaded for this project.</td></tr>
-                    )}
-                    {tasks.length > 0 && visibleSections.every(({ rows }) => rows.filter((r) => isAssignedToMe(r)).length === 0) && (
-                      <tr><td colSpan={7}>No WBS nodes assigned to you in this project.</td></tr>
+                      <tr><td colSpan={8}>No WBS nodes assigned to you in this project.</td></tr>
                     )}
                   </tbody>
                 </table>
