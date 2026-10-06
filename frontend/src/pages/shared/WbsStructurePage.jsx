@@ -1,4 +1,4 @@
-import { Pencil, Trash2 } from 'lucide-react';
+import { Copy, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
@@ -323,6 +323,30 @@ export function WbsStructurePage() {
     />
   );
 
+  // Duplicating: a copy next to the original with the next free WBS code, To Do, no hours
+  // (a task's copy brings copies of its subtasks). Leads duplicate anything; an engineer
+  // only their own subtasks under a task assigned to them. The server decides the code.
+  const [duplicating, setDuplicating] = useState(false);
+  const duplicable = (task) =>
+    isLead ||
+    (task.parent_id != null && employeeId != null &&
+      task.assigned_engineer_id === employeeId && byId[task.parent_id]?.assigned_engineer_id === employeeId);
+
+  async function duplicateNode(task) {
+    setDuplicating(true);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/wbs-nodes/${task.id}/duplicate`, { method: 'POST', headers: authHeaders() });
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(body.detail || 'Could not duplicate.');
+      setToast({ type: 'success', message: `Duplicated ${task.wbs_code || task.task_name} as ${body.wbs_code || 'a new item'}.` });
+      await loadTasks();
+    } catch (err) {
+      setToast({ type: 'error', message: err.message });
+    } finally {
+      setDuplicating(false);
+    }
+  }
+
   function requestDelete(ids) {
     setDeleteError(null);
     setPendingDelete(summarizeSelection(ids, tasks));
@@ -488,11 +512,8 @@ export function WbsStructurePage() {
             <td><div className="wbs-readonly">{task.target_due_date || task.end_date || '\u2014'}</div></td>
             <td>
               <div className="wbs-cell-actions">
-                {task.depth === 1 ? (
-                  <button className="button button-secondary" type="button" onClick={(e) => { e.stopPropagation(); openSubtaskForm(task); }}>+ Subtask</button>
-                ) : (
-                  <span className="wbs-subtask-slot" role="presentation">+ Subtask</span>
-                )}
+                {task.depth === 1 ? <button className="wbs-icon-btn wbs-icon-add" type="button" title="Add a subtask" aria-label={`Add a subtask to ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openSubtaskForm(task); }}><Plus size={14} /></button> : <span className="wbs-icon-slot" aria-hidden="true" />}
+                {duplicable(task) ? <button className="wbs-icon-btn wbs-icon-copy" type="button" title={task.depth === 1 ? 'Duplicate task and its subtasks' : 'Duplicate subtask'} aria-label={`Duplicate ${task.task_name}`} disabled={duplicating} onClick={(e) => { e.stopPropagation(); duplicateNode(task); }}><Copy size={14} /></button> : <span className="wbs-icon-slot" aria-hidden="true" />}
                 {deletable(task) && (
                   <button className="wbs-icon-btn wbs-icon-delete" type="button" title="Delete subtask" aria-label={`Delete ${task.task_name}`} disabled={deleting} onClick={(e) => { e.stopPropagation(); requestDelete([task.id]); }}><Trash2 size={14} /></button>
                 )}
@@ -516,11 +537,8 @@ export function WbsStructurePage() {
           <td><div className="wbs-readonly">{task.target_due_date || task.end_date || ''}</div></td>
           <td>
             <div className="wbs-cell-actions">
-              {task.depth === 1 ? (
-                <button className="button button-secondary" type="button" onClick={(e) => { e.stopPropagation(); openSubtaskForm(task); }}>+ Subtask</button>
-              ) : (
-                <span className="wbs-subtask-slot" role="presentation">+ Subtask</span>
-              )}
+              {task.depth === 1 ? <button className="wbs-icon-btn wbs-icon-add" type="button" title="Add a subtask" aria-label={`Add a subtask to ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openSubtaskForm(task); }}><Plus size={14} /></button> : <span className="wbs-icon-slot" aria-hidden="true" />}
+              <button className="wbs-icon-btn wbs-icon-copy" type="button" title={task.depth === 1 ? 'Duplicate task and its subtasks' : 'Duplicate subtask'} aria-label={`Duplicate ${task.task_name}`} disabled={duplicating} onClick={(e) => { e.stopPropagation(); duplicateNode(task); }}><Copy size={14} /></button>
               <button className="wbs-icon-btn wbs-icon-edit" type="button" title="Edit task" aria-label={`Edit ${task.task_name}`} onClick={(e) => { e.stopPropagation(); openEditForm(task); }}><Pencil size={14} /></button>
               <button className="wbs-icon-btn wbs-icon-delete" type="button" title={task.depth === 1 ? 'Delete task and its subtasks' : 'Delete subtask'} aria-label={`Delete ${task.task_name}`} disabled={deleting} onClick={(e) => { e.stopPropagation(); requestDelete([task.id]); }}><Trash2 size={14} /></button>
             </div>

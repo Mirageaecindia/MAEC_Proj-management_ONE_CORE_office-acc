@@ -207,10 +207,11 @@ After a rejection you get a notification with the reason, and the bookings are
 back in draft.
 
 ### 4.2 WBS Structure (build the plan)
-- **Phase cards** (Space Planning … Submission): click a phase to add a **main task** in it, or **+** to upload a workbook into that phase.
+- **Phase cards** (Space Planning … Submission): click a phase or its **+** to add a **main task** in it (the Add WBS Node form opens with that phase chosen). Workbooks are uploaded with **Upload WBS (Excel)**.
 - **Upload WBS (Excel)** / **Download the Excel template** for bulk import. The template (same layout as the company's WBS breakdown sheet) has two columns: **column A the phase** (one of the five, written once at the top of its merged block; a block left unnamed takes the phase by its position, so the company's breakdown sheet uploads as it is), **column B the tasks and subtasks**: a **bold** row is a task, a normal row is a subtask of the task above it. Codes are assigned automatically (1., 1.1, 1.2 …); dates, hours and engineers are set in the app afterwards. Uploading the same workbook again adds nothing: rows that already exist are kept. The older header-based CSV (`WBS Code, Task Name, Parent WBS Code, …`) still works.
 - **+ Add WBS Node**: task name, WBS code (unique in the project), phase, assigned engineer (only engineers booked on the project), start/end dates (estimated hours are calculated from the dates).
-- **+ Subtask** on a task: a child item for the engineer's day-to-day work.
+- **+** on a task row: add a subtask, a child item for the engineer's day-to-day work.
+- **Duplicate** (the copy icon) on a task or subtask row: a copy with the same name, engineer, hours and dates, the **next free WBS code** at its level (copying 1.1 when the task's last subtask is 1.4 gives 1.5; copying task 3 when the last task is 7 gives 8, its subtasks 8.1, 8.2 …) and status **To Do**, with no hours or comments. A task's copy brings copies of its subtasks. Rename or re-date the copy with **Edit**. Engineers can duplicate their own subtasks under a task assigned to them.
 - **Edit / Delete** a task or subtask (deleting a task deletes its subtasks). **Hours already worked are kept**: the day rows stay in the timesheet under the subtask's name, still count toward the engineer's working time, and the task's lead still reviews any that are pending. Anyone logged in to a deleted subtask is logged out and their time is saved.
 - **Delete many at once**: tick the boxes in front of tasks and subtasks (a phase's box ticks the whole phase, the header box everything; ticking a task ticks its subtasks), then **Delete N tasks and M subtasks** above the table. One confirmation lists what goes; nothing is deleted if any item is refused.
 
@@ -342,7 +343,7 @@ Use three windows: **BU** (BU Head), **LEAD** (the Electrical lead), **ENG** (an
 2. **LEAD:** Resource Booking: the project is listed. Book **ENG** at 50% for this month. **Submit for Approval**.
 3. **BU:** bell shows the request. Resource Booking: **Reject** with a reason. **LEAD:** bell shows the reason; bookings are draft. Resubmit. **BU:** **Approve**.
 4. **ENG:** the project now appears in WBS Structure (empty until tasks exist).
-5. **LEAD:** WBS Structure: add a main task in *Space Planning* assigned to ENG, then **+ Subtask** on it.
+5. **LEAD:** WBS Structure: add a main task in *Space Planning* assigned to ENG, then **+** on its row to add a subtask.
 6. **ENG:** WBS shows the task and subtask. Open the subtask: **Login**, keep the tab active a few minutes, **Logout**.
 7. **ENG:** Timeline & Logs: the hours appear as Pending review (they can be reviewed from the next day).
 8. **LEAD:** the next day, Timeline & Logs: **Approve week** on ENG's row. **BU:** Executive Dashboard: approved hours and budget burn go up.

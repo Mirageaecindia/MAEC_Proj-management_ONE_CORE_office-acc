@@ -8,6 +8,8 @@ Older code and the Excel upload used other names ("Not Started",
 (see models.WbsNode) and migration 0002 converted existing rows.
 """
 
+from collections.abc import Iterable
+
 TO_DO = "To Do"
 IN_PROGRESS = "In-Progress"
 SUBMITTED = "Submitted for Approval"
@@ -38,3 +40,20 @@ def normalize_status(status: str | None, *, is_subtask: bool) -> str:
 
 def is_finished(status: str | None) -> bool:
     return normalize_status(status, is_subtask=False) in FINISHED
+
+
+def next_code(prefix: str, codes: Iterable[str | None]) -> str:
+    """The next free WBS code at one level, after the highest number used there: tasks
+    (prefix "") "3" -> "4", subtasks of task 1 (prefix "1.") "1.4" -> "1.5". Gaps left by
+    deleted items stay gaps, so a new code never collides with an existing one."""
+    trimmed = ((code or "").rstrip(".") for code in codes)
+    numbers = (
+        int(code[len(prefix) :]) for code in trimmed if code.startswith(prefix) and code[len(prefix) :].isdigit()
+    )
+    return f"{prefix}{max(numbers, default=0) + 1}"
+
+
+def child_prefix(parent_code: str | None) -> str | None:
+    """ "1" or "1." -> "1."; None when the task has no code (its subtasks then have none either)."""
+    code = (parent_code or "").strip().rstrip(".")
+    return f"{code}." if code else None

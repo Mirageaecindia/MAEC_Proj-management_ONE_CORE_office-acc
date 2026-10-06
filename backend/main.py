@@ -30,7 +30,7 @@ from app.core.security import require_role
 from app.domain.calendar import distribute_hours_over_months as _distribute_hours_over_months
 from app.domain.calendar import month_key as _get_month_key
 from app.domain.timesheets import APPROVED, INDIVIDUAL_ONLY, PENDING_REVIEW, today_utc, total_hours
-from app.domain.wbs import TO_DO, is_finished
+from app.domain.wbs import TO_DO, child_prefix, is_finished, next_code
 from app.domain.allocation import peak_allocation, planned_hours
 from app.repositories.bookings import BookingRepository
 from app.services.allocation import over_capacity_message
@@ -59,6 +59,7 @@ from app.services.hours_review import (
 from app.services.tracking import end_sessions_if_done, last_visit, unattended_seconds
 from app.services.wbs_outline import import_outline, looks_like_outline
 from app.services.wbs_delete import delete_nodes
+from app.services.wbs_duplicate import duplicate_node
 from app.services.tracking import sweep_forever
 from app.services.notifications import EXTENSION_REQUESTED, create_bu_head_notification
 
@@ -1713,10 +1714,10 @@ def create_wbs_subtask(
         validate_subtask_rules(payload.estimated_hours, payload.start_date, payload.end_date)
 
     phase = payload.phase or parent.phase or "Space Planning"
-    sibling_count = db.query(models.WbsNode).filter_by(project_id=parent.project_id, parent_id=parent.id).count()
     child_code = None
-    if parent.wbs_code:
-        child_code = f"{str(parent.wbs_code).rstrip('.')}.{sibling_count + 1}"
+    if prefix := child_prefix(parent.wbs_code):  # the next free number: never a deleted subtask's code
+        codes = [code for (code,) in db.query(models.WbsNode.wbs_code).filter_by(project_id=parent.project_id)]
+        child_code = next_code(prefix, codes)
     elif payload.wbs_code:
         child_code = str(payload.wbs_code).strip() or None
     if child_code and db.query(models.WbsNode).filter_by(project_id=parent.project_id, wbs_code=child_code).first():
@@ -1814,6 +1815,21 @@ def delete_wbs_nodes(
     """Many tasks and subtasks at once: all of them, or none when one is refused."""
     _, role = project_and_role(db, project_id, user)
     return delete_nodes(db, project_id, role, user, payload.node_ids, datetime.now(timezone.utc)).as_dict()
+
+
+@app.post("/api/wbs-nodes/{node_id}/duplicate", response_model=schemas.WbsNodeOut, status_code=201)
+def duplicate_wbs_node(
+    node_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """A copy of a task (with its subtasks) or a subtask, next free WBS code, To Do;
+    the rules are in app/services/wbs_duplicate.py."""
+    node = db.get(models.WbsNode, node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="WBS node not found.")
+    _, role = project_and_role(db, node.project_id, user)
+    return node_output(db, duplicate_node(db, node, role, user))
 
 
 _FIELD_ALIASES = {
