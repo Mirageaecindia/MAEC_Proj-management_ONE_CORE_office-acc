@@ -194,6 +194,7 @@ input[type='date'] { color: #52687c; }
 .summary-caption { color: #8996a2; font-size: 9.5px; font-weight: 600; }
 .blue-value, .blue-caption { color: #1477b4 !important; }
 .green-caption { color: #38805d; }
+.red-caption { color: #b42318; } /* booked beyond the baseline */
 .bench-card { background: #fff9ed; border-color: #f4dfb2; }
 .bench-card .summary-label, .bench-card .summary-caption { color: #ad6d27; }
 

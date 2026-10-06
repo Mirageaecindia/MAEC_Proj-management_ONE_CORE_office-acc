@@ -371,8 +371,8 @@ def bookings_output(db: Session, bookings: list) -> list[dict]:
             "total_allocation_pct": float(
                 peak_allocation(spans.get(booking.employee_id, []), booking.start_date, booking.end_date)
             ),  # busiest day during this booking
-            "cost_per_hour": 0,
-            "total_cost": 0,
+            "cost_per_hour": None,  # no hourly rates exist yet (TODO N6): no cost rather than $0
+            "total_cost": None,
             "bench_status": "Fully Booked" if utilization >= 100 else "Near Capacity" if utilization >= 80 else "Available Bench",
             "approval_status": booking.approval_status,
             "submitted_at": booking.submitted_at.isoformat() if booking.submitted_at else None,

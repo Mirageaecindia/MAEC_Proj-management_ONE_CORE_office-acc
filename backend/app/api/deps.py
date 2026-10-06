@@ -68,7 +68,7 @@ def get_governance_service(db: Session = Depends(get_db)) -> GovernanceService:
 
 def get_booking_approval_service(db: Session = Depends(get_db)) -> BookingApprovalService:
     return BookingApprovalService(
-        db, ProjectRepository(db), BookingRepository(db), NotificationRepository(db), WorkRepository(db)
+        db, ProjectRepository(db), BookingRepository(db), NotificationRepository(db), UserRepository(db)
     )
 
 

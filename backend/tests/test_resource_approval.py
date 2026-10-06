@@ -1,8 +1,11 @@
 """Characterization: the BU Head side of resource booking (review & approve)."""
 
+from datetime import date
+
 import pytest
 
 import models
+from app.domain.allocation import planned_hours
 
 
 @pytest.fixture
@@ -40,22 +43,76 @@ def test_bu_head_sees_bookings_and_summary(client, world, booked_project):
     # Planned hours are derived server-side: weekdays x 8 h x the booking %
     # (1-30 Sep 2026 = 22 weekdays x 8 h x 50% = 88 h); the client-sent 80 is ignored.
     assert bookings[0]["planned_hours"] == 88
-    assert summary["total_booked_hours"] == 88
     assert summary["approval_status"] == "draft"
     assert summary["approval_status_label"] == "Draft"
 
 
-def test_resource_summary_commercial_figures_are_placeholders(client, world, booked_project):
-    # KNOWN (roadmap 7.4): commercial figures are hardcoded, not computed.
+def test_resource_summary_figures_come_from_the_project_and_its_bookings(client, world, db, booked_project):
     project_id, _ = booked_project
+    project = db.get(models.Project, project_id)
+    project.extension_approved_hours = 100  # an approved extension raises the baseline
+    db.commit()
+
+    summary = client.get(f"/api/projects/{project_id}/resource-summary", headers=world.bu_h).json()
+
+    lead_hours = planned_hours(date(2026, 9, 1), date(2027, 8, 31), 20)
+    booked = 88 + 3 * lead_hours  # the engineer and the three leads, as on the roster
+    assert summary["target_baseline_hours"] == 600  # 500 target + 100 extension
+    assert summary["extension_hours"] == 100
+    assert summary["total_booked_hours"] == booked
+    assert summary["allocated_pct"] == round(booked / 600 * 100)
+    assert summary["contract_value"] == 100000
+    assert summary["contract_currency"] == "USD"
+    assert summary["planned_labor_cost"] is None  # no hourly rates yet (TODO N6), never a made-up $0
+
+
+def test_resource_summary_without_a_baseline_has_no_percentage(client, world, db):
+    project_id = world.create_project()["id"]
+    db.get(models.Project, project_id).target_effort_hours = None  # an older project with no target
+    db.commit()
 
     summary = client.get(f"/api/projects/{project_id}/resource-summary", headers=world.bu_h).json()
 
     assert summary["target_baseline_hours"] == 0
-    assert summary["allocated_pct"] == 0
-    assert summary["planned_labor_cost"] == 0
-    assert summary["contract_value"] == 0
-    assert summary["contract_currency"] == "USD"
+    assert summary["allocated_pct"] is None
+
+
+def test_bench_counts_bookable_people_under_full_capacity_today(client, world, db, booked_project, monkeypatch):
+    monkeypatch.setattr("app.services.booking_approval.today_utc", lambda: date(2026, 9, 15))
+    project_id, _ = booked_project
+    bench = lambda: client.get(  # noqa: E731
+        f"/api/projects/{project_id}/resource-summary", headers=world.bu_h
+    ).json()["available_bench_engineers"]
+
+    # Five bookable accounts (four leads, one engineer); on 15 Sep Arjun is at 50%, the leads at 20%.
+    assert bench() == 5
+
+    other = world.create_project()["id"]  # the leads now hold 40% each: still free capacity
+    booking = {
+        "employee_id": world.emp1.id,
+        "utilization_rate": 50,
+        "start_date": "2026-09-01",
+        "end_date": "2026-09-30",
+    }
+    response = client.post(f"/api/projects/{other}/resource-bookings", json=booking, headers=world.lead_h)
+    assert response.status_code == 200, response.text
+    assert bench() == 4  # Arjun is fully booked that day
+
+    world.other_lead.is_active = False  # a leaver is nobody's bench
+    db.merge(world.other_lead)
+    db.commit()
+    assert bench() == 3
+
+    monkeypatch.setattr("app.services.booking_approval.today_utc", lambda: date(2026, 10, 15))
+    assert bench() == 4  # Arjun's September bookings are over
+
+
+def test_booking_rows_carry_no_made_up_cost(client, world, booked_project):
+    project_id, _ = booked_project
+
+    rows = client.get(f"/api/projects/{project_id}/resource-bookings", headers=world.bu_h).json()
+
+    assert {(row["cost_per_hour"], row["total_cost"]) for row in rows} == {(None, None)}
 
 
 def test_approval_workflow_draft_to_pending_to_approved(client, world, booked_project):

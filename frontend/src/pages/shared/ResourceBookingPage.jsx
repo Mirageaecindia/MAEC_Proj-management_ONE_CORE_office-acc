@@ -32,8 +32,55 @@ function formatLongDate(dateStr) {
   return parsed.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+/** A cost, or a dash when there is none to show (no hourly rates exist yet: TODO N6). */
 function money(value, currency = 'USD') {
+  if (value === null || value === undefined) return '—';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(Number(value || 0));
+}
+
+const hours = (value) => Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 1 });
+
+/** The project's figures above the roster: baseline, booked hours, cost and the bench. */
+function BookingSummaryCards({ summary, isLead }) {
+  const baseline = Number(summary.target_baseline_hours || 0);
+  const extension = Number(summary.extension_hours || 0);
+  const currency = summary.contract_currency;
+  const allocated = summary.allocated_pct ?? null; // null: no baseline to compare against
+  const cost = summary.planned_labor_cost ?? null; // null: no hourly rates yet
+  const overBooked = allocated !== null && allocated > 100;
+  return (
+    <div className={`summary-grid${isLead ? ' lead-summary-grid' : ''}`}>
+      <div className="summary-card">
+        <span className="summary-label">Target Baseline Hours</span>
+        <strong>{baseline > 0 ? hours(baseline) : '—'}<small> Hrs</small></strong>
+        <span className="summary-caption">
+          {baseline <= 0 ? 'No target effort set' : extension > 0 ? `Includes ${hours(extension)} h of extensions` : 'Target effort'}
+        </span>
+      </div>
+      <div className="summary-card">
+        <span className="summary-label">Total Booked Hours</span>
+        <strong className="blue-value">{hours(summary.total_booked_hours)}<small> Hrs</small></strong>
+        <span className={`summary-caption ${overBooked ? 'red-caption' : 'blue-caption'}`}>
+          {allocated === null ? 'No baseline to compare' : `${allocated}% of the baseline`}
+        </span>
+      </div>
+      {!isLead && (
+        <div className="summary-card">
+          <span className="summary-label">Planned Labor Cost</span>
+          <strong>{money(cost, currency)}</strong>
+          <span className="summary-caption">
+            {cost === null ? 'Hourly rates not set yet' : 'Planned'}
+            {summary.contract_value > 0 && ` · contract ${money(summary.contract_value, currency)}`}
+          </span>
+        </div>
+      )}
+      <div className="summary-card bench-card">
+        <span className="summary-label">Available Bench Engineers</span>
+        <strong>{summary.available_bench_engineers}<small> Engineers</small></strong>
+        <span className="summary-caption">Under 100% booked today</span>
+      </div>
+    </div>
+  );
 }
 
 /** "Structural · Engineer II" on one line; shown once when both are the same. */
@@ -523,12 +570,7 @@ export function ResourceBookingPage() {
         </div>
       ) : (
       <div className={refreshing ? 'is-refreshing' : undefined}>
-      <div className={`summary-grid${isLead ? ' lead-summary-grid' : ''}`}>
-        <div className="summary-card"><span className="summary-label">Target Baseline Hours</span><strong>{summary?.target_baseline_hours ?? 0}<small> Hrs</small></strong><span className="summary-caption">Commercial Limit</span></div>
-        <div className="summary-card"><span className="summary-label">Total Booked Hours</span><strong className="blue-value">{summary?.total_booked_hours ?? 0}<small> Hrs</small></strong><span className="summary-caption blue-caption">{Number(summary?.allocated_pct || 0).toFixed(0)}% Allocated</span></div>
-        {!isLead && <div className="summary-card"><span className="summary-label">Planned Labor Cost</span><strong>{money(summary?.planned_labor_cost, summary?.contract_currency)} </strong><span className="summary-caption green-caption">Within {money(summary?.contract_value, summary?.contract_currency)} Limit</span></div>}
-        <div className="summary-card bench-card"><span className="summary-label">Available Bench Engineers</span><strong>{summary?.available_bench_engineers ?? 0}<small> Engineers</small></strong><span className="summary-caption">Partial/Unassigned</span></div>
-      </div>
+      <BookingSummaryCards summary={summary} isLead={isLead} />
 
       <section className="allocation-card">
         <div className="allocation-header">

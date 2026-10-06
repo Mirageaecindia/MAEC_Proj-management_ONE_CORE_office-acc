@@ -37,6 +37,3 @@ class WorkRepository:
             return {}
         employees = self.db.query(models.Employee).filter(models.Employee.id.in_(ids)).all()
         return {employee.id: employee for employee in employees}
-
-    def employee_count(self) -> int:
-        return self.db.query(models.Employee).count()

@@ -1,7 +1,7 @@
 from collections.abc import Collection
 from datetime import date
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 import models
@@ -17,6 +17,12 @@ class BookingRepository:
     def for_project(self, project_id: int, role: str = ENGINEER) -> list[models.ResourceBooking]:
         """A project's bookings of one role. The approval workflow concerns engineer bookings only."""
         return self.db.query(models.ResourceBooking).filter_by(project_id=project_id, role=role).all()
+
+    def planned_hours_total(self, project_id: int) -> int:
+        """Planned hours of every booking on the project, engineers and leads, in one SQL query."""
+        booking = models.ResourceBooking
+        total = self.db.query(func.sum(booking.planned_hours)).filter(booking.project_id == project_id).scalar()
+        return int(total or 0)
 
     def approval_statuses(self, project_id: int) -> list[str]:
         rows = (

@@ -15,6 +15,7 @@ vi.mock('../../AuthContext', () => {
 });
 
 let bookingStatus = 'pending_approval';
+let summaryFigures = {};
 
 const booking = () => ({
   id: 9,
@@ -42,7 +43,7 @@ const ROUTES = [
   [/\/api\/projects\/1\/resource-bookings$/, () => [booking()]],
   [
     /\/api\/projects\/1\/resource-summary$/,
-    () => ({ project_name: 'Hotel Tower', approval_status: bookingStatus }),
+    () => ({ project_name: 'Hotel Tower', approval_status: bookingStatus, ...summaryFigures }),
   ],
   [
     /\/api\/resource-bookings\/gantt\?project_id=1$/,
@@ -76,6 +77,7 @@ function renderPage() {
 describe('Resource Booking: BU Head reject', () => {
   beforeEach(() => {
     bookingStatus = 'pending_approval';
+    summaryFigures = {};
     vi.stubGlobal('fetch', vi.fn(fakeApi));
   });
   afterEach(() => {
@@ -113,6 +115,35 @@ describe('Resource Booking: BU Head reject', () => {
     // The assignment timeline is loaded for the selected project only.
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/gantt\?project_id=1$/), expect.anything());
     expect(screen.getAllByText('Mechanical Engineer').filter((el) => el.tagName === 'TD')).toHaveLength(1); // discipline = role: shown once
+  });
+
+  it('shows the real project figures, a dash where there is no cost yet', async () => {
+    summaryFigures = {
+      target_baseline_hours: 600,
+      extension_hours: 100,
+      total_booked_hours: 694,
+      allocated_pct: 116,
+      planned_labor_cost: null,
+      contract_value: 100000,
+      contract_currency: 'USD',
+      available_bench_engineers: 4,
+    };
+    renderPage();
+
+    const card = async (label) => (await screen.findByText(label, {}, WAIT)).closest('.summary-card');
+    expect((await card('Target Baseline Hours')).textContent).toContain(
+      '600 HrsIncludes 100 h of extensions',
+    );
+    const booked = await card('Total Booked Hours');
+    expect(booked.textContent).toContain('694 Hrs116% of the baseline');
+    expect(within(booked).getByText('116% of the baseline').className).toContain('red-caption'); // over the baseline
+    expect((await card('Planned Labor Cost')).textContent).toBe(
+      'Planned Labor Cost—Hourly rates not set yet · contract $100,000',
+    );
+    expect((await card('Available Bench Engineers')).textContent).toContain(
+      '4 EngineersUnder 100% booked today',
+    );
+    expect(screen.getByText('Arjun Mehta').closest('tr').textContent).not.toContain('$0'); // row costs: a dash
   });
 
   it('offers Reject only while a submission is pending', async () => {

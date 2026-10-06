@@ -12,10 +12,13 @@ from sqlalchemy.orm import Session
 import models
 from app.core.errors import BadRequestError, ConflictError, NotFoundError
 from app.core.roles import Role
+from app.domain.allocation import CAPACITY_PCT, peak_allocation
+from app.domain.governance import governance_baseline
+from app.domain.timesheets import today_utc
 from app.repositories.bookings import BookingRepository
 from app.repositories.notifications import NotificationRepository
 from app.repositories.projects import ProjectRepository
-from app.repositories.work import WorkRepository
+from app.repositories.users import UserRepository
 from app.services import notifications as notify
 from app.services.access import require_project_lead
 from app.services.notifications import RESOURCE_BOOKING_APPROVAL
@@ -55,33 +58,43 @@ class BookingApprovalService:
         projects: ProjectRepository,
         bookings: BookingRepository,
         notifications: NotificationRepository,
-        work: WorkRepository,
+        users: UserRepository,
     ):
         self.db = db
         self.projects = projects
         self.bookings = bookings
         self.notifications = notifications
-        self.work = work
+        self.users = users
 
     def summary(self, user: models.User, project_id: int) -> dict:
         project = self._project(project_id)
         if user.role != Role.BU_HEAD:
             require_project_lead(self.db, user, project_id)
-        bookings = self.bookings.for_project(project_id)
-        status = overall_approval_status(b.approval_status for b in bookings)
-        # KNOWN (roadmap 7.4): commercial figures are placeholders until the rate card exists.
+        status = overall_approval_status(self.bookings.approval_statuses(project_id))
+        baseline = governance_baseline(project.target_effort_hours, project.extension_approved_hours)
+        booked = self.bookings.planned_hours_total(project_id)  # engineers and leads, as on the roster
         return {
-            "target_baseline_hours": 0,
-            "total_booked_hours": sum(booking.planned_hours for booking in bookings),
-            "allocated_pct": 0,
-            "planned_labor_cost": 0,
-            "contract_currency": "USD",
-            "contract_value": 0,
-            "available_bench_engineers": max(0, self.work.employee_count() - len(bookings)),
+            "target_baseline_hours": baseline,  # target effort + approved extensions
+            "extension_hours": float(project.extension_approved_hours or 0),
+            "total_booked_hours": booked,
+            "allocated_pct": round(booked / baseline * 100) if baseline > 0 else None,
+            # No hourly rates exist yet (TODO N6): no cost rather than a made-up one.
+            "planned_labor_cost": None,
+            "contract_currency": project.contract_currency or "USD",
+            "contract_value": float(project.contract_value or 0),
+            "available_bench_engineers": self._bench_count(),
             "project_name": project.project_name,
             "approval_status": status,
             "approval_status_label": BOOKING_APPROVAL_LABELS.get(status),
         }
+
+    def _bench_count(self) -> int:
+        """Bookable people with free capacity today: under 100% across all active projects."""
+        today = today_utc()
+        spans = self.bookings.spans_by_employee(self.users.staff_employee_ids())
+        return sum(
+            1 for employee_spans in spans.values() if peak_allocation(employee_spans, today, today) < CAPACITY_PCT
+        )
 
     def approve(self, project_id: int) -> dict:
         """Approve the Lead's submission. Approval is what grants engineers project access."""

@@ -20,6 +20,19 @@ class UserRepository:
             .all()
         )
 
+    def staff_employee_ids(self) -> list[int]:
+        """Employee ids of every active account that can be booked (not a BU Head)."""
+        rows = (
+            self.db.query(models.User.employee_id)
+            .filter(
+                models.User.role != Role.BU_HEAD,
+                models.User.is_active.is_(True),
+                models.User.employee_id.is_not(None),
+            )
+            .all()
+        )
+        return [employee_id for (employee_id,) in rows]
+
     def get_staff(self, user_id: int) -> models.User | None:
         """An active account with an employee record, or None."""
         return (
