@@ -66,7 +66,8 @@ export function MaecHeader({ subtitle }) {
   }
 
   return (
-    <>
+    // The logo bar and the tabs stay at the top of the window while the page scrolls.
+    <div className="masthead">
       <header className="topbar">
         <NavLink to="/" className="brand" aria-label="MAEC home">
           <img src={maecLogo} alt="MAEC" className="logo" />
@@ -126,7 +127,7 @@ export function MaecHeader({ subtitle }) {
           ))}
         </div>
       </nav>
-    </>
+    </div>
   );
 }
 

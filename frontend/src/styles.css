@@ -1,6 +1,6 @@
 /* Layout stability (2026-10-06 usability pass): the page keeps its width when a scrollbar
    appears (expanding a table, data arriving), so nothing slides sideways. */
-html { scrollbar-gutter: stable; }
+html { scrollbar-gutter: stable; scroll-padding-top: 130px; } /* jumps to an item land below the fixed header */
 
 :root {
   font-family: 'Segoe UI', Arial, sans-serif;
@@ -20,6 +20,9 @@ body { margin: 0; min-width: 320px; background: #f4f7fa; }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 
+/* Header and tabs stay put while the page scrolls: above the page content, below dialogs
+   (.modal-backdrop, z-index 20) and toasts. */
+.masthead { position: sticky; top: 0; z-index: 15; }
 .topbar { height: 72px; padding: 6px 48px; display: flex; align-items: center; justify-content: space-between; background: #fff; border-bottom: 1px solid #e5ebf0; }
 .brand { display: inline-flex; align-items: center; gap: 14px; color: var(--navy); text-decoration: none; }
 .logo { display: block; width: auto; height: 60px; object-fit: contain; }
@@ -370,6 +373,7 @@ input[type='date'] { color: #52687c; }
 }
 
 .gantt-container {
+  isolation: isolate; /* its bars and tooltips layer among themselves, never over the header */
   padding: 0 20px 10px;
 }
 
