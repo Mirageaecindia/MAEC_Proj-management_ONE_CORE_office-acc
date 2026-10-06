@@ -66,7 +66,6 @@ export function WbsStructurePage() {
   const [showNodeForm, setShowNodeForm] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [toast, setToast] = useState(null);
-  const [uploadPhase, setUploadPhase] = useState('');
   const [selected, setSelected] = useState([]); // ids ticked for deletion
   const [pendingDelete, setPendingDelete] = useState(null); // what the confirm dialog is about
   const [deleting, setDeleting] = useState(false);
@@ -360,7 +359,6 @@ export function WbsStructurePage() {
       try {
         const form = new FormData();
         form.append('file', file);
-        if (uploadPhase) form.append('phase', uploadPhase);
         const resp = await fetch(`${API_BASE_URL}/api/projects/${selectedId}/wbs-upload`, {
           method: 'POST',
           headers: authHeaders(),
@@ -368,26 +366,20 @@ export function WbsStructurePage() {
         });
         if (!resp.ok) throw new Error((await resp.json()).detail || 'Could not upload WBS file.');
         const result = await resp.json();
-        const suffix = uploadPhase ? ` to ${uploadPhase}` : '';
-        setToast({ type: 'success', message: `Uploaded${suffix}: ${result.created} created, ${result.updated} updated.` });
+        setToast({ type: 'success', message: `Uploaded: ${result.created} created, ${result.updated} updated.` });
         await loadTasks();
       } catch (err) {
         setError(err.message);
         setToast({ type: 'error', message: `Upload failed: ${err.message}` });
       } finally {
         setShowUpload(false);
-        setUploadPhase('');
         event.target.value = '';
       }
     }
   }
 
-  function triggerPhaseUpload(phase) {
-    setUploadPhase(phase);
-    if (fileInputRef.current) fileInputRef.current.click();
-  }
-
-  function openNodeForm(phase) {
+  /** The Add WBS Node dialog, with the phase already chosen when it is opened from a phase card. */
+  function openNodeForm(phase = '') {
     setError('');
     setNodeMode('node');
     setEditNodeId(null);
@@ -734,12 +726,12 @@ export function WbsStructurePage() {
               {PHASES.map((phase) => (
                 <div className="wbs-phase-card" key={phase}>
                   <button type="button" className="wbs-phase-card-node" onClick={() => openNodeForm(phase)}>{phase}</button>
-                  <button type="button" className="wbs-phase-card-plus" aria-label={`Upload to ${phase}`} title={`Upload to ${phase}`} onClick={() => triggerPhaseUpload(phase)}>+</button>
+                  <button type="button" className="wbs-phase-card-plus" aria-label={`Add a task to ${phase}`} title={`Add a task to ${phase}`} onClick={() => openNodeForm(phase)}>+</button>
                 </div>
               ))}
             </div>
             <div className="wbs-upload-tools">
-              <button className="button button-secondary" type="button" onClick={() => { setUploadPhase(''); fileInputRef.current?.click(); }} disabled={showUpload}>{showUpload ? 'Uploading...' : 'Upload WBS (Excel)'}</button>
+              <button className="button button-secondary" type="button" onClick={() => fileInputRef.current?.click()} disabled={showUpload}>{showUpload ? 'Uploading...' : 'Upload WBS (Excel)'}</button>
               <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" hidden onChange={handleUpload} />
               <a href="/wbs-upload-template.xlsx" download title="Column A: the phase. Column B: tasks in bold, subtasks in normal text.">Download the Excel template</a>
             </div>
@@ -760,7 +752,7 @@ export function WbsStructurePage() {
                     <button className="button button-secondary" type="button" onClick={() => setSelected([])}>Clear selection</button>
                   </>
                 )}
-                <button className="button button-primary" type="button" onClick={() => { setNodeMode('node'); setNodeForm(EMPTY_NODE); setShowNodeForm(true); }}>+ Add WBS Node</button>
+                <button className="button button-primary" type="button" onClick={() => openNodeForm()}>+ Add WBS Node</button>
               </div>
             </div>
             <div className="resource-table-wrap">
