@@ -1014,23 +1014,12 @@ table.wbs-table { table-layout: fixed; width: 100%; }
 .wbs-table .wbs-readonly { white-space: normal; overflow-wrap: anywhere; }
 table.wbs-table th { padding: 9px 8px; white-space: normal; }
 table.wbs-table td { padding: 9px 8px; }
-/* Per-column alignment (header + body match) for the 6-column WBS tables only.
-   Col1 WBS CODE & TASK NAME / Col2 ASSIGNED LEAD: left.
-   Col3 ESTIMATED HOURS: right. Col4/5/6 (STATUS, DUE DATE, ACTIONS): center. */
-table.wbs-table:has(> thead > tr > th:nth-child(6)) th:nth-child(1),
-table.wbs-table:has(> thead > tr > th:nth-child(6)) th:nth-child(2),
-table.wbs-table:has(> thead > tr > th:nth-child(6)) td:nth-child(1),
-table.wbs-table:has(> thead > tr > th:nth-child(6)) td:nth-child(2) { text-align: left; }
-table.wbs-table:has(> thead > tr > th:nth-child(6)) th:nth-child(3),
-table.wbs-table:has(> thead > tr > th:nth-child(6)) td:nth-child(3) { text-align: right; }
-table.wbs-table:has(> thead > tr > th:nth-child(6)) td:nth-child(2) .wbs-readonly { justify-content: flex-start; }
-table.wbs-table:has(> thead > tr > th:nth-child(6)) td:nth-child(3) .wbs-readonly { justify-content: flex-end; }
-table.wbs-table:has(> thead > tr > th:nth-child(6)) th:nth-child(4),
-table.wbs-table:has(> thead > tr > th:nth-child(6)) th:nth-child(5),
-table.wbs-table:has(> thead > tr > th:nth-child(6)) th:nth-child(6),
-table.wbs-table:has(> thead > tr > th:nth-child(6)) td:nth-child(4),
-table.wbs-table:has(> thead > tr > th:nth-child(6)) td:nth-child(5),
-table.wbs-table:has(> thead > tr > th:nth-child(6)) td:nth-child(6) { text-align: center; }
+/* Alignment, every WBS table (lead, engineer, BU Head): the task name reads from the left;
+   every other column is centred, header and values alike, so each header sits right
+   above its values (mixed left/right rules left headers off by the cell padding). */
+table.wbs-table th:first-child, table.wbs-table td:first-child { text-align: left; }
+table.wbs-table th:not(:first-child), table.wbs-table td:not(:first-child) { text-align: center; }
+table.wbs-table td:not(:first-child) .wbs-readonly { justify-content: center; min-width: 0; padding: 0; }
 /* Shared 6-column WBS tables (Lead, BU Head, Engineer): fix column layout so
    expanding/collapsing rows never changes header positions. Widths match the
    natural auto-layout sizes. Has() gates on exactly 6 header columns. */
@@ -1038,24 +1027,6 @@ table.wbs-table:has(> thead > tr > th:nth-child(6)) { table-layout: fixed; }
 table.wbs-table:has(> thead > tr > th:nth-child(6)) th { width: 115px; }
 table.wbs-table:has(> thead > tr > th:nth-child(6)) th:first-child { width: 290px; }
 table.wbs-table:has(> thead > tr > th:nth-child(6)) th:last-child { width: 95px; }
-/* 7-column WBS tables (Lead / BU Head: ASSIGNED ENGINEER + ASSIGNED LEAD).
-   Col1 WBS/TASK, Col2 ENGINEER, Col3 LEAD, Col4 HOURS: left/left/left/right.
-   Col5/6/7 (STATUS, DUE DATE, ACTIONS): center. */
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th:nth-child(2),
-table.wbs-table:has(> thead > tr > th:nth-child(7)) td:nth-child(2),
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th:nth-child(3),
-table.wbs-table:has(> thead > tr > th:nth-child(7)) td:nth-child(3) { text-align: left; }
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th:nth-child(4),
-table.wbs-table:has(> thead > tr > th:nth-child(7)) td:nth-child(4) { text-align: right; }
-table.wbs-table:has(> thead > tr > th:nth-child(7)) td:nth-child(2) .wbs-readonly,
-table.wbs-table:has(> thead > tr > th:nth-child(7)) td:nth-child(3) .wbs-readonly { justify-content: flex-start; }
-table.wbs-table:has(> thead > tr > th:nth-child(7)) td:nth-child(4) .wbs-readonly { justify-content: flex-end; }
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th:nth-child(5),
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th:nth-child(6),
-table.wbs-table:has(> thead > tr > th:nth-child(7)) th:nth-child(7),
-table.wbs-table:has(> thead > tr > th:nth-child(7)) td:nth-child(5),
-table.wbs-table:has(> thead > tr > th:nth-child(7)) td:nth-child(6),
-table.wbs-table:has(> thead > tr > th:nth-child(7)) td:nth-child(7) { text-align: center; }
 /* 7-column WBS tables (Lead / BU Head): compact fixed widths so the full table
    fits the page width without horizontal scrolling. Col1 keeps room for the tree. */
 table.wbs-table:has(> thead > tr > th:nth-child(7)) { table-layout: fixed; }
