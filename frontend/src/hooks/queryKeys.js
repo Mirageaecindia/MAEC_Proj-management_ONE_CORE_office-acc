@@ -5,6 +5,7 @@ export const queryKeys = {
   project: (projectId) => ['projects', 'detail', String(projectId)],
   projectLeads: ['project-leads'],
   executiveDashboard: (projectId) => ['executive-dashboard', projectId],
+  myPerformance: (projectId) => ['my-performance', String(projectId)],
   workSummary: (projectId) => ['work-summary', projectId],
   notifications: ['notifications'],
   tracking: ['tracking'],

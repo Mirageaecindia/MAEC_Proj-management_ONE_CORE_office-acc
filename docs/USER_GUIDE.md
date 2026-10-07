@@ -78,7 +78,7 @@ least four engineers** (some will be chosen as leads), and use three browsers
 | Role | Lands on | Tabs |
 |---|---|---|
 | **BU Head** | Projects | Projects · Create Project · Resource Booking · WBS Structure · Timeline & Logs · Executive Dashboard · Work Summary · SharePoint Mirror |
-| **Engineer who leads a project** | Resource Booking | Resource Booking · WBS Structure · Timeline & Logs · Executive Dashboard · Performance Dashboard · SharePoint Mirror |
+| **Engineer who leads a project** | Resource Booking | Resource Booking · WBS Structure · Timeline & Logs · Performance Dashboard · SharePoint Mirror |
 | **Engineer** | WBS Structure | WBS Structure · Timeline & Logs · Performance Dashboard · SharePoint Mirror |
 
 Lead is a role on a project, not a kind of account: each page follows your role
@@ -136,7 +136,7 @@ Projects page shows the outcome; if SharePoint fails (for example no Azure
 credentials), the project is still created and the error is shown.
 
 **Effect on others:** the leads see the project immediately (Resource Booking,
-WBS, Timeline, Executive Dashboard). Engineers see nothing yet. The leads appear
+WBS, Timeline, Performance Dashboard). Engineers see nothing yet. The leads appear
 on the Resource Booking page as approved rows that only you can change (edit the
 project), and in the subtask assignee list, so a lead can do subtasks and use
 Login/Logout too. **A lead's own hours are approved by you**, not by the leads.
@@ -268,10 +268,17 @@ Who approves what:
 - New hours logged on an already-approved day (a session that ran past midnight)
   put that day back to "pending review".
 
-### 4.5 Executive Dashboard (Lead view)
-The project's governance figures for your projects, the audit log, and the
-**extension request**: enter additional hours and a justification and submit.
-Only a Lead allocated to the project can request, one pending request at a time.
+### 4.5 Performance Dashboard (Lead view)
+One dashboard (the Executive and Performance dashboards were merged on 2026-10-07).
+On a project you lead it shows, in order:
+- **The project**: budget burn, approved hours against the baseline, governance status and SPI;
+  the monthly planned-vs-consumed chart; **Hours by Review Status** (approved, pending, rejected);
+  **Consumption by Discipline** against the alert threshold; the governance audit log.
+- **Lead Action**: the **extension request**: enter additional hours and a justification and submit.
+  Only a Lead allocated to the project can request, one pending request at a time.
+- **My Work on This Project**: your own hours and tasks, if you have subtasks there.
+
+On a project where you only work as an engineer, it shows your own work (as in 5.4).
 
 **Effect on others:** the BU Head gets a notification and sees the request on
 their dashboard. You are notified of the decision.
@@ -311,8 +318,8 @@ the task's lead once the day is over. Open your weekly log for the day-by-day
 detail, the reviewer's name and any rejection reason.
 
 ### 5.4 Performance Dashboard
-Your own figures per project: hours consumption, governance status, schedule
-index, task completion and a monthly chart.
+Your own figures per project: your hours (approved and pending against your plan), tasks
+completed, schedule index, your monthly chart and **My Tasks by Status** (To Do, In Progress, Done).
 
 ---
 
@@ -353,7 +360,7 @@ Use three windows: **BU** (BU Head), **LEAD** (the Electrical lead), **ENG** (an
 7. **ENG:** Timeline & Logs: the hours appear as Pending review (they can be reviewed from the next day).
 8. **LEAD:** the next day, Timeline & Logs: **Approve week** on ENG's row. **BU:** Executive Dashboard: approved hours and budget burn go up.
 9. **Threshold and lock.** Hours come only from Login/Logout, so use a small target: **BU:** Edit the project → target effort **1 h**, threshold **50%**. **ENG:** Login on a subtask, wait about **35 minutes**, Logout; submit the week. **LEAD:** approve the week → **ALERT** (bell for BU and LEAD). **ENG:** another **30 minutes**, Logout, submit; **LEAD:** approve → at 100% the project **locks** (BASELINE REACHED, bell). **ENG:** Login on the subtask is refused.
-10. **LEAD:** Executive Dashboard: request an extension of, say, 10 h with a justification. **BU:** bell; dashboard: **Approve Extension**. If usage is now under 100%, the lock lifts automatically ("System" in the audit log); LEAD is notified.
+10. **LEAD:** Performance Dashboard: request an extension of, say, 10 h with a justification. **BU:** bell; dashboard: **Approve Extension**. If usage is now under 100%, the lock lifts automatically ("System" in the audit log); LEAD is notified.
 11. **BU:** **Stop the Execution** (comment, confirm) → locked; **Resume Execution** → reopened. Both in the audit log.
 12. **BU:** Edit: change the currency → confirmation dialog. Replace the Electrical Lead → the old Lead's window no longer lists the project.
 13. **BU:** Projects → **Archive** → the project disappears for LEAD and ENG; **Show archived** → open its Dashboard (read-only banner). **Reopen** → everything is back as before.

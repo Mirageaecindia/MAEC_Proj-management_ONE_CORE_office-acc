@@ -2,11 +2,21 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { governanceApi } from '../api/governance';
 import { queryKeys } from './queryKeys';
 
-export function useExecutiveDashboard(projectId) {
+/** A project's health and governance figures (the BU Head, and the project's leads). */
+export function useExecutiveDashboard(projectId, { enabled = true } = {}) {
   return useQuery({
     queryKey: queryKeys.executiveDashboard(projectId),
     queryFn: () => governanceApi.executiveDashboard(projectId),
-    enabled: Boolean(projectId),
+    enabled: Boolean(projectId) && enabled,
+  });
+}
+
+/** A lead's extension request: `{ requestedHours, justification }`. */
+export function useRequestExtension(projectId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request) => governanceApi.requestExtension(projectId, request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.executiveDashboard(projectId) }),
   });
 }
 

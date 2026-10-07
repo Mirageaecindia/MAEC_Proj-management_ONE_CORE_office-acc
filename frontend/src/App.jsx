@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import { MaecHeader } from './components/MaecHeader';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
@@ -30,13 +30,9 @@ const SharePointMirrorPage = lazyPage(
   () => import('./features/sharepoint/SharePointMirrorPage'),
   'SharePointMirrorPage',
 );
-const LeadExecutiveDashboardPage = lazyPage(
-  () => import('./pages/lead/ExecutiveDashboardPage'),
-  'ExecutiveDashboardPage',
-);
-const EngineerPerformanceDashboardPage = lazyPage(
-  () => import('./pages/engineer/EngineerPerformanceDashboardPage'),
-  'EngineerPerformanceDashboardPage',
+const PerformanceDashboardPage = lazyPage(
+  () => import('./pages/shared/PerformanceDashboardPage'),
+  'PerformanceDashboardPage',
 );
 const ResourceBookingPage = lazyPage(
   () => import('./pages/shared/ResourceBookingPage'),
@@ -50,9 +46,11 @@ const EngineerWeeklyLogsPage = lazyPage(
 );
 const TaskDetailsPage = lazyPage(() => import('./pages/shared/TaskDetailsPage'), 'TaskDetailsPage');
 
+/** Leads have one dashboard (Performance Dashboard); old links to the Executive Dashboard land there. */
 function ExecutiveDashboardRouter() {
   const { role } = useAuth();
-  if (role === 'engineer') return <LeadExecutiveDashboardPage />; // an engineer who leads a project
+  const { search } = useLocation();
+  if (role === 'engineer') return <Navigate to={`/engineer-performance-dashboard${search}`} replace />;
   return <BuHeadExecutiveDashboardPage />;
 }
 
@@ -189,7 +187,7 @@ function AppRoutes() {
           path="/engineer-performance-dashboard"
           element={
             <WorkspaceRoute roles={['engineer']}>
-              <EngineerPerformanceDashboardPage />
+              <PerformanceDashboardPage />
             </WorkspaceRoute>
           }
         />

@@ -13,8 +13,9 @@ const allTabs = [
   { label: 'Resource Booking', path: '/resource-booking', roles: ['lead', 'bu_head'] },
   { label: 'WBS Structure', path: '/wbs-structure', roles: ['lead', 'engineer', 'bu_head'] },
   { label: 'Timeline & Logs', path: '/timeline-logs', roles: ['lead', 'engineer', 'bu_head'] },
-  { label: 'Executive Dashboard', path: '/executive-dashboard', roles: ['lead', 'bu_head'] },
+  { label: 'Executive Dashboard', path: '/executive-dashboard', roles: ['bu_head'] },
   { label: 'Work Summary', path: '/project-work-summary', roles: ['bu_head'] },
+  // Leads (engineers who lead a project) and engineers: one dashboard, the project they lead included.
   { label: 'Performance Dashboard', path: '/engineer-performance-dashboard', roles: ['engineer'] },
   { label: 'SharePoint Mirror', path: '/sharepoint-mirror', roles: ['lead', 'engineer', 'bu_head'] },
 ];
