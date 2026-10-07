@@ -200,8 +200,7 @@ project, read-only. SharePoint Mirror shows the project's folder tree and files.
 ### 3.9 Audit Log
 Everything anyone did in ProManage (engineers, leads and BU Heads), newest first: who, when,
 what, on which project. Filter by person, project, type and dates, search names and actions,
-and **Download CSV**. In the People list, **Activity** on a person opens the log filtered to
-them. Reading pages is not logged, and passwords never are. Entries are kept for 30 days
+and **Download CSV**; pick a person in the first filter to see only their activity. Reading pages is not logged, and passwords never are. Entries are kept for 30 days
 (`AUDIT_RETENTION_DAYS` on the server) and then deleted.
 
 ---

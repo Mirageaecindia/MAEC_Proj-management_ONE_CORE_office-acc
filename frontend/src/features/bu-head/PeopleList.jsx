@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ErrorBanner } from '../../components/Feedback';
 import {
@@ -93,15 +92,6 @@ function PersonRow({ person, onDelete, onChangeRole }) {
         <span className={`approval-pill ${pill}`}>{status}</span>
       </td>
       <td>
-        <span className="review-actions">
-          <Link
-            className="review-btn"
-            to={`/audit-log?userId=${person.id}`}
-            title="Everything this person did in ProManage"
-          >
-            Activity
-          </Link>
-        </span>
         {person.can_remove_bu_head && (
           <span className="review-actions">
             <button type="button" className="review-btn" onClick={() => onChangeRole(person, false)}>

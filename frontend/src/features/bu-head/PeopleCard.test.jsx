@@ -179,10 +179,6 @@ describe('People list (BU Head)', () => {
     expect(screen.getByText('Not signed in yet')).toBeTruthy();
     expect(screen.getByText(/2 accounts · 1 not signed in yet/)).toBeTruthy();
     expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1); // not on the BU Head's row
-    expect(screen.getAllByRole('link', { name: 'Activity' }).map((a) => a.getAttribute('href'))).toEqual([
-      '/audit-log?userId=7',
-      '/audit-log?userId=1',
-    ]); // everyone's activity, BU Heads included
 
     fireEvent.change(screen.getByLabelText('Search people'), { target: { value: 'M0101' } });
     expect(screen.queryByText('Mohan Daniel')).toBeNull();
