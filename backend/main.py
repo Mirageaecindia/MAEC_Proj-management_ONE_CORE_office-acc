@@ -1216,8 +1216,8 @@ def engineer_dashboard_data(db: Session, employee_id: int, approved_ids: set[int
             "project_code": project.project_code if project else "",
             "client_organization": project.client_organization if project else "",
             "project_lead": project.project_lead if project else "",
-            "contract_value": float(project.contract_value or 0) if project else 0,
-            "contract_currency": project.contract_currency if project else "USD",
+            "contract_value": None,  # own work, in hours: money is the BU Head's (app/domain/commercial.py)
+            "contract_currency": None,
             "governance_threshold_pct": float(project.governance_threshold_pct) if project and project.governance_threshold_pct else None,
             "scheduled_hours": 0,
             "logged_hours": 0.0,

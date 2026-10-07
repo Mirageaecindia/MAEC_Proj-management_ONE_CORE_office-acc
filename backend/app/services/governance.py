@@ -12,6 +12,7 @@ import models
 import schemas
 from app.core.errors import ConflictError, NotFoundError
 from app.core.roles import Role
+from app.domain.commercial import sees_money, without_money
 from app.domain.governance import HARD_STOP, LOCK_MANUAL
 from app.repositories.governance import GovernanceRepository
 from app.repositories.projects import ProjectRepository
@@ -95,6 +96,9 @@ class GovernanceService:
         if user.role != Role.BU_HEAD:
             require_project_lead(self.db, user, project_id)
         data = self.metrics.dashboard_data(project)
+        if not sees_money(user):  # a lead works in hours: no contract value, no budget burn
+            data.pop("commercial_budget_burn", None)
+            data["project"] = without_money(data["project"])
         # A Lead only sees the extension requests they raised themselves.
         requested_by = None if user.role == Role.BU_HEAD else user.id
         requests = self.governance.requests_for_project(project_id, requested_by_user_id=requested_by)

@@ -59,7 +59,7 @@ function ProjectSection({ project, data }) {
   return (
     <>
       <h2 className="perf-section-title">Project: {project.project_name}</h2>
-      <GovernanceSummaryCards data={data} />
+      <GovernanceSummaryCards data={data} showMoney={false} />
       <div className="ed-two-panels">
         <section className="allocation-card ed-chart-panel">
           <div className="allocation-header">

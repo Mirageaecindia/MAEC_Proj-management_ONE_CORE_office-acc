@@ -13,6 +13,7 @@ import models
 from app.core.errors import BadRequestError, ConflictError, NotFoundError
 from app.core.roles import Role
 from app.domain.allocation import CAPACITY_PCT, peak_allocation
+from app.domain.commercial import sees_money
 from app.domain.governance import governance_baseline
 from app.domain.timesheets import today_utc
 from app.repositories.bookings import BookingRepository
@@ -70,6 +71,7 @@ class BookingApprovalService:
         project = self._project(project_id)
         if user.role != Role.BU_HEAD:
             require_project_lead(self.db, user, project_id)
+        money = sees_money(user)  # the lead sees hours only
         status = overall_approval_status(self.bookings.approval_statuses(project_id))
         baseline = governance_baseline(project.target_effort_hours, project.extension_approved_hours)
         booked = self.bookings.planned_hours_total(project_id)  # engineers and leads, as on the roster
@@ -80,8 +82,8 @@ class BookingApprovalService:
             "allocated_pct": round(booked / baseline * 100) if baseline > 0 else None,
             # No hourly rates exist yet (TODO N6): no cost rather than a made-up one.
             "planned_labor_cost": None,
-            "contract_currency": project.contract_currency or "USD",
-            "contract_value": float(project.contract_value or 0),
+            "contract_currency": (project.contract_currency or "USD") if money else None,
+            "contract_value": float(project.contract_value or 0) if money else None,
             "available_bench_engineers": self._bench_count(),
             "project_name": project.project_name,
             "approval_status": status,

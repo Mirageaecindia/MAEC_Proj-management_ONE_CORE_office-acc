@@ -99,7 +99,8 @@ describe('Performance Dashboard', () => {
     renderAt('/engineer-performance-dashboard?projectId=1');
 
     expect(await screen.findByRole('heading', { name: 'Project: Hotel Tower' }, WAIT)).toBeTruthy();
-    expect(await screen.findByText('Commercial Budget Burn', {}, WAIT)).toBeTruthy();
+    expect(await screen.findByText('Approved Hours Consumption', {}, WAIT)).toBeTruthy();
+    expect(screen.queryByText('Commercial Budget Burn')).toBeNull(); // money is the BU Head's
     expect(screen.getByRole('heading', { name: 'Lead Action' })).toBeTruthy();
     const status = within(card('Hours by Review Status'));
     expect(await status.findByText('30.0 Hrs', {}, WAIT)).toBeTruthy(); // approved

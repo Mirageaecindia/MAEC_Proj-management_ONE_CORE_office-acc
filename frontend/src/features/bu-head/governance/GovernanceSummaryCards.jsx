@@ -58,8 +58,11 @@ function budgetFoot(budget, currency) {
   return formatPercent(budget.percent);
 }
 
-/** The four headline KPIs of the Executive Dashboard. `data` is null until a project loads. */
-export function GovernanceSummaryCards({ data }) {
+/**
+ * The headline KPIs of a project. `data` is null until a project loads. `showMoney`: the
+ * budget card is the BU Head's only; a lead's page leaves it out (the server sends no money to leads).
+ */
+export function GovernanceSummaryCards({ data, showMoney = true }) {
   const currency = data?.project?.contract_currency || 'USD';
   const budget = data?.commercial_budget_burn;
   const hours = data?.hours_consumption;
@@ -68,14 +71,16 @@ export function GovernanceSummaryCards({ data }) {
 
   return (
     <section className="ed-summary-cards">
-      <StatCard
-        label="Commercial Budget Burn"
-        value={budget ? formatMoney(budget.consumed, currency) : NOT_AVAILABLE}
-        sub={budget ? `of ${formatMoney(budget.total, currency)} contract value` : NO_PROJECT}
-        progress={{ tone: overBudget ? 'red' : 'blue', percent: budget?.percent }}
-        foot={budgetFoot(budget, currency)}
-        className={overBudget ? 'ed-card-danger' : ''}
-      />
+      {showMoney && (
+        <StatCard
+          label="Commercial Budget Burn"
+          value={budget ? formatMoney(budget.consumed, currency) : NOT_AVAILABLE}
+          sub={budget ? `of ${formatMoney(budget.total, currency)} contract value` : NO_PROJECT}
+          progress={{ tone: overBudget ? 'red' : 'blue', percent: budget?.percent }}
+          foot={budgetFoot(budget, currency)}
+          className={overBudget ? 'ed-card-danger' : ''}
+        />
+      )}
       <StatCard
         label="Approved Hours Consumption"
         value={hours ? formatHours(hours.hours) : NOT_AVAILABLE}

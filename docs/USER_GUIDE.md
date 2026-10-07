@@ -271,7 +271,8 @@ Who approves what:
 ### 4.5 Performance Dashboard (Lead view)
 One dashboard (the Executive and Performance dashboards were merged on 2026-10-07).
 On a project you lead it shows, in order:
-- **The project**: budget burn, approved hours against the baseline, governance status and SPI;
+- **The project**: approved hours against the baseline, governance status and SPI (no money: contract
+  value, budget burn and costs are shown to the BU Head only);
   the monthly planned-vs-consumed chart; **Hours by Review Status** (approved, pending, rejected);
   **Consumption by Discipline** against the alert threshold; the governance audit log.
 - **Lead Action**: the **extension request**: enter additional hours and a justification and submit.

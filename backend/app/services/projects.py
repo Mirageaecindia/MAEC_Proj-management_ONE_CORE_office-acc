@@ -13,6 +13,7 @@ import schemas
 from app.core.errors import NO_PROJECT_ACCESS, BadRequestError, ConflictError, ForbiddenError, NotFoundError
 from app.core.roles import Role
 from app.domain.allocation import planned_hours
+from app.domain.commercial import sees_money, without_money
 from app.integrations.sharepoint import DocumentStorage, SharePointError
 from app.repositories.bookings import ENGINEER, LEAD, BookingRepository
 from app.repositories.projects import ProjectRepository
@@ -155,6 +156,8 @@ class ProjectService:
         for project in projects:
             data = schemas.ProjectOut.model_validate(project).model_dump()
             data["my_role"] = Role.BU_HEAD if roles is None else roles.get(project.id)
+            if user is not None and not sees_money(user):
+                data = without_money(data)
             for slot, (_, id_col) in zip(schemas.LEAD_SLOTS, _LEAD_SLOTS, strict=True):
                 booking = assignments.get((project.id, employee_of.get(getattr(project, id_col))))
                 if booking is not None:
