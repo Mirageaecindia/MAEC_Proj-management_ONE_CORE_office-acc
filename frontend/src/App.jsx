@@ -45,6 +45,8 @@ const EngineerWeeklyLogsPage = lazyPage(
   'EngineerWeeklyLogsPage',
 );
 const TaskDetailsPage = lazyPage(() => import('./pages/shared/TaskDetailsPage'), 'TaskDetailsPage');
+const MyActivityPage = lazyPage(() => import('./pages/shared/MyActivityPage'), 'MyActivityPage');
+const AuditLogPage = lazyPage(() => import('./features/bu-head/AuditLogPage'), 'AuditLogPage');
 
 /** Leads have one dashboard (Performance Dashboard); old links to the Executive Dashboard land there. */
 function ExecutiveDashboardRouter() {
@@ -119,6 +121,22 @@ function AppRoutes() {
           }
         />
         <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route
+          path="/my-activity"
+          element={
+            <WorkspaceRoute roles={['bu_head', 'engineer']}>
+              <MyActivityPage />
+            </WorkspaceRoute>
+          }
+        />
+        <Route
+          path="/audit-log"
+          element={
+            <WorkspaceRoute roles={['bu_head']}>
+              <AuditLogPage />
+            </WorkspaceRoute>
+          }
+        />
         <Route
           path="/created-projects"
           element={

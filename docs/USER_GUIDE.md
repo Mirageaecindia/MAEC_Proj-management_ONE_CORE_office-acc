@@ -77,7 +77,7 @@ least four engineers** (some will be chosen as leads), and use three browsers
 ### 1.3 After login
 | Role | Lands on | Tabs |
 |---|---|---|
-| **BU Head** | Projects | Projects · Create Project · Resource Booking · WBS Structure · Timeline & Logs · Executive Dashboard · Work Summary · SharePoint Mirror |
+| **BU Head** | Projects | Projects · Create Project · Resource Booking · WBS Structure · Timeline & Logs · Executive Dashboard · Work Summary · Audit Log · SharePoint Mirror |
 | **Engineer who leads a project** | Resource Booking | Resource Booking · WBS Structure · Timeline & Logs · Performance Dashboard · SharePoint Mirror |
 | **Engineer** | WBS Structure | WBS Structure · Timeline & Logs · Performance Dashboard · SharePoint Mirror |
 
@@ -90,6 +90,11 @@ The **bell** in the header (BU Head and project leads) shows notifications: book
 approve, decisions, threshold alerts, locks, archive notices. Open it to read
 them; **Mark read** clears one. A session lasts 12 hours; five wrong passwords lock that
 username for 15 minutes.
+
+**My activity** (account menu, top right, everyone): what you did in ProManage, newest first:
+sign-ins (and failed sign-ins on your account), WBS changes, Login/Logout, hour reviews,
+bookings and so on, filtered by project, type and dates. You see only your own entries; the
+BU Head sees everyone's. Entries are kept for 30 days.
 
 ### 1.4 Who sees which project
 - **BU Head:** every project. Archived ones only with **Show archived** on the Projects page.
@@ -191,6 +196,13 @@ hours, overall progress (Not Started / In Progress / Completed).
 ### 3.8 Read-only views
 WBS Structure and Timeline & Logs show the Leads' and Engineers' work for any
 project, read-only. SharePoint Mirror shows the project's folder tree and files.
+
+### 3.9 Audit Log
+Everything anyone did in ProManage (engineers, leads and BU Heads), newest first: who, when,
+what, on which project. Filter by person, project, type and dates, search names and actions,
+and **Download CSV**. In the People list, **Activity** on a person opens the log filtered to
+them. Reading pages is not logged, and passwords never are. Entries are kept for 30 days
+(`AUDIT_RETENTION_DAYS` on the server) and then deleted.
 
 ---
 

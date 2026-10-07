@@ -1,4 +1,4 @@
-import { CircleUserRound, KeyRound, LogOut } from 'lucide-react';
+import { CircleUserRound, History, KeyRound, LogOut } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
@@ -15,6 +15,7 @@ const allTabs = [
   { label: 'Timeline & Logs', path: '/timeline-logs', roles: ['lead', 'engineer', 'bu_head'] },
   { label: 'Executive Dashboard', path: '/executive-dashboard', roles: ['bu_head'] },
   { label: 'Work Summary', path: '/project-work-summary', roles: ['bu_head'] },
+  { label: 'Audit Log', path: '/audit-log', roles: ['bu_head'] },
   // Leads (engineers who lead a project) and engineers: one dashboard, the project they lead included.
   { label: 'Performance Dashboard', path: '/engineer-performance-dashboard', roles: ['engineer'] },
   { label: 'SharePoint Mirror', path: '/sharepoint-mirror', roles: ['lead', 'engineer', 'bu_head'] },
@@ -106,6 +107,16 @@ export function MaecHeader() {
                   }}
                 >
                   <KeyRound size={13} /> Change password
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    navigate('/my-activity');
+                  }}
+                >
+                  <History size={13} /> My activity
                 </button>
                 <button className="account-logout" type="button" role="menuitem" onClick={handleLogout}>
                   <LogOut size={13} /> Logout

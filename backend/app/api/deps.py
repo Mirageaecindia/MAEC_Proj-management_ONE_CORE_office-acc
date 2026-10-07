@@ -18,6 +18,7 @@ from app.repositories.tracking import TrackingRepository
 from app.repositories.users import UserRepository
 from app.repositories.work import WorkRepository
 from app.services import archive_guard
+from app.services.audit import AuditLog
 from app.services.auth import AuthService, LoginThrottle, get_login_throttle
 from app.services.booking_approval import BookingApprovalService
 from app.services.documents import ProjectDocumentService
@@ -95,3 +96,7 @@ def get_rejected_hours_service(db: Session = Depends(get_db)) -> RejectedHours:
 
 def get_team_members_service(db: Session = Depends(get_db)) -> TeamMembers:
     return TeamMembers(db)
+
+
+def get_audit_log(db: Session = Depends(get_db)) -> AuditLog:
+    return AuditLog(db)

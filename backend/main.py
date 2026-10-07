@@ -61,6 +61,8 @@ from app.services.wbs_outline import import_outline, looks_like_outline
 from app.services.wbs_delete import delete_nodes
 from app.services.wbs_duplicate import duplicate_node
 from app.services.tracking import sweep_forever
+from app.services.audit import purge_forever
+from app.api.middleware import AuditMiddleware
 from app.services.notifications import EXTENSION_REQUESTED, create_bu_head_notification
 
 logger = logging.getLogger(__name__)
@@ -84,13 +86,19 @@ migrate(engine)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """While the app runs, settle Login/Logout sessions whose browser went quiet, every few
-    minutes (app/services/tracking.py), so a closed laptop never leaves hours unbanked."""
-    sweep = asyncio.create_task(sweep_forever(SessionLocal))
+    minutes (app/services/tracking.py), so a closed laptop never leaves hours unbanked; and
+    keep the audit log to its retention window (app/services/audit.py)."""
+    tasks = [asyncio.create_task(sweep_forever(SessionLocal)), asyncio.create_task(purge_forever(SessionLocal))]
     yield
-    sweep.cancel()
+    for task in tasks:
+        task.cancel()
 
 
 app = FastAPI(title="ProManage API", version="1.0.0", lifespan=lifespan)
+
+# Every change request gets an audit log entry (app/api/middleware.py). Added before CORS,
+# so CORS stays the outermost layer.
+app.add_middleware(AuditMiddleware)
 
 # Allow the React dev servers to call this API. The app pins two dev ports
 # (5173 = BU Head, 5174 = Lead) and is opened via localhost or 127.0.0.1.

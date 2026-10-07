@@ -239,6 +239,12 @@ MAEC_project_management/
 
 ### 6.2 Authentication and authorization
 - **Login:** `POST /api/auth/login` checks the PBKDF2 hash and returns a random 64-character token. The token is stored in `login_sessions` and sent as `Authorization: Bearer <token>`.
+- **Audit log:** every change request (sign-ins and failed sign-ins, people, projects, bookings, WBS,
+  Login/Logout, hour reviews, governance) is one row in `audit_events`, written by
+  `app/api/middleware.py` from the catalog in `app/domain/audit.py` (a test fails when a new change
+  endpoint is missing from it). Only whitelisted request fields are quoted; passwords never. Each person
+  reads their own (`GET /api/audit/mine`), the BU Head everyone's (`GET /api/audit`, `/api/audit/export`).
+  Rows older than `AUDIT_RETENTION_DAYS` (default 30) are deleted every 6 hours.
 - **Session expiry:** a token stops working `SESSION_TTL_HOURS` (default 12) after login. It is then deleted, and each login purges older expired sessions.
 - **Brute-force protection:** `LOGIN_MAX_FAILED_ATTEMPTS` (default 5) failed logins for one username lock it for `LOGIN_LOCKOUT_MINUTES` (default 15). Further attempts get HTTP 429 with `Retry-After`. The counter is in memory (per process).
 - **`get_current_user`** (in `app/core/security.py`) resolves the token to a user on every request, or returns 401; it returns 403 (`PASSWORD_CHANGE_REQUIRED`) while the account still has a temporary password, so `get_session_user` is used only by `/auth/me` and `/auth/change-password`. `GET /api/auth/me` restores the session on page refresh. Logout deletes the token.

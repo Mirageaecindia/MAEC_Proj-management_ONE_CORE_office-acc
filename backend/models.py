@@ -360,3 +360,25 @@ class TeamMember(Base):
     lead_user_id = Column(Integer, nullable=False, index=True)
     employee_id = Column(Integer, nullable=False)
     added_at = Column(UTCDateTime, server_default=func.now())
+
+
+class AuditEvent(Base):
+    """One action someone took in the app (decided 2026-10-07): who, when, what, on which project.
+
+    Written for every change request by app/services/audit.py, never edited, and deleted
+    once older than AUDIT_RETENTION_DAYS. Each person reads their own; the BU Head reads
+    everyone's. Passwords and other request contents are never stored, only a summary.
+    """
+    __tablename__ = "audit_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    at = Column(UTCDateTime, nullable=False, index=True)
+    user_id = Column(Integer, nullable=True, index=True)
+    user_name = Column(String(150), nullable=True)
+    user_role = Column(String(20), nullable=True)
+    category = Column(String(20), nullable=False, index=True)
+    action = Column(String(60), nullable=False)
+    summary = Column(String(500), nullable=False)
+    project_id = Column(Integer, nullable=True, index=True)
+    project_name = Column(String(240), nullable=True)
+    ip = Column(String(64), nullable=True)

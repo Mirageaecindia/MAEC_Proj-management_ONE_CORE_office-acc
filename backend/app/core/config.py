@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     # This many failed logins for one username within the window lock it out for the window.
     login_max_failed_attempts: int = 5
     login_lockout_minutes: int = 15
+    # Audit log entries older than this are deleted (decided 2026-10-07: 30 days).
+    audit_retention_days: int = 30
 
     azure_client_id: str = ""
     azure_client_secret: str = ""
