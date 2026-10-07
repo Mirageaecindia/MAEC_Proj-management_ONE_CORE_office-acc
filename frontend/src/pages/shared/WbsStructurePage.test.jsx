@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-/** WBS page: the phase cards' "+" add a task to that phase; each row adds a subtask ("+") and duplicates. */
+/** WBS page: a phase card's name adds one task, its "+" the phase's blueprint; each row adds a subtask ("+") and duplicates. */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -38,7 +39,25 @@ const node = (id, code, name, parentId = null) => ({
 let nodes = [];
 let myRole = 'lead'; // the viewer's role on the project
 
+const BLUEPRINTS = PHASES.map((phase, index) => ({
+  key: phase.toLowerCase().replace(/ /g, '-'),
+  phase,
+  tasks: 2,
+  subtasks: 5 + index,
+}));
+let blueprintAdds = [];
+
 const ROUTES = [
+  [/\/api\/wbs-blueprints$/, () => BLUEPRINTS],
+  [
+    /\/api\/projects\/1\/wbs-blueprints\/[a-z-]+$/,
+    (url) => {
+      const key = url.split('/').at(-1);
+      blueprintAdds.push(key);
+      nodes = [...nodes, node(30, '1.', 'Blueprint task')];
+      return { phase: BLUEPRINTS.find((b) => b.key === key).phase, created: 7, skipped: 2 };
+    },
+  ],
   [/\/api\/projects$/, () => [{ id: 1, project_name: 'test', project_code: 'MAEC-001', my_role: myRole }]],
   [/\/api\/projects\/1\/wbs-structure/, () => nodes],
   [/\/api\/projects\/1\/booked-engineers$/, () => []],
@@ -60,20 +79,23 @@ const ROUTES = [
 
 function fakeApi(url) {
   const match = ROUTES.find(([pattern]) => pattern.test(url));
-  const body = match ? match[1]() : { detail: `No fixture for ${url}` };
+  const body = match ? match[1](url) : { detail: `No fixture for ${url}` };
   return Promise.resolve(new Response(JSON.stringify(body), { status: match ? 200 : 404 }));
 }
 
 const renderPage = () =>
   render(
-    <MemoryRouter initialEntries={['/wbs-structure?projectId=1']}>
-      <WbsStructurePage />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={['/wbs-structure?projectId=1']}>
+        <WbsStructurePage />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 
 describe('WBS phase cards (lead)', () => {
   beforeEach(() => {
     nodes = [];
+    blueprintAdds = [];
     vi.stubGlobal('fetch', vi.fn(fakeApi));
   });
   afterEach(() => {
@@ -81,11 +103,33 @@ describe('WBS phase cards (lead)', () => {
     vi.unstubAllGlobals();
   });
 
-  it.each(PHASES)('"+" on %s opens Add WBS Node with that phase chosen', async (phase) => {
+  it.each(PHASES)(
+    '"+" on %s adds the blueprint of that phase after saying how much it adds',
+    async (phase) => {
+      renderPage();
+      const blueprint = BLUEPRINTS.find((b) => b.phase === phase);
+
+      fireEvent.click(await screen.findByRole('button', { name: `Add the ${phase} blueprint` }, WAIT));
+      const dialog = await screen.findByRole('dialog', {}, WAIT);
+      await within(dialog).findByText(
+        `2 tasks and ${blueprint.subtasks} subtasks from the standard ${phase} list.`,
+        {},
+        WAIT,
+      );
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Add tasks' }));
+
+      expect(await screen.findByText(`${phase}: 7 added, 2 already there.`, {}, WAIT)).toBeTruthy();
+      expect(blueprintAdds).toEqual([blueprint.key]); // that phase only
+      expect(await screen.findByText('Blueprint task', {}, WAIT)).toBeTruthy(); // the WBS is reloaded
+    },
+  );
+
+  it('the phase name still adds a single task by hand, with the phase chosen', async () => {
+    const phase = 'ID Coordination';
     renderPage();
     const filePicker = vi.spyOn(HTMLInputElement.prototype, 'click');
 
-    fireEvent.click(await screen.findByRole('button', { name: `Add a task to ${phase}` }, WAIT));
+    fireEvent.click(await screen.findByRole('button', { name: phase }, WAIT));
 
     const heading = screen.getByRole('heading', { name: 'Add WBS Node' });
     const dialog = heading.closest('form') || heading.parentElement.parentElement;

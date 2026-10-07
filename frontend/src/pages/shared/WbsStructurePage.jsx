@@ -1,6 +1,8 @@
 import { Copy, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { wbsBlueprintsApi } from '../../api/wbsBlueprints';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
@@ -329,6 +331,30 @@ export function WbsStructurePage() {
     />
   );
 
+  // Phase blueprints: "+" on a phase card adds that phase's standard tasks (what is already
+  // there is skipped); the whole WBS workbook upload adds all five phases at once.
+  const { data: blueprints = [] } = useQuery({ queryKey: ['wbs-blueprints'], queryFn: wbsBlueprintsApi.list, enabled: isLead, staleTime: Infinity });
+  const blueprintFor = (phase) => blueprints.find((blueprint) => blueprint.phase === phase);
+  const [pendingPhase, setPendingPhase] = useState(null); // the phase whose "+" was clicked
+  const pendingBlueprint = pendingPhase ? (blueprintFor(pendingPhase) ?? { phase: pendingPhase }) : null;
+  const [addingBlueprint, setAddingBlueprint] = useState(false);
+  const [blueprintError, setBlueprintError] = useState(null);
+
+  async function addBlueprint() {
+    setAddingBlueprint(true);
+    setBlueprintError(null);
+    try {
+      const result = await wbsBlueprintsApi.add(selectedId, pendingBlueprint.key);
+      setPendingPhase(null);
+      setToast({ type: 'success', message: `${result.phase}: ${result.created} added${result.skipped ? `, ${result.skipped} already there` : ''}.` });
+      await loadTasks();
+    } catch (err) {
+      setBlueprintError(err);
+    } finally {
+      setAddingBlueprint(false);
+    }
+  }
+
   // Duplicating: a copy next to the original with the next free WBS code, To Do, no hours
   // (a task's copy brings copies of its subtasks). Leads duplicate anything; an engineer
   // only their own subtasks under a task assigned to them. The server decides the code.
@@ -580,6 +606,30 @@ export function WbsStructurePage() {
 
   return (
     <main className="resource-page">
+      {pendingBlueprint && (
+        <ConfirmDialog
+          title={`Add the ${pendingBlueprint.phase} blueprint?`}
+          tone="primary"
+          confirmLabel="Add tasks"
+          busyLabel="Adding…"
+          busy={addingBlueprint}
+          confirmDisabled={!pendingBlueprint.key}
+          error={blueprintError}
+          onConfirm={addBlueprint}
+          onCancel={() => setPendingPhase(null)}
+        >
+          <p className="confirm-modal-text">
+            {pendingBlueprint.key
+              ? `${pendingBlueprint.tasks} tasks and ${pendingBlueprint.subtasks} subtasks from the standard ${pendingBlueprint.phase} list.`
+              : 'Loading the blueprint…'}
+          </p>
+          <p className="confirm-modal-subtext">
+            Tasks and subtasks already in the project are skipped. Engineers, dates and hours are set afterwards
+            with Edit. To add one task by hand, click the phase name instead.
+          </p>
+        </ConfirmDialog>
+      )}
+
       {pendingDelete && (
         <ConfirmDialog
           title={`Delete ${describeCount(pendingDelete)}?`}
@@ -729,7 +779,7 @@ export function WbsStructurePage() {
               {PHASES.map((phase) => (
                 <div className="wbs-phase-card" key={phase}>
                   <button type="button" className="wbs-phase-card-node" onClick={() => openNodeForm(phase)}>{phase}</button>
-                  <button type="button" className="wbs-phase-card-plus" aria-label={`Add a task to ${phase}`} title={`Add a task to ${phase}`} onClick={() => openNodeForm(phase)}>+</button>
+                  <button type="button" className="wbs-phase-card-plus" aria-label={`Add the ${phase} blueprint`} title={`Add the standard ${phase} tasks`} onClick={() => { setBlueprintError(null); setPendingPhase(phase); }}>+</button>
                 </div>
               ))}
             </div>

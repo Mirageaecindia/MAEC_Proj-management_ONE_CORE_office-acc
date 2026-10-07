@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 import models
 from app.core.errors import BadRequestError
-from app.domain.wbs import TO_DO
+from app.domain.wbs import TO_DO, child_prefix, next_code
 
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 PHASES = ("Space Planning", "STR Coordination", "ID Coordination", "BoH Area RCP Coordination", "Submission")
@@ -181,18 +181,46 @@ def looks_like_outline(content: bytes) -> bool:
 # --- the template ------------------------------------------------------------------------------
 
 
+def parse_blueprint(content: bytes, phase: str) -> list[OutlineRow]:
+    """A phase blueprint (app/blueprints/): one column, a **bold** row is a task and the normal
+    rows under it its subtasks; the phase is the blueprint's own."""
+    rows: list[OutlineRow] = []
+    for number, cells in read_cells(content):
+        name, is_bold = cells.get("A", ("", False))
+        name = name.strip()
+        if not name:
+            continue
+        if not is_bold and not rows:
+            raise BadRequestError(f"Row {number}: '{name}' is a subtask (not bold) but no task comes before it.")
+        rows.append(OutlineRow(number, phase, name, is_bold))
+    return rows
+
+
 def import_outline(db: Session, project: models.Project, user: models.User, content: bytes, phase: str | None) -> dict:
-    """Create the outline's tasks and subtasks in the project (a row whose name already exists in
-    that place is kept, so the same workbook can be uploaded again). `phase` overrides column A.
+    """Create the outline workbook's tasks and subtasks in the project. `phase` overrides column A.
     The caller commits."""
-    rows = parse_outline(content)
-    nodes = db.query(models.WbsNode).filter_by(project_id=project.id).all()
-    tasks = {(n.phase, n.task_name.strip().lower()): n for n in nodes if n.parent_id is None}
-    subtasks = {(n.parent_id, n.task_name.strip().lower()): n for n in nodes if n.parent_id is not None}
-    children = {}
+    return add_rows(db, project, user, parse_outline(content), phase)
+
+
+def add_rows(
+    db: Session, project: models.Project, user: models.User, rows: list[OutlineRow], phase: str | None = None
+) -> dict:
+    """Add tasks and subtasks to the project, skipping what is already there, so the same rows
+    can be added again. Matching counts repeats: a step that appears twice under a task (a
+    second review, "repeat until closed") is added twice, unless the project already has two.
+    New subtasks take the next free code under their task. The caller commits."""
+    nodes = db.query(models.WbsNode).filter_by(project_id=project.id).order_by(models.WbsNode.id).all()
+    tasks: dict[tuple, list[models.WbsNode]] = {}  # (phase, name) -> existing tasks, oldest first
+    subtasks: dict[tuple, int] = {}  # (task id, name) -> how many the task has
     for n in nodes:
-        if n.parent_id is not None:
-            children[n.parent_id] = children.get(n.parent_id, 0) + 1
+        if n.parent_id is None:
+            tasks.setdefault((n.phase, n.task_name.strip().lower()), []).append(n)
+        else:
+            subtasks[(n.parent_id, n.task_name.strip().lower())] = (
+                subtasks.get((n.parent_id, n.task_name.strip().lower()), 0) + 1
+            )
+    seen: dict[tuple, int] = {}  # how many times this add has met the same task or subtask
+    codes = [n.wbs_code for n in nodes]
     roots = [int(m.group(1)) for n in nodes if n.wbs_code and (m := re.match(r"(\d+)", str(n.wbs_code)))]
     next_root = max(roots, default=0) + 1
     created = updated = 0
@@ -201,7 +229,9 @@ def import_outline(db: Session, project: models.Project, user: models.User, cont
         row_phase = phase or row.phase
         key = row.name.strip().lower()
         if row.is_task:
-            task = tasks.get((row_phase, key))
+            nth = seen[("task", row_phase, key)] = seen.get(("task", row_phase, key), 0) + 1
+            existing = tasks.setdefault((row_phase, key), [])
+            task = existing[nth - 1] if nth <= len(existing) else None
             if task is None:
                 task = models.WbsNode(
                     project_id=project.id,
@@ -216,19 +246,22 @@ def import_outline(db: Session, project: models.Project, user: models.User, cont
                 next_root += 1
                 db.add(task)
                 db.flush()
-                tasks[(row_phase, key)] = task
+                existing.append(task)
                 created += 1
             else:
                 updated += 1
             continue
-        if (task.id, key) in subtasks:
+        nth = seen[(task.id, key)] = seen.get((task.id, key), 0) + 1
+        if nth <= subtasks.get((task.id, key), 0):
             updated += 1
             continue
-        children[task.id] = children.get(task.id, 0) + 1
+        prefix = child_prefix(task.wbs_code)
+        code = next_code(prefix, codes) if prefix else None
+        codes.append(code)
         subtask = models.WbsNode(
             project_id=project.id,
             parent_id=task.id,
-            wbs_code=f"{str(task.wbs_code).rstrip('.')}.{children[task.id]}",
+            wbs_code=code,
             task_name=row.name,
             phase=row_phase,
             deliverable_status=TO_DO,
@@ -242,7 +275,7 @@ def import_outline(db: Session, project: models.Project, user: models.User, cont
         )
         db.add(subtask)
         db.flush()
-        subtasks[(task.id, key)] = subtask
+        subtasks[(task.id, key)] = subtasks.get((task.id, key), 0) + 1
         created += 1
     return {"created": created, "updated": updated, "phase": phase}
 

@@ -26,7 +26,7 @@ repos:
         # from another folder slipped past the narrower rule on 2026-10-03.
         files: '(^|/)\.env$|\.db$|\.(csv|xlsx|xls)$'
         # The few data files that belong in the repo: examples and the WBS templates.
-        exclude: '\.example\.csv$|^_archive/tests/|^backend/data/WBS_Break_Down\.xlsx$|^frontend/public/wbs-upload-template\.xlsx$'
+        exclude: '\.example\.csv$|^_archive/tests/|^backend/data/WBS_Break_Down\.xlsx$|^frontend/public/wbs-upload-template\.xlsx$|^backend/app/blueprints/[a-z_]+\.xlsx$'
 
       - id: ruff-check
         name: ruff check (backend)
