@@ -60,6 +60,9 @@ export function TaskDetailsPage() {
     const trackingBusy = startTracking.isPending || logoutTracking.isPending;
     // A Done subtask takes no more time: setting it to Done logs out whoever is logged in to it.
     const subtaskDone = node?.node_type === 'subtask' && node.deliverable_status === 'Done';
+    // Starting your own To Do subtask logs you in when you are logged in nowhere (the server does it).
+    const startsTracking = isEngineer && node?.node_type === 'subtask' && !node.reference_only
+        && node.deliverable_status === 'To Do' && !activeSession;
     const [confirmSwitch, setConfirmSwitch] = useState(false);
 
     const showToast = useCallback((type, message) => {
@@ -166,7 +169,8 @@ export function TaskDetailsPage() {
             setConfirmError('');
             showToast('success', `Status updated to '${pendingStatus}'.`);
             loadData({ quiet: true });
-            if (pendingStatus === 'Done' && loggedInHere) tracking.refetch(); // the server logged us out
+            // Done logs out of the subtask; In-Progress on your own To Do subtask logs you in.
+            if (isEngineer) tracking.refetch();
         } catch (err) {
             setConfirmError(err.message);
             showToast('error', err.message);
@@ -235,10 +239,15 @@ export function TaskDetailsPage() {
         } else if (loggedInElsewhere && !confirmSwitch) {
             setConfirmSwitch(true); // one step: confirm, and the other subtask is logged out as this one starts
         } else {
+            const wasToDo = node?.deliverable_status === 'To Do';
             startTracking.mutate({ subtaskId: nodeId, switchOver: loggedInElsewhere }, {
-                onSuccess: () => showToast('success', loggedInElsewhere
-                    ? 'Switched. Your time on the other subtask is saved; this subtask counts from now.'
-                    : 'Logged in. Your time on this subtask counts until you log out.'),
+                onSuccess: () => {
+                    showToast('success', (loggedInElsewhere
+                        ? 'Switched. Your time on the other subtask is saved; this subtask counts from now.'
+                        : 'Logged in. Your time on this subtask counts until you log out.')
+                        + (wasToDo ? ' The subtask is now In-Progress.' : ''));
+                    if (wasToDo) loadData({ quiet: true }); // Login started it: show In-Progress
+                },
                 onError,
                 onSettled: () => setConfirmSwitch(false),
             });
@@ -555,6 +564,11 @@ export function TaskDetailsPage() {
                                     <p className="confirm-modal-text">
                                         Are you sure you want to change the task status to <strong>{pendingStatus}</strong>?
                                     </p>
+                                    {pendingStatus === 'In-Progress' && startsTracking && (
+                                        <p className="confirm-modal-subtext">
+                                            You will be logged in to this subtask: your time counts from now until you log out.
+                                        </p>
+                                    )}
                                     {pendingStatus === 'Done' && node.node_type === 'subtask' && !node.reference_only && (
                                         <p className="confirm-modal-subtext">
                                             {loggedInHere

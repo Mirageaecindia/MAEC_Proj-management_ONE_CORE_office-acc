@@ -44,13 +44,17 @@ function fakeApi(url, options = {}) {
   if (/\/api\/wbs-nodes\/5$/.test(url))
     body = { ...SUBTASK, deliverable_status: subtaskStatus, reference_only: referenceOnly };
   else if (/\/api\/wbs-nodes\/5\/advance-status$/.test(url)) {
+    const from = subtaskStatus;
     subtaskStatus = JSON.parse(options.body).new_status;
+    // Like the server: starting your own To Do subtask logs you in when you are logged in nowhere.
+    if (from === 'To Do' && subtaskStatus === 'In-Progress' && !activeSession) activeSession = session(5);
     if (subtaskStatus === 'Done' && activeSession?.subtask_id === 5) activeSession = null; // the server logs out
     body = { ok: true };
   } else if (/\/api\/projects\/1$/.test(url))
     body = { id: 1, project_name: 'Hotel Tower', my_role: 'engineer' };
   else if (/\/subtask-tracking\/start$/.test(url)) {
     activeSession = session(JSON.parse(options.body).subtask_id);
+    if (activeSession.subtask_id === 5 && subtaskStatus === 'To Do') subtaskStatus = 'In-Progress'; // Login starts it
     body = { active_session: activeSession };
   } else if (/\/subtask-tracking\/logout$/.test(url)) {
     activeSession = null;
@@ -189,5 +193,28 @@ describe('Task Details: subtask Login/Logout', () => {
 
     expect(await screen.findByRole('button', { name: 'Change status to Done' }, WAIT)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Login' })).toBeNull();
+  });
+
+  it('Login on a To Do subtask moves it to In-Progress', async () => {
+    subtaskStatus = 'To Do';
+    renderPage();
+    expect(await screen.findByRole('button', { name: 'Change status to In-Progress' }, WAIT)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Login' }));
+
+    expect(await screen.findByRole('button', { name: 'Logout' }, WAIT)).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Change status to Done' }, WAIT)).toBeTruthy(); // now In-Progress
+    expect(screen.getByText(/The subtask is now In-Progress/)).toBeTruthy();
+  });
+
+  it('In-Progress on my To Do subtask logs me in, and says so first', async () => {
+    subtaskStatus = 'To Do';
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Change status to In-Progress' }, WAIT));
+    expect(screen.getByText(/You will be logged in to this subtask/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    expect(await screen.findByRole('button', { name: 'Logout' }, WAIT)).toBeTruthy();
   });
 });

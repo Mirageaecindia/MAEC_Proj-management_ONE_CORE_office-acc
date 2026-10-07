@@ -31,6 +31,10 @@ so yesterday's subtask never carries on by itself. A day's row that has been
 reviewed is never changed by a later Logout (review waits for the day's
 sessions to close, see app/services/hours_review.py).
 
+Starting work is one step (decided 2026-10-08): Login on a To Do subtask moves it to
+In-Progress, and moving your own To Do subtask to In-Progress logs you in when you are not
+logged in anywhere (logged in elsewhere, the switch stays the engineer's confirmed choice).
+
 A subtask that is Done takes no more time: setting it to Done (by the engineer,
 a lead's edit or a re-upload) ends a session open on it at that moment, its
 time banked, and nobody can log in to it until a lead moves it back.
@@ -58,7 +62,7 @@ from app.core.errors import (
 )
 from app.core.security import as_utc
 from app.domain.timesheets import DAILY_MARK_HOURS, PENDING_REVIEW
-from app.domain.wbs import is_finished, is_sub_subtask
+from app.domain.wbs import IN_PROGRESS, TO_DO, is_finished, is_sub_subtask
 from app.repositories.tracking import ACTIVE, ENDED, TrackingRepository
 from app.services.access import user_can_access_project
 from app.services.governance_monitor import enforce_governance
@@ -79,6 +83,7 @@ SUBTASK_DELETED = "subtask_deleted"  # the subtask was deleted while the enginee
 PROJECT_ARCHIVED = "project_archived"  # the BU Head archived the project while the engineer was logged in
 SUBTASK_DONE = "subtask_done"  # the subtask was set to Done while the engineer was logged in
 SUBTASK_IS_DONE = "This subtask is Done, so no more time can be logged on it."
+STARTED_WITH_LOGIN = "Started with Login"
 NOT_FOR_TIME = "Sub-subtasks are for reference only: log in on the subtask above it."
 
 
@@ -145,6 +150,28 @@ def end_sessions_if_done(db: Session, node: models.WbsNode, now: datetime | None
     now = now or utcnow()
     for session in TrackingRepository(db).open_on_subtask(node.id):
         end_session(db, session, now, SUBTASK_DONE)
+
+
+def mark_started(db: Session, node: models.WbsNode, user: models.User, now: datetime) -> None:
+    """Login on a To Do subtask moves it to In-Progress, with the history entry and actual start
+    a status change makes. Any other status is left as it is. The caller commits."""
+    if node.deliverable_status != TO_DO:
+        return
+    node.deliverable_status = IN_PROGRESS
+    if node.actual_start_datetime is None:
+        node.actual_start_datetime = now
+    db.add(
+        models.WbsNodeHistory(
+            node_id=node.id,
+            project_id=node.project_id,
+            user_id=user.id,
+            user_name=user.full_name or user.username,
+            action="status_change",
+            old_status=TO_DO,
+            new_status=IN_PROGRESS,
+            comment=STARTED_WITH_LOGIN,
+        )
+    )
 
 
 def last_visit(session: models.TimeSession) -> datetime:
@@ -224,10 +251,24 @@ class TrackingService:
             end_session(self.db, running, now, BY_ENGINEER)
             self.db.flush()
         session = self._open(user, node, now)
+        mark_started(self.db, node, user, now)  # Login on a To Do subtask starts it
         self.db.commit()
         if running is not None:
             enforce_governance(self.db, running.project_id)
         return self._state_for(session, user.employee_id, now)  # with the over-8 state, at once
+
+    def start_if_idle(self, user: models.User, subtask_id: int) -> bool:
+        """Log in to the subtask when the person is logged in nowhere: their own subtask moving to
+        In-Progress. Logged in elsewhere, or not allowed (not theirs, locked, a sub-subtask), it does
+        nothing: the status change stands on its own. Returns whether a session started."""
+        if user.employee_id is None or self.sessions.active_session(user.employee_id) is not None:
+            return False
+        try:
+            self.start(user, subtask_id)
+        except DomainError:
+            self.db.rollback()
+            return False
+        return True
 
     def logout(self, user: models.User) -> dict:
         session = self.sessions.active_session(_employee_id(user))

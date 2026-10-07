@@ -94,7 +94,7 @@ def test_lead_does_a_subtask_on_their_own_project(client, db, make, world):
         f"/api/wbs-nodes/{subtask.id}/advance-status", json={"new_status": "In-Progress"}, headers=lead
     )
     assert advanced.status_code == 200, advanced.text
-    assert client.post("/api/subtask-tracking/start", json={"subtask_id": subtask.id}, headers=lead).status_code == 201
+    assert advanced.json()["tracking_started"] is True  # starting their own subtask logged them in
     assert client.post("/api/subtask-tracking/logout", headers=lead).status_code == 200
     # Still the lead there: the whole WBS, not just their own nodes.
     make.wbs_node(project_id, world.lead_e, engineer=world.emp1)

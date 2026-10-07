@@ -56,7 +56,8 @@ from app.services.hours_review import (
     tasks_by_id,
     trimmed_hours,
 )
-from app.services.tracking import end_sessions_if_done, last_visit, unattended_seconds
+from app.services.tracking import TrackingService, end_sessions_if_done, last_visit, unattended_seconds
+from app.repositories.tracking import TrackingRepository
 from app.services.wbs_outline import import_outline, looks_like_outline
 from app.services.wbs_delete import delete_nodes
 from app.services.wbs_duplicate import duplicate_node
@@ -2256,11 +2257,21 @@ def advance_wbs_node_status(
     )
     db.add(history_entry)
     db.commit()
+
+    # Starting your own subtask logs you in, when you are logged in nowhere (app/services/tracking.py).
+    tracking_started = (
+        is_subtask
+        and old_status == TO_DO
+        and payload.new_status == "In-Progress"
+        and node_assigned_to_engineer(node, user)
+        and TrackingService(db, TrackingRepository(db)).start_if_idle(user, node.id)
+    )
     db.refresh(node)
 
     return {
         "ok": True,
         "node": node_output(db, node),
+        "tracking_started": bool(tracking_started),
         "message": f"Status updated to '{payload.new_status}'." + (f" {payload.comment}" if payload.comment else ""),
     }
 

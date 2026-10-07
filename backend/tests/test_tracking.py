@@ -484,7 +484,7 @@ def test_setting_a_subtask_done_logs_the_engineer_out_and_banks_the_time(client,
     session_id = _login(client, world, subtask)
     _rewind(db, session_id, logged_in=timedelta(hours=2), last_seen=timedelta(minutes=1))
 
-    _advance(client, world.eng_h, subtask, "In-Progress", "Done")
+    _advance(client, world.eng_h, subtask, "Done")  # Login already moved it to In-Progress
 
     db.expire_all()
     session = db.get(models.TimeSession, session_id)
@@ -523,3 +523,56 @@ def test_a_lead_editing_a_subtask_to_done_logs_the_engineer_out(client, db, worl
     assert response.status_code == 200, response.text
     db.expire_all()
     assert db.get(models.TimeSession, session_id).ended_by == tracking.SUBTASK_DONE
+
+
+# -- starting work is one step (decided 2026-10-08) --------------------------------------------
+
+
+def _status(db, node):
+    db.expire_all()
+    return db.get(models.WbsNode, node.id).deliverable_status
+
+
+def test_login_on_a_to_do_subtask_moves_it_to_in_progress(client, db, world, subtask):
+    _login(client, world, subtask)
+
+    assert _status(db, subtask) == "In-Progress"
+    history = db.query(models.WbsNodeHistory).filter_by(node_id=subtask.id).all()
+    assert [(h.old_status, h.new_status, h.comment) for h in history] == [
+        ("To Do", "In-Progress", tracking.STARTED_WITH_LOGIN)
+    ]
+    assert db.get(models.WbsNode, subtask.id).actual_start_datetime is not None
+
+
+def test_login_leaves_a_started_subtask_as_it_is(client, db, world, subtask):
+    db.get(models.WbsNode, subtask.id).deliverable_status = "In-Progress"
+    db.commit()
+
+    _login(client, world, subtask)
+
+    assert _status(db, subtask) == "In-Progress"
+    assert db.query(models.WbsNodeHistory).filter_by(node_id=subtask.id).count() == 0
+
+
+def test_moving_your_to_do_subtask_to_in_progress_logs_you_in(client, db, world, subtask):
+    response = client.post(ADVANCE.format(subtask.id), json={"new_status": "In-Progress"}, headers=world.eng_h)
+
+    assert response.status_code == 200 and response.json()["tracking_started"] is True
+    running = client.post(HEARTBEAT, headers=world.eng_h).json()["active_session"]
+    assert running["subtask_id"] == subtask.id
+
+
+def test_in_progress_never_logs_in_someone_else_or_switches_a_running_session(
+    client, db, make, world, governed, subtask
+):
+    project_id, node_a, *_ = governed
+    other = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, parent_id=node_a.id, estimated_hours=4)
+    _login(client, world, subtask)  # logged in elsewhere already
+
+    mine = client.post(ADVANCE.format(other.id), json={"new_status": "In-Progress"}, headers=world.eng_h).json()
+    assert mine["tracking_started"] is False  # switching stays the engineer's confirmed choice
+    assert client.post(HEARTBEAT, headers=world.eng_h).json()["active_session"]["subtask_id"] == subtask.id
+
+    by_lead = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, parent_id=node_a.id, estimated_hours=4)
+    moved = client.post(ADVANCE.format(by_lead.id), json={"new_status": "In-Progress"}, headers=world.lead_h).json()
+    assert moved["tracking_started"] is False  # a lead moving the engineer's subtask logs nobody in

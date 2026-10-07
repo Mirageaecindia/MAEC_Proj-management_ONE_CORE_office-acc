@@ -56,17 +56,17 @@ def test_work_is_described_in_words_with_its_project(client, make, world, govern
     subtask = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, parent_id=node_a.id, wbs_code="9.1")
     subtask_name = f"9.1 {subtask.task_name}"
 
-    client.post(f"/api/wbs-nodes/{subtask.id}/advance-status", json={"new_status": "In-Progress"}, headers=world.eng_h)
-    client.post("/api/subtask-tracking/start", json={"subtask_id": subtask.id}, headers=world.eng_h)
+    client.post("/api/subtask-tracking/start", json={"subtask_id": subtask.id}, headers=world.eng_h)  # starts it too
     client.post("/api/subtask-tracking/heartbeat", headers=world.eng_h)
     client.post("/api/subtask-tracking/logout", headers=world.eng_h)
+    client.post(f"/api/wbs-nodes/{subtask.id}/advance-status", json={"new_status": "Done"}, headers=world.eng_h)
 
     events = client.get(MINE, headers=world.eng_h).json()["events"]
     summaries = [e["summary"] for e in events]
     assert summaries[:3] == [
+        f"Changed the status of {subtask_name} (to Done)",
         f"Logged out of {subtask_name}",
         f"Logged in to {subtask_name}",
-        f"Changed the status of {subtask_name} (to In-Progress)",
     ]  # the heartbeat is not an action
     assert {e["project_id"] for e in events[:3]} == {project_id}
 
