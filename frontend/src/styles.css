@@ -42,7 +42,8 @@ button { cursor: pointer; }
 .account-name-text { white-space: nowrap; }
 .account-role { color: #4b545c; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 .account-menu { position: absolute; z-index: 10; top: calc(100% + 7px); right: 0; min-width: 132px; width: max-content; padding: 5px; background: #fff; border: 1px solid #d9e0e6; border-radius: 6px; box-shadow: 0 8px 18px rgba(27, 46, 64, .14); }
-.account-menu button { width: 100%; padding: 8px 10px; color: #3e5265; background: transparent; border: 0; border-radius: 4px; text-align: left; font-size: 11px; }
+/* Each item is its own row (block-level), so the menu is as wide as its widest item, not all of them side by side. */
+.account-menu button { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 10px; color: #3e5265; background: transparent; border: 0; border-radius: 4px; text-align: left; font-size: 11px; white-space: nowrap; }
 .account-menu button:hover { background: #f0f5f8; }
 .account-menu .account-logout { display: flex; align-items: center; gap: 6px; color: #a14242; font-weight: 600; border-top: 1px solid #edf1f4; border-radius: 0; }
 .account-menu .account-logout:hover { background: #fff3f1; }
