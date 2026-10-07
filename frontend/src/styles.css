@@ -1429,6 +1429,9 @@ tr.clickable-row:hover td { background: #f0f7fd !important; }
 /* Timesheet review actions (lead) */
 .review-actions { display: inline-flex; gap: 6px; margin-left: 6px; vertical-align: middle; }
 .review-btn { padding: 4px 10px; border-radius: 6px; border: 1px solid transparent; font-size: 11px; font-weight: 700; cursor: pointer; }
+/* "Review subtasks": a link that looks like the review buttons beside it. */
+a.review-btn { display: inline-block; color: #1f4f7a; background: #eef5fb; border-color: #cfe3f2; text-decoration: none; white-space: nowrap; }
+a.review-btn:hover { background: #dcecf7; }
 .review-approve { color: #216548; background: #effaf5; border-color: #bde5d1; }
 .review-approve:hover { background: #dff4e8; }
 .review-reject { color: #8c2f3a; background: #fdf1f2; border-color: #f0c9cd; }

@@ -315,6 +315,23 @@ describe('Approving a week, day by day, from the Timeline Logs page', () => {
     expect(screen.queryByText(/Approve all on my tasks/)).toBeNull();
   });
 
+  it('offers Review subtasks beside Approve week, opening the engineer’s day-by-day log', async () => {
+    timesheetData = reviewable(ENTRIES);
+    renderPage();
+
+    const review = await screen.findByRole('link', { name: 'Review subtasks' });
+    expect(review.getAttribute('href')).toBe('/weekly-logs?projectId=1&employeeId=3&weekStart=2026-09-21');
+    expect(screen.getByText('Approve week')).toBeTruthy();
+  });
+
+  it('says View subtasks when nothing on the row is this viewer’s to review', async () => {
+    timesheetData = ENTRIES; // can_review: false
+    renderPage();
+
+    expect(await screen.findByRole('link', { name: 'View subtasks' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Review subtasks' })).toBeNull();
+  });
+
   it('approves the engineer’s pending days on my tasks and shows the week as approved', async () => {
     timesheetData = reviewable(ENTRIES);
     renderPage();

@@ -559,16 +559,26 @@ export function TimelineLogsPage() {
                           {group.daysApproved} of {group.daysLogged} days approved
                         </small>
                       )}
-                      {group.reviewable > 0 && (
-                        <button
-                          type="button"
-                          className="review-btn review-approve"
-                          title={`Approve ${group.reviewable} pending day${group.reviewable === 1 ? '' : 's'} on your tasks`}
-                          onClick={() => handleApprove(group.employee_id)}
+                      <span className="review-actions">
+                        {/* Day by day, subtask by subtask: the engineer's weekly log. */}
+                        <Link
+                          className="review-btn"
+                          to={`/weekly-logs?projectId=${projectId}&employeeId=${group.employee_id}&weekStart=${weekStartStr}`}
+                          title={`Open ${group.employee_name}'s hours for this week, one row per subtask and day`}
                         >
-                          Approve week
-                        </button>
-                      )}
+                          {group.reviewable > 0 ? 'Review subtasks' : 'View subtasks'}
+                        </Link>
+                        {group.reviewable > 0 && (
+                          <button
+                            type="button"
+                            className="review-btn review-approve"
+                            title={`Approve ${group.reviewable} pending day${group.reviewable === 1 ? '' : 's'} on your tasks`}
+                            onClick={() => handleApprove(group.employee_id)}
+                          >
+                            Approve week
+                          </button>
+                        )}
+                      </span>
                     </td>
                   </tr>
                 ))

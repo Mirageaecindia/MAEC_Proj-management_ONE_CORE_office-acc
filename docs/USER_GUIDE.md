@@ -236,7 +236,7 @@ just the sum of its days.
 - **Approve week** on an engineer's row approves every pending, finished day of
   theirs on *your* tasks. **Approve all on my tasks** does it for every engineer
   at once. Approved days count toward the project's usage straight away.
-- Click the engineer to open their **weekly log**: one row per subtask and day,
+- **Review subtasks** on an engineer's row (or a click on their name) opens their **weekly log**: one row per subtask and day,
   with **Approve** / **Reject** per day. **Every rejection needs a reason**: the
   engineer reads it, and so does the lead who may look at the rejection again.
   Taking back hours that were already approved is also recorded in the audit
