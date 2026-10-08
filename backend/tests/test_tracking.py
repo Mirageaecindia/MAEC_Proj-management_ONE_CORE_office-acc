@@ -513,8 +513,8 @@ def test_a_lead_editing_a_subtask_to_done_logs_the_engineer_out(client, db, worl
         "parent_id": subtask.parent_id,
         "assigned_engineer_id": subtask.assigned_engineer_id,
         "estimated_hours": subtask.estimated_hours,
-        "start_date": "2026-09-01",
-        "end_date": "2026-09-01",
+        "start_date": subtask.start_date.isoformat(),  # the plan unchanged: it is In-Progress
+        "target_due_date": subtask.target_due_date.isoformat(),
         "deliverable_status": "Done",
     }
 
@@ -576,3 +576,48 @@ def test_in_progress_never_logs_in_someone_else_or_switches_a_running_session(
     by_lead = make.wbs_node(project_id, world.lead_e, engineer=world.emp1, parent_id=node_a.id, estimated_hours=4)
     moved = client.post(ADVANCE.format(by_lead.id), json={"new_status": "In-Progress"}, headers=world.lead_h).json()
     assert moved["tracking_started"] is False  # a lead moving the engineer's subtask logs nobody in
+
+
+# -- started work keeps its plan (decided 2026-10-08) ------------------------------------------
+
+
+def _edit(subtask, **changes):
+    return {
+        "task_name": subtask.task_name,
+        "parent_id": subtask.parent_id,
+        "assigned_engineer_id": subtask.assigned_engineer_id,
+        "estimated_hours": subtask.estimated_hours,
+        "start_date": subtask.start_date.isoformat(),
+        "target_due_date": subtask.target_due_date.isoformat(),
+        "deliverable_status": subtask.deliverable_status,
+        **changes,
+    }
+
+
+def test_a_started_subtask_keeps_its_engineer_hours_and_dates(client, db, world, subtask):
+    _login(client, world, subtask)  # now In-Progress
+    db.refresh(subtask)
+
+    for change in ({"assigned_engineer_id": world.emp2.id}, {"estimated_hours": 6}, {"start_date": "2026-09-02"}):
+        refused = client.put(f"/api/wbs-nodes/{subtask.id}", json=_edit(subtask, **change), headers=world.lead_h)
+        assert refused.status_code == 409, change
+        assert "Move it back to To Do first" in refused.json()["detail"]
+
+    renamed = client.put(
+        f"/api/wbs-nodes/{subtask.id}", json=_edit(subtask, task_name="Risers, level 2"), headers=world.lead_h
+    )
+    assert renamed.status_code == 200, renamed.text  # the name is not the plan
+
+
+def test_moving_it_back_to_to_do_frees_the_plan(client, db, world, subtask):
+    db.get(models.WbsNode, subtask.id).deliverable_status = "In-Progress"
+    db.commit()
+    db.refresh(subtask)
+
+    back = client.put(
+        f"/api/wbs-nodes/{subtask.id}", json=_edit(subtask, deliverable_status="To Do"), headers=world.lead_h
+    )
+    assert back.status_code == 200, back.text
+    db.refresh(subtask)
+    changed = client.put(f"/api/wbs-nodes/{subtask.id}", json=_edit(subtask, estimated_hours=6), headers=world.lead_h)
+    assert changed.status_code == 200, changed.text

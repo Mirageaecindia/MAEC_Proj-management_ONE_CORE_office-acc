@@ -60,7 +60,25 @@ const ROUTES = [
   ],
   [/\/api\/projects$/, () => [{ id: 1, project_name: 'test', project_code: 'MAEC-001', my_role: myRole }]],
   [/\/api\/projects\/1\/wbs-structure/, () => nodes],
-  [/\/api\/projects\/1\/booked-engineers$/, () => []],
+  [/\/api\/projects\/1\/booked-engineers$/, () => booked],
+  [
+    /\/api\/wbs-nodes\/\d+$/,
+    (url, options) => {
+      const id = Number(url.split('/').at(-1));
+      const body = JSON.parse(options.body);
+      saved.push({ id, body });
+      nodes = nodes.map((n) =>
+        n.id === id
+          ? {
+              ...n,
+              ...body,
+              assigned_engineer_name: booked.find((e) => e.id === body.assigned_engineer_id)?.name,
+            }
+          : n,
+      );
+      return nodes.find((n) => n.id === id);
+    },
+  ],
   [
     /\/api\/wbs-nodes\/11\/subtasks$/,
     () => {
@@ -77,9 +95,12 @@ const ROUTES = [
   ],
 ];
 
-function fakeApi(url) {
+let booked = [];
+let saved = [];
+
+function fakeApi(url, options = {}) {
   const match = ROUTES.find(([pattern]) => pattern.test(url));
-  const body = match ? match[1](url) : { detail: `No fixture for ${url}` };
+  const body = match ? match[1](url, options) : { detail: `No fixture for ${url}` };
   return Promise.resolve(new Response(JSON.stringify(body), { status: match ? 200 : 404 }));
 }
 
@@ -210,6 +231,67 @@ describe('Sub-subtasks (lead)', () => {
       estimated_hours: null,
     });
     expect(screen.queryByRole('button', { name: 'Add a sub-subtask to Sleeves' })).toBeNull(); // three levels at most
+  });
+});
+
+describe('Editing in the table (lead)', () => {
+  beforeEach(() => {
+    booked = [{ id: 3, name: 'Ravi Kumar' }];
+    saved = [];
+    nodes = [
+      node(10, '1', 'Cable routing'),
+      { ...node(11, '1.1', 'Risers', 10), assigned_lead: 'Lead A', assigned_lead_user_id: 9 },
+      { ...node(12, '1.2', 'Trays', 10), deliverable_status: 'In-Progress', assigned_engineer_name: 'Me' },
+    ];
+    vi.stubGlobal('fetch', vi.fn(fakeApi));
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('assigns an engineer from the cell: pick, then the tick saves', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Change engineer of Risers' }, WAIT));
+    fireEvent.change(screen.getByLabelText('engineer of Risers'), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save engineer of Risers' }));
+
+    expect(await screen.findByText('Ravi Kumar', {}, WAIT)).toBeTruthy();
+    expect(saved[0].id).toBe(11);
+    expect(saved[0].body).toMatchObject({
+      assigned_engineer_id: 3,
+      assigned_lead_user_id: 9,
+      task_name: 'Risers',
+    });
+  });
+
+  it('a subtask date sets both its dates (one day of work)', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Change start date of Risers' }, WAIT));
+    fireEvent.change(screen.getByLabelText('start date of Risers'), { target: { value: '2026-10-12' } });
+    fireEvent.keyDown(screen.getByLabelText('start date of Risers'), { key: 'Enter' });
+
+    await vi.waitFor(() => expect(saved).toHaveLength(1), WAIT);
+    expect(saved[0].body).toMatchObject({
+      start_date: '2026-10-12',
+      end_date: '2026-10-12',
+      target_due_date: '2026-10-12',
+    });
+  });
+
+  it('a started subtask keeps its plan: no editable cells, the reason on hover', async () => {
+    renderPage();
+    await screen.findByRole('button', { name: 'Change engineer of Risers' }, WAIT);
+
+    expect(screen.queryByRole('button', { name: 'Change engineer of Trays' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Change hours of Trays' })).toBeNull();
+    const trays = screen.getByText('Trays').closest('tr');
+    expect(within(trays).getByText('Me').getAttribute('title')).toMatch(
+      /^In-Progress: the engineer, hours and dates stay/,
+    );
+    expect(screen.queryByRole('button', { name: 'Change hours of Cable routing' })).toBeNull(); // a task: from its dates
   });
 });
 

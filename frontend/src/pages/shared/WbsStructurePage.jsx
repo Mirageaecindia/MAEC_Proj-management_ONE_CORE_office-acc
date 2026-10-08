@@ -6,6 +6,7 @@ import { wbsBlueprintsApi } from '../../api/wbsBlueprints';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { InlineEditCell } from '../../components/InlineEditCell';
 import { countWorkingDays, plannedHoursForRange } from '../../lib/hours';
 import { canDelete, describeCount, impliedSelection, summarizeSelection } from '../../utils/wbsSelection';
 
@@ -289,6 +290,7 @@ export function WbsStructurePage() {
 
   function openEditForm(task) {
     setError('');
+    setEditStatus(task.deliverable_status || 'To Do');
     setNodeMode('edit');
     setEditNodeId(task.id);
     setNodeForm({
@@ -306,6 +308,106 @@ export function WbsStructurePage() {
     });
     setShowNodeForm(true);
   }
+
+  // The status the item had when the Edit dialog opened: started or finished work keeps its plan.
+  const [editStatus, setEditStatus] = useState('To Do');
+  const planLocked = nodeMode === 'edit' && editStatus !== 'To Do';
+
+  // Inline editing (decided 2026-10-08): the lead clicks a row's engineer, hours or a date and
+  // changes it there; the tick saves, the cross cancels. Same rules as the Edit dialog, checked
+  // again by the server.
+  const planLock = (task) =>
+    task.deliverable_status && task.deliverable_status !== 'To Do'
+      ? `${task.deliverable_status}: the engineer, hours and dates stay as they are. Move it back to To Do to change them.`
+      : null;
+  const engineerOptions = (task) => {
+    const list = (Array.isArray(engineers) ? engineers : []).map((e) => ({ value: String(e.id), label: e.name }));
+    if (task.assigned_engineer_id != null && !list.some((o) => o.value === String(task.assigned_engineer_id))) {
+      list.push({ value: String(task.assigned_engineer_id), label: task.assigned_engineer_name || `#${task.assigned_engineer_id}` });
+    }
+    return list;
+  };
+
+  async function saveInline(task, changes) {
+    const payload = {
+      wbs_code: task.wbs_code || null,
+      task_name: task.task_name,
+      parent_id: task.parent_id ?? null,
+      assigned_lead: task.assigned_lead ?? null,
+      assigned_lead_user_id: task.assigned_lead_user_id ?? null,
+      assigned_engineer_id: task.assigned_engineer_id ?? null,
+      estimated_hours: task.estimated_hours ?? null,
+      deliverable_status: task.deliverable_status || 'To Do',
+      start_date: task.start_date || null,
+      target_due_date: task.target_due_date || null,
+      end_date: task.end_date || null,
+      phase: task.phase || null,
+      ...changes,
+    };
+    const resp = await fetch(`${API_BASE_URL}/api/wbs-nodes/${task.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      const detail = Array.isArray(body.detail) ? body.detail[0]?.msg : body.detail;
+      throw new Error(detail || 'Could not save.');
+    }
+    await loadTasks();
+  }
+
+  // A subtask is one day of work: either date sets both. A task or a step keeps its own two dates.
+  const dateChanges = (task, which, value) => {
+    const day = value || null;
+    if (task.depth === 2) return { start_date: day, end_date: day, target_due_date: day };
+    return which === 'start' ? { start_date: day } : { end_date: day, target_due_date: day };
+  };
+
+  const engineerCell = (task) => (
+    <InlineEditCell
+      kind="select"
+      label={`engineer of ${task.task_name}`}
+      value={task.assigned_engineer_id != null ? String(task.assigned_engineer_id) : ''}
+      display={task.assigned_engineer_name}
+      placeholder="Assign…"
+      options={engineerOptions(task)}
+      locked={planLock(task)}
+      onSave={(value) => saveInline(task, { assigned_engineer_id: value ? Number(value) : null })}
+    />
+  );
+  const hoursCell = (task) =>
+    task.depth === 2 ? (
+      <InlineEditCell
+        kind="number"
+        min={1}
+        max={8}
+        label={`hours of ${task.task_name}`}
+        value={task.estimated_hours != null ? String(task.estimated_hours) : ''}
+        display={hours(task)}
+        placeholder="Set hours"
+        locked={planLock(task)}
+        onSave={(value) => saveInline(task, { estimated_hours: value === '' ? null : Number(value) })}
+      />
+    ) : (
+      <div className="wbs-readonly" title={task.depth === 1 ? 'From the dates: weekdays × 8 hours' : 'A sub-subtask has no hours'}>
+        {hours(task) || '—'}
+      </div>
+    );
+  const dateCell = (task, which) => {
+    const value = which === 'start' ? task.start_date : task.target_due_date || task.end_date;
+    return (
+      <InlineEditCell
+        kind="date"
+        label={`${which} date of ${task.task_name}`}
+        value={value || ''}
+        display={value}
+        placeholder="Set date"
+        locked={planLock(task)}
+        onSave={(day) => saveInline(task, dateChanges(task, which, day))}
+      />
+    );
+  };
 
   // Deleting: a lead deletes tasks and subtasks, an engineer only subtasks under their own
   // tasks; one confirmation for any number of them. Worked hours are kept by the server.
@@ -543,6 +645,7 @@ export function WbsStructurePage() {
   const rowTask = (task, engineerView = false, buHeadView = false) => {
     // An engineer opens only what is theirs; a colleague's subtask is shown for who has it and its status.
     const opens = !engineerView || task.assigned_engineer_id === employeeId;
+    const editable = isLead && !engineerView && !buHeadView; // the lead's own table
     return (
     <tr key={task.id} className={opens ? 'wbs-row-clickable' : undefined} onClick={opens ? () => navigate(`/task-details?nodeId=${task.id}&projectId=${selectedId}`) : undefined}>
       <td>
@@ -565,12 +668,12 @@ export function WbsStructurePage() {
           <strong>{task.wbs_code}</strong> {task.task_name}
         </span>
       </td>
-      <td><div className="wbs-readonly">{task.assigned_engineer_name || ''}</div></td>
+      <td>{editable ? engineerCell(task) : <div className="wbs-readonly">{task.assigned_engineer_name || ''}</div>}</td>
       {(engineerView || buHeadView) && <td><div className="wbs-readonly">{task.assigned_lead || '—'}</div></td>}
-      <td><div className="wbs-readonly">{hours(task)}</div></td>
+      <td>{editable ? hoursCell(task) : <div className="wbs-readonly">{hours(task)}</div>}</td>
       <td><div className="wbs-readonly">{task.deliverable_status || ''}</div></td>
-      <td><div className="wbs-readonly">{task.start_date || ''}</div></td>
-      <td><div className="wbs-readonly">{task.target_due_date || task.end_date || ''}</div></td>
+      <td>{editable ? dateCell(task, 'start') : <div className="wbs-readonly">{task.start_date || ''}</div>}</td>
+      <td>{editable ? dateCell(task, 'end') : <div className="wbs-readonly">{task.target_due_date || task.end_date || ''}</div>}</td>
       <td>{buHeadView ? <div className="wbs-readonly">{'—'}</div> : rowActions(task)}</td>
     </tr>
     );
@@ -696,7 +799,7 @@ export function WbsStructurePage() {
             </label>
             <label className="wbs-field-sm">
               <span>Assign Engineer</span>
-              <select value={nodeForm.assigned_engineer_id || ''} onChange={(e) => {
+              <select disabled={planLocked} value={nodeForm.assigned_engineer_id || ''} onChange={(e) => {
                   const id = e.target.value ? Number(e.target.value) : null;
                   setNodeForm({ ...nodeForm, assigned_engineer_id: id });
                 }}>
@@ -706,12 +809,17 @@ export function WbsStructurePage() {
             </label>
             <label className="wbs-field-sm">
               <span>Start Date</span>
-              <input type="date" value={nodeForm.start_date} onChange={(e) => setNodeForm({ ...nodeForm, start_date: e.target.value })} />
+              <input type="date" disabled={planLocked} value={nodeForm.start_date} onChange={(e) => setNodeForm({ ...nodeForm, start_date: e.target.value })} />
             </label>
             <label className="wbs-field-sm">
               <span>End Date</span>
-              <input type="date" value={nodeForm.end_date} onChange={(e) => setNodeForm({ ...nodeForm, end_date: e.target.value })} />
+              <input type="date" disabled={planLocked} value={nodeForm.end_date} onChange={(e) => setNodeForm({ ...nodeForm, end_date: e.target.value })} />
             </label>
+            {planLocked && (
+              <div className="wbs-hours-calc warn" role="note">
+                {editStatus}: the engineer, hours and dates stay as they are. Set the status back to To Do and save, then change them.
+              </div>
+            )}
             {formIsStep ? (
               <div className="wbs-hours-calc">For reference: a step of the subtask, with no Login/Logout and no hours.</div>
             ) : nodeMode === 'subtask' || (nodeMode === 'edit' && nodeForm.parent_id) ? (
@@ -724,6 +832,7 @@ export function WbsStructurePage() {
                     max="8"
                     step="1"
                     placeholder="1-8"
+                    disabled={planLocked}
                     value={nodeForm.estimated_hours === null || nodeForm.estimated_hours === '' ? '' : nodeForm.estimated_hours}
                     onChange={(e) => setNodeForm({ ...nodeForm, estimated_hours: e.target.value })}
                   />

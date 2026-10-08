@@ -1738,6 +1738,9 @@ def create_wbs_subtask(
     return node_output(db, child)
 
 
+PLAN_FIELDS = ("assigned_engineer_id", "estimated_hours", "start_date", "end_date", "target_due_date")
+
+
 @app.put("/api/wbs-nodes/{node_id}", response_model=schemas.WbsNodeOut)
 def update_wbs_node(
     node_id: int,
@@ -1755,6 +1758,16 @@ def update_wbs_node(
         duplicate = db.query(models.WbsNode).filter(models.WbsNode.project_id == node.project_id, models.WbsNode.wbs_code == payload.wbs_code, models.WbsNode.id != node_id).first()
     if duplicate:
         raise HTTPException(status_code=409, detail="WBS code already exists in this project.")
+    # Started or finished work keeps its plan (decided 2026-10-08): its engineer, hours and dates
+    # change only after a lead moves it back to To Do.
+    if node.deliverable_status != TO_DO:
+        changed = [f for f in PLAN_FIELDS if getattr(payload, f) != getattr(node, f)]
+        if changed:
+            raise HTTPException(
+                status_code=409,
+                detail=f"'{node.task_name}' is {node.deliverable_status}: its engineer, hours and dates stay as they "
+                "are. Move it back to To Do first to change them.",
+            )
     for field, value in payload.model_dump(exclude={"subtask", "phase", "parent_id"}).items():
         setattr(node, field, value)
     parent = db.get(models.WbsNode, node.parent_id) if node.parent_id is not None else None
