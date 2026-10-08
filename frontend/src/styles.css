@@ -1578,14 +1578,16 @@ a.review-btn:hover { background: #dcecf7; }
 .audit-paging { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 10px; color: #52697e; font-size: 12px; }
 
 /* Inline editing in the WBS table: a clickable cell, its editor with tick / cross, a locked cell. */
-.inline-cell { width: 100%; min-height: 30px; padding: 4px 6px; color: #24415d; background: transparent; border: 1px solid transparent; border-radius: 5px; font-size: 11px; text-align: center; cursor: pointer; }
+/* Fixed width (the column's), and a long name wraps: the box grows taller around it, never past its border. */
+.inline-cell { width: 100%; min-height: 30px; padding: 4px 6px; color: #24415d; background: transparent; border: 1px solid transparent; border-radius: 5px; font-size: 11px; line-height: 1.35; text-align: center; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
 .inline-cell:hover, .inline-cell:focus-visible { background: #f4f9fd; border-color: #c5d9ea; outline: none; }
 .inline-cell-placeholder { color: #8aa0b4; font-style: italic; }
 .wbs-table .inline-cell-locked { color: #9aa7b3; cursor: not-allowed; } /* started or finished: the plan stays */
-.inline-cell-editor { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.inline-cell-row { display: flex; align-items: center; gap: 4px; }
-.inline-cell-row select, .inline-cell-row input { width: auto; min-width: 0; max-width: 150px; height: 30px; padding: 0 6px; font-size: 11px; }
-.inline-cell-row input[type='number'] { width: 64px; }
+.inline-cell-editor { display: flex; flex-direction: column; align-items: stretch; gap: 3px; }
+.inline-cell-row { display: flex; align-items: center; gap: 4px; width: 100%; }
+/* The editor takes the cell's whole width; the open list shows full names. */
+.inline-cell-row select, .inline-cell-row input { flex: 1 1 auto; width: auto; min-width: 0; height: 30px; padding: 0 6px; font-size: 11px; }
+.inline-cell-row input[type='number'] { flex: 0 1 64px; }
 .inline-cell-ok, .inline-cell-cancel { width: 26px; height: 26px; flex: 0 0 26px; display: inline-grid; place-items: center; padding: 0; border-radius: 4px; cursor: pointer; }
 .inline-cell-ok { color: #1f5b45; background: #eff8f3; border: 1px solid #cfe8da; }
 .inline-cell-cancel { color: #a34d4a; background: #fff3f3; border: 1px solid #f3d2d0; }
