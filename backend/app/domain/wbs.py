@@ -8,6 +8,7 @@ Older code and the Excel upload used other names ("Not Started",
 (see models.WbsNode) and migration 0002 converted existing rows.
 """
 
+import re
 from collections.abc import Callable, Iterable
 
 TO_DO = "To Do"
@@ -43,6 +44,17 @@ def is_finished(status: str | None) -> bool:
 
 
 NO_DEEPER = "A sub-subtask can't have items of its own."
+
+
+def code_order(node) -> tuple:
+    """Sort key: WBS codes in number order (1, 2, ... 10; 1.2 before 1.10), not as text, where
+    "10." would come before "2.". Items without a code come last, oldest first."""
+    numbers = tuple(int(part) for part in re.findall(r"\d+", node.wbs_code or ""))
+    return (0, numbers, node.id) if numbers else (1, (), node.id)
+
+
+def by_code(nodes: Iterable) -> list:
+    return sorted(nodes, key=code_order)
 
 
 def is_sub_subtask(parent) -> bool:

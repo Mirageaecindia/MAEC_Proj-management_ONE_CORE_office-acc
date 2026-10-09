@@ -17,12 +17,25 @@ def list_blueprints(_user: models.User = Depends(get_current_user)) -> list[dict
     return wbs_blueprints.catalog()
 
 
-@router.post("/projects/{project_id}/wbs-blueprints/{phase}")
-def add_blueprint(
+@router.get("/projects/{project_id}/wbs-blueprints/{phase}")
+def preview_blueprint(
     project_id: int,
     phase: str,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Add a phase's blueprint to the project; what is already there is skipped (project leads)."""
-    return wbs_blueprints.add_blueprint(db, user, project_id, phase)
+    """How much of the phase's blueprint is already in the project (project leads)."""
+    return wbs_blueprints.preview(db, user, project_id, phase)
+
+
+@router.post("/projects/{project_id}/wbs-blueprints/{phase}")
+def add_blueprint(
+    project_id: int,
+    phase: str,
+    again: bool = False,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Add a phase's blueprint to the project (project leads): what is missing, or with
+    `again=true` a full second copy."""
+    return wbs_blueprints.add_blueprint(db, user, project_id, phase, again)

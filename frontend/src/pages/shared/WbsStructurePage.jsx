@@ -7,6 +7,7 @@ import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { InlineEditCell } from '../../components/InlineEditCell';
+import { BlueprintDialog } from '../lead/BlueprintDialog';
 import { countWorkingDays, plannedHoursForRange } from '../../lib/hours';
 import { canDelete, describeCount, impliedSelection, summarizeSelection } from '../../utils/wbsSelection';
 
@@ -438,22 +439,33 @@ export function WbsStructurePage() {
   const { data: blueprints = [] } = useQuery({ queryKey: ['wbs-blueprints'], queryFn: wbsBlueprintsApi.list, enabled: isLead, staleTime: Infinity });
   const blueprintFor = (phase) => blueprints.find((blueprint) => blueprint.phase === phase);
   const [pendingPhase, setPendingPhase] = useState(null); // the phase whose "+" was clicked
-  const pendingBlueprint = pendingPhase ? (blueprintFor(pendingPhase) ?? { phase: pendingPhase }) : null;
-  const [addingBlueprint, setAddingBlueprint] = useState(false);
-  const [blueprintError, setBlueprintError] = useState(null);
+  // Rows a blueprint just added: highlighted, each with the line it repeats, until Keep or Undo.
+  const [recent, setRecent] = useState(null); // { phase, ids: Set, sameAs: { id: code } }
+  const [undoing, setUndoing] = useState(false);
 
-  async function addBlueprint() {
-    setAddingBlueprint(true);
-    setBlueprintError(null);
+  async function blueprintAdded(result) {
+    setPendingPhase(null);
+    setToast({ type: 'success', message: `${result.phase}: ${result.created} added${result.skipped ? `, ${result.skipped} already there` : ''}.` });
+    setRecent(result.created ? { phase: result.phase, ids: new Set(result.created_ids), sameAs: result.same_as || {} } : null);
+    await loadTasks();
+  }
+
+  async function undoRecent() {
+    setUndoing(true);
     try {
-      const result = await wbsBlueprintsApi.add(selectedId, pendingBlueprint.key);
-      setPendingPhase(null);
-      setToast({ type: 'success', message: `${result.phase}: ${result.created} added${result.skipped ? `, ${result.skipped} already there` : ''}.` });
+      const resp = await fetch(`${API_BASE_URL}/api/projects/${selectedId}/wbs-nodes/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ node_ids: [...recent.ids] }),
+      });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || 'Could not undo.');
+      setToast({ type: 'success', message: `The ${recent.ids.size} added items were removed.` });
+      setRecent(null);
       await loadTasks();
     } catch (err) {
-      setBlueprintError(err);
+      setToast({ type: 'error', message: err.message });
     } finally {
-      setAddingBlueprint(false);
+      setUndoing(false);
     }
   }
 
@@ -647,7 +659,7 @@ export function WbsStructurePage() {
     const opens = !engineerView || task.assigned_engineer_id === employeeId;
     const editable = isLead && !engineerView && !buHeadView; // the lead's own table
     return (
-    <tr key={task.id} className={opens ? 'wbs-row-clickable' : undefined} onClick={opens ? () => navigate(`/task-details?nodeId=${task.id}&projectId=${selectedId}`) : undefined}>
+    <tr key={task.id} className={[opens && 'wbs-row-clickable', recent?.ids.has(task.id) && 'wbs-row-new'].filter(Boolean).join(' ') || undefined} onClick={opens ? () => navigate(`/task-details?nodeId=${task.id}&projectId=${selectedId}`) : undefined}>
       <td>
         <span style={{ paddingLeft: `${(task.depth - 1) * 24}px` }}>
           {!buHeadView && deletable(task) && (
@@ -666,6 +678,9 @@ export function WbsStructurePage() {
             <span className="wbs-connector" aria-hidden="true">{'└─'}</span>
           )}
           <strong>{task.wbs_code}</strong> {task.task_name}
+          {recent?.ids.has(task.id) && (
+            <em className="wbs-new-badge">New{recent.sameAs[task.id] ? ` · same as ${recent.sameAs[task.id]}` : ''}</em>
+          )}
         </span>
       </td>
       <td>{editable ? engineerCell(task) : <div className="wbs-readonly">{task.assigned_engineer_name || ''}</div>}</td>
@@ -709,28 +724,14 @@ export function WbsStructurePage() {
 
   return (
     <main className="resource-page">
-      {pendingBlueprint && (
-        <ConfirmDialog
-          title={`Add the ${pendingBlueprint.phase} blueprint?`}
-          tone="primary"
-          confirmLabel="Add tasks"
-          busyLabel="Adding…"
-          busy={addingBlueprint}
-          confirmDisabled={!pendingBlueprint.key}
-          error={blueprintError}
-          onConfirm={addBlueprint}
+      {pendingPhase && (
+        <BlueprintDialog
+          projectId={selectedId}
+          blueprintKey={blueprintFor(pendingPhase)?.key ?? pendingPhase.toLowerCase().replace(/ /g, '-')}
+          phase={pendingPhase}
+          onAdded={blueprintAdded}
           onCancel={() => setPendingPhase(null)}
-        >
-          <p className="confirm-modal-text">
-            {pendingBlueprint.key
-              ? `${pendingBlueprint.tasks} tasks and ${pendingBlueprint.subtasks} subtasks from the standard ${pendingBlueprint.phase} list.`
-              : 'Loading the blueprint…'}
-          </p>
-          <p className="confirm-modal-subtext">
-            Tasks and subtasks already in the project are skipped. Engineers, dates and hours are set afterwards
-            with Edit. To add one task by hand, click the phase name instead.
-          </p>
-        </ConfirmDialog>
+        />
       )}
 
       {pendingDelete && (
@@ -888,7 +889,7 @@ export function WbsStructurePage() {
               {PHASES.map((phase) => (
                 <div className="wbs-phase-card" key={phase}>
                   <button type="button" className="wbs-phase-card-node" onClick={() => openNodeForm(phase)}>{phase}</button>
-                  <button type="button" className="wbs-phase-card-plus" aria-label={`Add the ${phase} blueprint`} title={`Add the standard ${phase} tasks`} onClick={() => { setBlueprintError(null); setPendingPhase(phase); }}>+</button>
+                  <button type="button" className="wbs-phase-card-plus" aria-label={`Add the ${phase} blueprint`} title={`Add the standard ${phase} tasks`} onClick={() => setPendingPhase(phase)}>+</button>
                 </div>
               ))}
             </div>
@@ -917,6 +918,16 @@ export function WbsStructurePage() {
                 <button className="button button-primary" type="button" onClick={() => openNodeForm()}>+ Add WBS Node</button>
               </div>
             </div>
+            {recent && (
+              <div className="wbs-recent-bar" role="status">
+                <span>
+                  <strong>{recent.ids.size} items added to {recent.phase}</strong>, highlighted below; a repeat says which line it
+                  copies.
+                </span>
+                <button className="button button-primary" type="button" disabled={undoing} onClick={() => setRecent(null)}>Keep</button>
+                <button className="button button-secondary" type="button" disabled={undoing} onClick={undoRecent}>{undoing ? 'Undoing…' : 'Undo'}</button>
+              </div>
+            )}
             <div className="resource-table-wrap">
               <table className="resource-table wbs-table wbs-lead-table">
                 <thead>

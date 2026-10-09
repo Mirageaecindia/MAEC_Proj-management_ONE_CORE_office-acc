@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 import models
 from app.domain.timesheets import APPROVED
+from app.domain.wbs import by_code
 
 
 class WorkRepository:
@@ -14,10 +15,8 @@ class WorkRepository:
         self.db = db
 
     def nodes_for_project(self, project_id: int, *, order_by_code: bool = False) -> list[models.WbsNode]:
-        query = self.db.query(models.WbsNode).filter_by(project_id=project_id)
-        if order_by_code:
-            query = query.order_by(models.WbsNode.wbs_code)
-        return query.all()
+        nodes = self.db.query(models.WbsNode).filter_by(project_id=project_id).all()
+        return by_code(nodes) if order_by_code else nodes
 
     def entries_for_project(self, project_id: int) -> list[models.TimeLogEntry]:
         return self.db.query(models.TimeLogEntry).filter_by(project_id=project_id).all()

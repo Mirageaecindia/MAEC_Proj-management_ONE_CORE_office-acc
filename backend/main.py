@@ -30,7 +30,16 @@ from app.core.security import require_role
 from app.domain.calendar import distribute_hours_over_months as _distribute_hours_over_months
 from app.domain.calendar import month_key as _get_month_key
 from app.domain.timesheets import APPROVED, INDIVIDUAL_ONLY, PENDING_REVIEW, today_utc, total_hours
-from app.domain.wbs import NO_DEEPER, TO_DO, child_prefix, is_finished, is_sub_subtask, next_code, whole_tasks
+from app.domain.wbs import (
+    NO_DEEPER,
+    TO_DO,
+    by_code,
+    child_prefix,
+    is_finished,
+    is_sub_subtask,
+    next_code,
+    whole_tasks,
+)
 from app.domain.allocation import peak_allocation, planned_hours
 from app.repositories.bookings import BookingRepository
 from app.services.allocation import over_capacity_message
@@ -251,12 +260,8 @@ def node_assigned_to_lead(node: models.WbsNode, user: models.User) -> bool:
 
 def incomplete_subtasks(db: Session, node: models.WbsNode) -> List[models.WbsNode]:
     """Direct child subtasks of a node whose deliverable_status is not 'Done'."""
-    return (
-        db.query(models.WbsNode)
-        .filter_by(parent_id=node.id)
-        .filter(models.WbsNode.deliverable_status != "Done")
-        .order_by(models.WbsNode.wbs_code, models.WbsNode.id)
-        .all()
+    return by_code(
+        db.query(models.WbsNode).filter_by(parent_id=node.id).filter(models.WbsNode.deliverable_status != "Done")
     )
 
 
@@ -750,11 +755,11 @@ def list_wbs_structure(
         # The WBS page: each task the engineer works on, whole (every subtask and who has it),
         # so they see which subtasks are still open before the task can close. One query.
         scoped_nodes = whole_tasks(
-            query.order_by(models.WbsNode.wbs_code).all(),
+            by_code(query),
             lambda node: node.assigned_engineer_id == user.employee_id,
         )
     else:
-        scoped_nodes = query.order_by(models.WbsNode.wbs_code).all()
+        scoped_nodes = by_code(query)
     return nodes_output(db, scoped_nodes)
 
 
@@ -835,7 +840,7 @@ def scoped_wbs_tasks(
         )
     elif role == "lead":
         query = query.filter(lead_node_condition(user))
-    return query.order_by(models.WbsNode.wbs_code).all()
+    return by_code(query)
 
 
 @app.get("/api/projects/{project_id}/timesheet")
@@ -1060,14 +1065,11 @@ def engineer_performance(
     entries = []
     approved_ids = visible_project_ids(db, user)
     if approved_ids:
-        nodes = (
-            db.query(models.WbsNode)
-            .filter(
+        nodes = by_code(
+            db.query(models.WbsNode).filter(
                 engineer_wbs_condition(user.employee_id),
                 models.WbsNode.project_id.in_(approved_ids),
             )
-            .order_by(models.WbsNode.wbs_code)
-            .all()
         )
         entries = (
             db.query(models.TimeLogEntry)
@@ -2139,10 +2141,7 @@ def get_node_detail(db: Session, node_id: int, user: models.User):
             "task_name": child.task_name,
             "deliverable_status": map_status_for_display(child.deliverable_status),
         }
-        for child in db.query(models.WbsNode)
-        .filter_by(parent_id=node_id)
-        .order_by(models.WbsNode.wbs_code, models.WbsNode.id)
-        .all()
+        for child in by_code(db.query(models.WbsNode).filter_by(parent_id=node_id))
     ]
 
     return schemas.WbsNodeDetailOut(

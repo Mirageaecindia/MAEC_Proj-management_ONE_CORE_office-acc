@@ -29,7 +29,13 @@ def test_a_lead_adds_one_phase_and_only_that_phase(client, db, world):
     response = client.post(ADD.format(project_id, "space-planning"), headers=world.lead_h)
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"phase": "Space Planning", "created": len(rows), "skipped": 0}
+    assert response.json() | {"created_ids": None, "same_as": None} == {
+        "phase": "Space Planning",
+        "created": len(rows),
+        "skipped": 0,
+        "created_ids": None,
+        "same_as": None,
+    }
     nodes = _nodes(db, project_id)
     assert {n.phase for n in nodes} == {"Space Planning"}
     tasks = [n for n in nodes if n.parent_id is None]
@@ -48,7 +54,7 @@ def test_adding_a_blueprint_again_skips_what_is_already_there(client, db, world)
 
     again = client.post(ADD.format(project_id, "submission"), headers=world.lead_h).json()
 
-    assert again == {"phase": "Submission", "created": 1, "skipped": total - 1}  # only the deleted one comes back
+    assert (again["created"], again["skipped"]) == (1, total - 1)  # only the deleted one comes back
     assert len(_nodes(db, project_id)) == total
 
 
@@ -78,3 +84,47 @@ def test_adding_a_blueprint_is_in_the_audit_log(client, world):
     latest = client.get("/api/audit/mine", headers=world.lead_h).json()["events"][0]
     assert latest["summary"] == "Added the id coordination blueprint"
     assert latest["project_id"] == project_id
+
+
+def test_the_question_before_adding_says_how_much_is_already_there(client, world):
+    project_id = world.create_project()["id"]
+    rows = blueprint_rows("submission")
+    tasks = sum(1 for r in rows if r.is_task)
+
+    before = client.get(ADD.format(project_id, "submission"), headers=world.lead_h).json()
+    client.post(ADD.format(project_id, "submission"), headers=world.lead_h)
+    after = client.get(ADD.format(project_id, "submission"), headers=world.lead_h).json()
+
+    assert (before["present_tasks"], before["present_subtasks"], before["missing"]) == (0, 0, len(rows))
+    assert (after["present_tasks"], after["present_subtasks"], after["missing"]) == (tasks, len(rows) - tasks, 0)
+    assert client.get(ADD.format(project_id, "submission"), headers=world.eng_h).status_code == 403
+
+
+def test_adding_again_makes_a_full_copy_at_the_bottom_and_names_what_each_repeats(client, db, world):
+    project_id = world.create_project()["id"]
+    rows = blueprint_rows("submission")
+    client.post(ADD.format(project_id, "submission"), headers=world.lead_h)
+    first = {n.id: n.wbs_code for n in _nodes(db, project_id)}
+
+    copy = client.post(ADD.format(project_id, "submission") + "?again=true", headers=world.lead_h).json()
+
+    assert (copy["created"], copy["skipped"]) == (len(rows), 0)
+    new = [n for n in _nodes(db, project_id) if n.id in set(copy["created_ids"])]
+    assert len(new) == len(rows)
+    old_tasks = [int(code.rstrip(".")) for code in first.values() if code.count(".") == 1 and code.endswith(".")]
+    new_tasks = [n for n in new if n.parent_id is None]
+    assert min(int(t.wbs_code.rstrip(".")) for t in new_tasks) > max(old_tasks)  # numbered after: at the bottom
+    same_as = {int(k): v for k, v in copy["same_as"].items()}
+    assert set(same_as) == {n.id for n in new} and set(same_as.values()) <= set(first.values())
+    first_task = new_tasks[0]
+    assert same_as[first_task.id] == min(first.values(), key=lambda c: int(c.split(".")[0]))  # repeats task 1
+
+
+def test_the_wbs_lists_codes_in_number_order(client, make, world):
+    project_id = world.create_project()["id"]
+    for code in ("10.", "2.", "1.", "1.10", "1.2", "11."):
+        make.wbs_node(project_id, world.lead_e, wbs_code=code)
+
+    listed = client.get(f"/api/projects/{project_id}/wbs-structure", headers=world.lead_h).json()
+
+    assert [n["wbs_code"] for n in listed] == ["1.", "1.2", "1.10", "2.", "10.", "11."]

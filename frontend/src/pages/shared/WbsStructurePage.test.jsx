@@ -46,16 +46,43 @@ const BLUEPRINTS = PHASES.map((phase, index) => ({
   subtasks: 5 + index,
 }));
 let blueprintAdds = [];
+let present = { tasks: 0, subtasks: 0 }; // how much of a blueprint the fake project already has
+let deleted = [];
 
 const ROUTES = [
   [/\/api\/wbs-blueprints$/, () => BLUEPRINTS],
   [
-    /\/api\/projects\/1\/wbs-blueprints\/[a-z-]+$/,
-    (url) => {
-      const key = url.split('/').at(-1);
-      blueprintAdds.push(key);
-      nodes = [...nodes, node(30, '1.', 'Blueprint task')];
-      return { phase: BLUEPRINTS.find((b) => b.key === key).phase, created: 7, skipped: 2 };
+    /\/api\/projects\/1\/wbs-blueprints\/[a-z-]+(\?again=true)?$/,
+    (url, options) => {
+      const again = url.endsWith('?again=true');
+      const key = url.replace('?again=true', '').split('/').at(-1);
+      const blueprint = BLUEPRINTS.find((b) => b.key === key);
+      if (options.method !== 'POST') {
+        const total = blueprint.tasks + blueprint.subtasks;
+        return {
+          ...blueprint,
+          present_tasks: present.tasks,
+          present_subtasks: present.subtasks,
+          missing: total - present.tasks - present.subtasks,
+        };
+      }
+      blueprintAdds.push(again ? `${key} again` : key);
+      nodes = [...nodes, node(30, '14.', 'Blueprint task'), node(31, '14.1', 'Blueprint step', 30)];
+      return {
+        phase: blueprint.phase,
+        created: 2,
+        skipped: again ? 0 : 7,
+        created_ids: [30, 31],
+        same_as: again ? { 30: '1.', 31: '1.1' } : {},
+      };
+    },
+  ],
+  [
+    /\/api\/projects\/1\/wbs-nodes\/delete$/,
+    (url, options) => {
+      deleted = JSON.parse(options.body).node_ids;
+      nodes = nodes.filter((n) => !deleted.includes(n.id));
+      return { tasks: 1, subtasks: 1, hours_kept: 0, deleted_nodes: deleted };
     },
   ],
   [/\/api\/projects$/, () => [{ id: 1, project_name: 'test', project_code: 'MAEC-001', my_role: myRole }]],
@@ -117,7 +144,48 @@ describe('WBS phase cards (lead)', () => {
   beforeEach(() => {
     nodes = [];
     blueprintAdds = [];
+    present = { tasks: 0, subtasks: 0 };
+    deleted = [];
     vi.stubGlobal('fetch', vi.fn(fakeApi));
+  });
+
+  it('when some of it is there: says how much, adds a second copy, marks each repeat, and undoes', async () => {
+    present = { tasks: 2, subtasks: 4 }; // Space Planning: 2 tasks + 5 subtasks, one subtask missing
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add the Space Planning blueprint' }, WAIT));
+    const dialog = await screen.findByRole('dialog', {}, WAIT);
+    await within(dialog).findByText(
+      /2 tasks and 4 subtasks of the standard Space Planning list are already/,
+      {},
+      WAIT,
+    );
+    expect(within(dialog).getByRole('button', { name: 'Add the 1 missing' })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add all 7 again' }));
+
+    expect(await screen.findByText('New · same as 1.', {}, WAIT)).toBeTruthy();
+    expect(screen.getByText('New · same as 1.1')).toBeTruthy();
+    expect(blueprintAdds).toEqual(['space-planning again']);
+    expect(screen.getByText('Blueprint task').closest('tr').className).toContain('wbs-row-new');
+    expect(screen.getByText(/2 items added to Space Planning/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await vi.waitFor(() => expect(deleted).toEqual([30, 31]), WAIT);
+    await vi.waitFor(() => expect(screen.queryByText('Blueprint task')).toBeNull(), WAIT);
+  });
+
+  it('Keep clears the highlight and leaves the rows', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add the Submission blueprint' }, WAIT));
+    const dialog = await screen.findByRole('dialog', {}, WAIT);
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Add tasks' }, WAIT));
+    await screen.findByText(/2 items added to Submission/, {}, WAIT);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep' }));
+
+    expect(screen.queryByText(/items added to/)).toBeNull();
+    expect(screen.getByText('Blueprint task').closest('tr').className).not.toContain('wbs-row-new');
+    expect(screen.queryByText(/^New/)).toBeNull();
   });
   afterEach(() => {
     cleanup();
@@ -139,7 +207,7 @@ describe('WBS phase cards (lead)', () => {
       );
       fireEvent.click(within(dialog).getByRole('button', { name: 'Add tasks' }));
 
-      expect(await screen.findByText(`${phase}: 7 added, 2 already there.`, {}, WAIT)).toBeTruthy();
+      expect(await screen.findByText(`${phase}: 2 added, 7 already there.`, {}, WAIT)).toBeTruthy();
       expect(blueprintAdds).toEqual([blueprint.key]); // that phase only
       expect(await screen.findByText('Blueprint task', {}, WAIT)).toBeTruthy(); // the WBS is reloaded
     },

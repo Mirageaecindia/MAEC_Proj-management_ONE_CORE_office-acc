@@ -1592,3 +1592,9 @@ a.review-btn:hover { background: #dcecf7; }
 .inline-cell-ok { color: #1f5b45; background: #eff8f3; border: 1px solid #cfe8da; }
 .inline-cell-cancel { color: #a34d4a; background: #fff3f3; border: 1px solid #f3d2d0; }
 .inline-cell-error { max-width: 220px; color: #a14242; font-size: 10.5px; line-height: 1.3; white-space: normal; }
+
+/* Rows a blueprint just added: highlighted until Keep or Undo, each saying which line it repeats. */
+.resource-table tbody tr.wbs-row-new > td { background: #fff8e6; }
+.wbs-new-badge { flex: 0 0 auto; align-self: center; margin-left: 6px; padding: 1px 7px; color: #8a5a00; background: #ffe9b8; border-radius: 9px; font-size: 10px; font-style: normal; font-weight: 700; white-space: nowrap; }
+.wbs-recent-bar { display: flex; align-items: center; gap: 10px; margin: 0 20px 12px; padding: 10px 14px; color: #6b4a00; background: #fff8e6; border: 1px solid #f5d98a; border-radius: 6px; font-size: 12.5px; }
+.wbs-recent-bar span { flex: 1 1 auto; }

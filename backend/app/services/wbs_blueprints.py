@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 import models
 from app.core.errors import NotFoundError
 from app.services.access import require_project_lead
-from app.services.wbs_outline import OutlineRow, add_rows, parse_blueprint
+from app.services.wbs_outline import OutlineRow, add_rows, match_rows, parse_blueprint
 
 BLUEPRINT_DIR = Path(__file__).resolve().parents[1] / "blueprints"
 
@@ -49,13 +49,44 @@ def catalog() -> list[dict]:
     return out
 
 
-def add_blueprint(db: Session, user: models.User, project_id: int, key: str) -> dict:
-    """Add the phase's blueprint to the project (the project's leads). Commits."""
-    rows = blueprint_rows(key)
+def _lead_project(db: Session, user: models.User, project_id: int) -> models.Project:
     project = db.get(models.Project, project_id)
     if project is None:
         raise NotFoundError("Project not found.")
     require_project_lead(db, user, project_id)
-    result = add_rows(db, project, user, list(rows))
+    return project
+
+
+def preview(db: Session, user: models.User, project_id: int, key: str) -> dict:
+    """How much of the phase's blueprint is already in the project, for the question before adding."""
+    rows = list(blueprint_rows(key))
+    _lead_project(db, user, project_id)
+    nodes = db.query(models.WbsNode).filter_by(project_id=project_id).all()
+    present = [row for row, match in zip(rows, match_rows(nodes, rows), strict=True) if match is not None]
+    tasks = sum(1 for row in rows if row.is_task)
+    present_tasks = sum(1 for row in present if row.is_task)
+    return {
+        "key": key,
+        "phase": BLUEPRINTS[key][0],
+        "tasks": tasks,
+        "subtasks": len(rows) - tasks,
+        "present_tasks": present_tasks,
+        "present_subtasks": len(present) - present_tasks,
+        "missing": len(rows) - len(present),
+    }
+
+
+def add_blueprint(db: Session, user: models.User, project_id: int, key: str, again: bool = False) -> dict:
+    """Add the phase's blueprint to the project (the project's leads): the missing rows, or with
+    `again` a full second copy at the bottom of the phase. Commits."""
+    rows = blueprint_rows(key)
+    project = _lead_project(db, user, project_id)
+    result = add_rows(db, project, user, list(rows), again=again)
     db.commit()
-    return {"phase": BLUEPRINTS[key][0], "created": result["created"], "skipped": result["updated"]}
+    return {
+        "phase": BLUEPRINTS[key][0],
+        "created": result["created"],
+        "skipped": result["updated"],
+        "created_ids": result["created_ids"],
+        "same_as": result["same_as"],
+    }

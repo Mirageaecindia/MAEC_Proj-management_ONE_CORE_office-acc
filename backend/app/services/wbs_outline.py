@@ -199,85 +199,116 @@ def parse_blueprint(content: bytes, phase: str) -> list[OutlineRow]:
 def import_outline(db: Session, project: models.Project, user: models.User, content: bytes, phase: str | None) -> dict:
     """Create the outline workbook's tasks and subtasks in the project. `phase` overrides column A.
     The caller commits."""
-    return add_rows(db, project, user, parse_outline(content), phase)
+    result = add_rows(db, project, user, parse_outline(content), phase)
+    return {key: result[key] for key in ("created", "updated", "phase")}
+
+
+def match_rows(nodes: list[models.WbsNode], rows: list[OutlineRow], phase: str | None = None) -> list:
+    """For each row, the item already in the project that it stands for, or None. A task matches
+    by phase and name, a subtask by name under its matched task. Repeats count: the second
+    "review the model" under a task matches the second one there, if there is one."""
+    tasks: dict[tuple, list[models.WbsNode]] = {}  # (phase, name) -> existing tasks, oldest first
+    subtasks: dict[tuple, list[models.WbsNode]] = {}  # (task id, name) -> existing subtasks, oldest first
+    for n in sorted(nodes, key=lambda n: n.id):
+        key = n.task_name.strip().lower()
+        if n.parent_id is None:
+            tasks.setdefault((n.phase, key), []).append(n)
+        else:
+            subtasks.setdefault((n.parent_id, key), []).append(n)
+    seen: dict[tuple, int] = {}
+    matches: list[models.WbsNode | None] = []
+    task = None
+    for row in rows:
+        key = row.name.strip().lower()
+        group = (("task", phase or row.phase, key), tasks.get((phase or row.phase, key), []))
+        if not row.is_task:
+            if task is None:  # under a task that is new: new as well
+                matches.append(None)
+                continue
+            group = ((task.id, key), subtasks.get((task.id, key), []))
+        (counter, existing) = group
+        nth = seen[counter] = seen.get(counter, 0) + 1
+        match = existing[nth - 1] if nth <= len(existing) else None
+        if row.is_task:
+            task = match
+        matches.append(match)
+    return matches
 
 
 def add_rows(
-    db: Session, project: models.Project, user: models.User, rows: list[OutlineRow], phase: str | None = None
+    db: Session,
+    project: models.Project,
+    user: models.User,
+    rows: list[OutlineRow],
+    phase: str | None = None,
+    again: bool = False,
 ) -> dict:
-    """Add tasks and subtasks to the project, skipping what is already there, so the same rows
-    can be added again. Matching counts repeats: a step that appears twice under a task (a
-    second review, "repeat until closed") is added twice, unless the project already has two.
-    New subtasks take the next free code under their task. The caller commits."""
-    nodes = db.query(models.WbsNode).filter_by(project_id=project.id).order_by(models.WbsNode.id).all()
-    tasks: dict[tuple, list[models.WbsNode]] = {}  # (phase, name) -> existing tasks, oldest first
-    subtasks: dict[tuple, int] = {}  # (task id, name) -> how many the task has
-    for n in nodes:
-        if n.parent_id is None:
-            tasks.setdefault((n.phase, n.task_name.strip().lower()), []).append(n)
-        else:
-            subtasks[(n.parent_id, n.task_name.strip().lower())] = (
-                subtasks.get((n.parent_id, n.task_name.strip().lower()), 0) + 1
-            )
-    seen: dict[tuple, int] = {}  # how many times this add has met the same task or subtask
+    """Add tasks and subtasks to the project. By default what is already there is skipped, so the
+    same rows can be added again safely; with `again`, every row is added as a new copy, and
+    `same_as` names, for each copy, the code of the item it repeats. New tasks are numbered after
+    the project's highest task, so they come at the bottom; new subtasks take the next free code
+    under their task. The caller commits."""
+    nodes = db.query(models.WbsNode).filter_by(project_id=project.id).all()
+    matches = match_rows(nodes, rows, phase)
     codes = [n.wbs_code for n in nodes]
     roots = [int(m.group(1)) for n in nodes if n.wbs_code and (m := re.match(r"(\d+)", str(n.wbs_code)))]
     next_root = max(roots, default=0) + 1
-    created = updated = 0
+    created_ids: list[int] = []
+    same_as: dict[int, str | None] = {}
+    skipped = 0
     task = None
-    for row in rows:
+    for row, match in zip(rows, matches, strict=True):
         row_phase = phase or row.phase
-        key = row.name.strip().lower()
+        if match is not None and not again:
+            skipped += 1
+            if row.is_task:
+                task = match  # missing subtasks go under the task already there
+            continue
         if row.is_task:
-            nth = seen[("task", row_phase, key)] = seen.get(("task", row_phase, key), 0) + 1
-            existing = tasks.setdefault((row_phase, key), [])
-            task = existing[nth - 1] if nth <= len(existing) else None
-            if task is None:
-                task = models.WbsNode(
-                    project_id=project.id,
-                    wbs_code=f"{next_root}.",
-                    task_name=row.name,
-                    phase=row_phase,
-                    deliverable_status=TO_DO,
-                    assigned_lead=user.full_name,
-                    assigned_lead_user_id=user.id,
-                    created_by_user_id=user.id,
-                )
-                next_root += 1
-                db.add(task)
-                db.flush()
-                existing.append(task)
-                created += 1
-            else:
-                updated += 1
-            continue
-        nth = seen[(task.id, key)] = seen.get((task.id, key), 0) + 1
-        if nth <= subtasks.get((task.id, key), 0):
-            updated += 1
-            continue
-        prefix = child_prefix(task.wbs_code)
-        code = next_code(prefix, codes) if prefix else None
-        codes.append(code)
-        subtask = models.WbsNode(
-            project_id=project.id,
-            parent_id=task.id,
-            wbs_code=code,
-            task_name=row.name,
-            phase=row_phase,
-            deliverable_status=TO_DO,
-            assigned_lead=task.assigned_lead,
-            assigned_lead_user_id=task.assigned_lead_user_id,
-            assigned_engineer_id=task.assigned_engineer_id,
-            created_by_user_id=user.id,
-            start_date=task.start_date,
-            target_due_date=task.target_due_date,
-            end_date=task.end_date,
-        )
-        db.add(subtask)
+            node = models.WbsNode(
+                project_id=project.id,
+                wbs_code=f"{next_root}.",
+                task_name=row.name,
+                phase=row_phase,
+                deliverable_status=TO_DO,
+                assigned_lead=user.full_name,
+                assigned_lead_user_id=user.id,
+                created_by_user_id=user.id,
+            )
+            next_root += 1
+        else:
+            prefix = child_prefix(task.wbs_code)
+            code = next_code(prefix, codes) if prefix else None
+            codes.append(code)
+            node = models.WbsNode(
+                project_id=project.id,
+                parent_id=task.id,
+                wbs_code=code,
+                task_name=row.name,
+                phase=row_phase,
+                deliverable_status=TO_DO,
+                assigned_lead=task.assigned_lead,
+                assigned_lead_user_id=task.assigned_lead_user_id,
+                assigned_engineer_id=task.assigned_engineer_id,
+                created_by_user_id=user.id,
+                start_date=task.start_date,
+                target_due_date=task.target_due_date,
+                end_date=task.end_date,
+            )
+        db.add(node)
         db.flush()
-        subtasks[(task.id, key)] = subtasks.get((task.id, key), 0) + 1
-        created += 1
-    return {"created": created, "updated": updated, "phase": phase}
+        created_ids.append(node.id)
+        if match is not None:
+            same_as[node.id] = match.wbs_code
+        if row.is_task:
+            task = node
+    return {
+        "created": len(created_ids),
+        "updated": skipped,
+        "phase": phase,
+        "created_ids": created_ids,
+        "same_as": same_as,
+    }
 
 
 def write_template(rows_by_phase: dict[str, list[tuple[str, bool]]] = TEMPLATE_ROWS) -> bytes:
