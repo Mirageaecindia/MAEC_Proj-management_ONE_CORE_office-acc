@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
+import { pickProject, rememberProject } from '../../hooks/currentProject';
 import { useServerToday } from '../../hooks/useServerToday';
 import {
   HOURS_STATUS_LABELS,
@@ -58,8 +59,9 @@ export function EngineerWeeklyLogsPage() {
       .then((data) => {
         setProjects(data);
         if (!Array.isArray(data)) return;
-        const selected = targetProjectId ? data.find((p) => p.id === targetProjectId) : data[0];
+        const selected = pickProject(data, targetProjectId);
         setSelectedId(selected ? String(selected.id) : '');
+        rememberProject(selected?.id);
       })
       .catch((err) => setError(err.message));
   }, [targetProjectId, authHeaders]);

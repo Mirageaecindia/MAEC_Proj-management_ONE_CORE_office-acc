@@ -86,6 +86,11 @@ on the **selected project**. On a project you lead you see the lead view
 (bookings, WBS editing, approvals); on a project you only work on, the engineer
 view. The account badge reads "Lead / Engineer" once you lead any project.
 
+The **Project Name** switcher stays on the project you chose: a refresh, another tab
+or a later visit opens the same project (remembered in this browser). A link to a
+project, such as a notification's **Open**, shows that project instead. The newest
+project is shown only when you have not chosen one yet.
+
 The **bell** in the header (BU Head and project leads) shows notifications: bookings to
 approve, decisions, threshold alerts, locks, archive notices. Open it to read
 them; **Mark read** clears one, and **Open** goes to the page where you act on it (bookings to approve: Resource Booking; an extension request or a threshold alert: the dashboard; a finished subtask: that day in the engineer's weekly log) and marks it read. A session lasts 12 hours; five wrong passwords lock that

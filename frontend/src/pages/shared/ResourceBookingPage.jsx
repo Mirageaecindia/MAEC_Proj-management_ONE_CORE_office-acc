@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
+import { pickProject, useProjectChoice } from '../../hooks/currentProject';
 import { useServerToday } from '../../hooks/useServerToday';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useRejectResourceBookings } from '../../hooks/useResourceBookings';
@@ -111,6 +112,7 @@ export function ResourceBookingPage() {
 
   const [projects, setProjects] = useState([]);
   const [selectedId, setSelectedId] = useState('');
+  const chooseProject = useProjectChoice(selectedId, setSelectedId);
   const [employees, setEmployees] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -218,26 +220,15 @@ export function ResourceBookingPage() {
         return response.json();
       })
       .then((projectData) => {
-        setProjects(projectData);
+        setProjects(Array.isArray(projectData) ? projectData : []);
         setProjectsLoaded(true);
-        if (Array.isArray(projectData) && projectData.length > 0) {
-          const selected = targetProjectId
-            ? projectData.find((p) => p.id === targetProjectId)
-            : projectData[0];
-          setSelectedId(selected ? String(selected.id) : '');
-        }
       })
       .catch((loadError) => setError(loadError.message));
-  }, [targetProjectId, authHeaders]);
+  }, [authHeaders]);
 
   useEffect(() => {
-    if (targetProjectId && projects.length > 0) {
-      const match = projects.find((p) => p.id === targetProjectId);
-      if (match && String(match.id) !== selectedId) {
-        setSelectedId(String(match.id));
-      }
-    }
-  }, [targetProjectId, projects, selectedId]);
+    setSelectedId((current) => String(pickProject(projects, targetProjectId ?? current)?.id ?? ''));
+  }, [projects, targetProjectId]);
 
   useEffect(() => {
     if (projectId) loadProjectData(projectId);
@@ -454,7 +445,7 @@ export function ResourceBookingPage() {
 
   function jumpToProject(id) {
     const match = projects.find((p) => p.id === id);
-    if (match) setSelectedId(String(match.id));
+    if (match) chooseProject(match.id);
   }
 
   async function markNotificationRead(id) {
@@ -536,7 +527,7 @@ export function ResourceBookingPage() {
           <span>Project Name</span>
           <select
             value={selectedId}
-            onChange={(e) => setSelectedId(e.target.value)}
+            onChange={(e) => chooseProject(e.target.value)}
           >
             <option value="">Select project</option>
             {projects.map((project) => (

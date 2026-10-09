@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
+import { pickProject, useProjectChoice } from '../../hooks/currentProject';
 import { useServerToday } from '../../hooks/useServerToday';
 import { RejectedHoursPanel } from '../../features/hours/RejectedHours';
 import { DAY_KEYS, DAY_LEGEND, HOURS_STATUS_LABELS, HOURS_STATUS_PILL, bulkNotice, describeTotals, groupByEngineer, isOverMark, summarizeWeek } from '../../utils/hours';
@@ -39,6 +40,7 @@ export function TimelineLogsPage() {
 
   const [projects, setProjects] = useState([]);
   const [selectedId, setSelectedId] = useState('');
+  const chooseProject = useProjectChoice(selectedId, setSelectedId);
   const [nodes, setNodes] = useState([]);
   const [entries, setEntries] = useState([]);
   const [timelineTasks, setTimelineTasks] = useState([]);
@@ -69,16 +71,14 @@ export function TimelineLogsPage() {
         return res.json();
       })
       .then((data) => {
-        setProjects(data);
-        if (Array.isArray(data) && data.length > 0) {
-          const selected = targetProjectId
-            ? data.find((p) => p.id === targetProjectId)
-            : data[0];
-          setSelectedId(selected ? String(selected.id) : '');
-        }
+        setProjects(Array.isArray(data) ? data : []);
       })
       .catch((err) => setError(err.message));
-  }, [targetProjectId, authHeaders]);
+  }, [authHeaders]);
+
+  useEffect(() => {
+    setSelectedId((current) => String(pickProject(projects, targetProjectId ?? current)?.id ?? ''));
+  }, [projects, targetProjectId]);
 
   const weekStartStr = useMemo(() => formatDateStr(currentMonday), [currentMonday]);
   // Tracks the week the user is actually viewing right now. Assigned during
@@ -310,7 +310,7 @@ export function TimelineLogsPage() {
           <span>Project Name</span>
           <select
             value={selectedId}
-            onChange={(e) => setSelectedId(e.target.value)}
+            onChange={(e) => chooseProject(e.target.value)}
           >
             <option value="">Select project</option>
             {projects.map((project) => (

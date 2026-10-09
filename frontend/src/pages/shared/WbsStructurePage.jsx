@@ -1,10 +1,11 @@
 import { Copy, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { wbsBlueprintsApi } from '../../api/wbsBlueprints';
 import { API_BASE_URL } from '../../api/client';
 import { useAuth } from '../../AuthContext';
+import { pickProject, useProjectChoice } from '../../hooks/currentProject';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { InlineEditCell } from '../../components/InlineEditCell';
 import { BlueprintDialog } from '../lead/BlueprintDialog';
@@ -57,6 +58,9 @@ export function WbsStructurePage() {
 
   const [projects, setProjects] = useState([]);
   const [selectedId, setSelectedId] = useState('');
+  const [searchParams] = useSearchParams();
+  const requestedId = searchParams.get('projectId');
+  const chooseProject = useProjectChoice(selectedId, setSelectedId);
   const [tasks, setTasks] = useState([]);
   const [engineers, setEngineers] = useState([]);
   const [error, setError] = useState('');
@@ -110,15 +114,15 @@ export function WbsStructurePage() {
         if (!active) return;
         const projectList = Array.isArray(projs) ? projs : [];
         setProjects(projectList);
-        setSelectedId((current) => {
-          if (projectList.some((project) => String(project.id) === String(current))) return current;
-          return projectList[0] ? String(projectList[0].id) : '';
-        });
       }).catch((err) => {
         if (active) setError(err.message);
       });
     return () => { active = false; };
   }, [authHeaders]);
+
+  useEffect(() => {
+    setSelectedId((current) => String(pickProject(projects, requestedId ?? current)?.id ?? ''));
+  }, [projects, requestedId]);
 
   useEffect(() => {
     let active = true;
@@ -766,7 +770,7 @@ export function WbsStructurePage() {
         </div>
         <label className="project-switcher">
           <span>Project Name</span>
-          <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
+          <select value={selectedId} onChange={(e) => chooseProject(e.target.value)}>
             <option value="">Select project</option>
             {projects.map((project) => <option key={project.id} value={project.id}>{project.project_name}</option>)}
           </select>

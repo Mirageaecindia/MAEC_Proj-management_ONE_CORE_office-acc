@@ -1,11 +1,12 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { pickProject, rememberProject } from './currentProject';
 import { useProject, useProjects } from './useProjects';
 
 /**
  * The project a page is showing, kept in the URL (`?projectId=`) so links,
  * refreshes and NEXT buttons land on the same project. Without a parameter
- * the most recent project is selected.
+ * the project last shown on any page is selected, else the most recent one.
  *
  * The switcher lists active projects. A project that isn't in that list (an
  * archived one the BU Head opened from Created Projects) is fetched on its own
@@ -16,10 +17,13 @@ export function useProjectSelection() {
   const { data: projects = [], isLoading, error } = useProjects();
 
   const requestedId = searchParams.get('projectId');
-  const listed = requestedId ? projects.find((p) => String(p.id) === requestedId) : projects[0];
+  const listed = requestedId
+    ? projects.find((p) => String(p.id) === requestedId)
+    : (pickProject(projects) ?? undefined);
   const { data: unlisted = null } = useProject(requestedId, { enabled: !isLoading && !listed });
   const project = listed ?? unlisted ?? null;
   const options = !listed && unlisted ? [unlisted, ...projects] : projects;
+  useEffect(() => rememberProject(project?.id), [project?.id]);
 
   const selectProject = useCallback(
     (projectId) =>

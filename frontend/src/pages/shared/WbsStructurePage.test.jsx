@@ -409,3 +409,48 @@ describe('WBS rows (engineer)', () => {
     expect(places).toEqual(['Add a sub-subtask to Risers', 'Duplicate Risers', null, 'Delete Risers']); // no edit
   });
 });
+
+describe('WBS project switcher', () => {
+  const TWO = [
+    { id: 2, project_name: 'Newest', project_code: 'MAEC-002', my_role: 'lead' },
+    { id: 1, project_name: 'test', project_code: 'MAEC-001', my_role: 'lead' },
+  ];
+  beforeEach(() => {
+    localStorage.clear();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url, options) =>
+        /\/api\/projects$/.test(url)
+          ? Promise.resolve(new Response(JSON.stringify(TWO)))
+          : fakeApi(url, options),
+      ),
+    );
+  });
+
+  const openWithoutLink = () =>
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/wbs-structure']}>
+          <WbsStructurePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+  it('stays on the project last worked on, not the newest, after a refresh or a tab change', async () => {
+    localStorage.setItem('promanage.projectId', '1');
+    openWithoutLink();
+
+    const switcher = await screen.findByRole('combobox', { name: 'Project Name' });
+    await vi.waitFor(() => expect(switcher.value).toBe('1'), WAIT);
+
+    fireEvent.change(switcher, { target: { value: '2' } });
+    await vi.waitFor(() => expect(localStorage.getItem('promanage.projectId')).toBe('2'), WAIT);
+    cleanup();
+
+    openWithoutLink(); // the page opened again: still the project just chosen
+    await vi.waitFor(
+      () => expect(screen.getByRole('combobox', { name: 'Project Name' }).value).toBe('2'),
+      WAIT,
+    );
+  });
+});
