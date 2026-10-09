@@ -1,5 +1,6 @@
 import { Bell } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMarkNotificationRead, useNotifications } from '../hooks/useNotifications';
 import { formatDateTime } from '../utils/format';
 
@@ -9,6 +10,13 @@ export function NotificationBell() {
   const panelRef = useRef(null);
   const { data: notifications = [] } = useNotifications();
   const markRead = useMarkNotificationRead();
+  const navigate = useNavigate();
+  // A notification with a page (e.g. a finished subtask's day in the weekly log): open it, and it counts as read.
+  const openNotification = (notification) => {
+    if (!notification.is_read) markRead.mutate(notification.id);
+    setOpen(false);
+    navigate(notification.link);
+  };
   const unread = notifications.filter((notification) => !notification.is_read);
 
   useEffect(() => {
@@ -56,7 +64,18 @@ export function NotificationBell() {
                   )}
                 </div>
                 <p>{notification.message}</p>
-                <small>{formatDateTime(notification.created_at)}</small>
+                <div className="notification-item-foot">
+                  <small>{formatDateTime(notification.created_at)}</small>
+                  {notification.link && (
+                    <button
+                      type="button"
+                      className="notification-open"
+                      onClick={() => openNotification(notification)}
+                    >
+                      Open
+                    </button>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

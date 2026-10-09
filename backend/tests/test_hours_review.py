@@ -106,7 +106,7 @@ def test_only_a_finished_day_is_reviewed(client, db, make, world, split):
 
     refused = _row(client, world.lead_h, today.id)
 
-    assert refused.status_code == 409 and "once it is over" in refused.json()["detail"]
+    assert refused.status_code == 409 and "once the day is over" in refused.json()["detail"]
     this_week = today_utc() - timedelta(days=today_utc().weekday())
     rows = client.get(f"/api/projects/{project_id}/timesheet?week_start={this_week}", headers=world.lead_h).json()
     assert next(r for r in rows if r["id"] == today.id)["can_review"] is False

@@ -61,6 +61,7 @@ from app.services.governance_monitor import enforce_governance
 from app.services.hours_review import (
     NOT_YOUR_HOURS,
     HoursReview,
+    notify_subtask_done,
     row_key,
     sessions_by_row,
     tasks_by_id,
@@ -778,7 +779,7 @@ def time_entries_output(db: Session, entries: list, project: models.Project, use
     for entry in entries:
         task = tasks.get(entry.task_id)
         employee = employees.get(entry.employee_id)
-        finished = entry.work_date < review.today and not review.session_open(entry)
+        finished = review.ready(entry, task) is None  # Done, or the day is over
         row_sessions = sessions.get(row_key(entry), [])
         unattended = trimmed_hours(row_sessions) if entry.trimmed_hours is None else 0
         out.append({
@@ -1761,6 +1762,7 @@ def update_wbs_node(
         duplicate = db.query(models.WbsNode).filter(models.WbsNode.project_id == node.project_id, models.WbsNode.wbs_code == payload.wbs_code, models.WbsNode.id != node_id).first()
     if duplicate:
         raise HTTPException(status_code=409, detail="WBS code already exists in this project.")
+    became_done = payload.deliverable_status == "Done" and node.deliverable_status != "Done"
     # Started or finished work keeps its plan (decided 2026-10-08): its engineer, hours and dates
     # change only after a lead moves it back to To Do.
     if node.deliverable_status != TO_DO:
@@ -1792,6 +1794,8 @@ def update_wbs_node(
     if payload.phase is not None:
         node.phase = payload.phase
     end_sessions_if_done(db, node)
+    if became_done and node.parent_id is not None:
+        notify_subtask_done(db, node, user, today_utc())
     db.commit()
     if phase_changed:
         cascade_phase(db, node.id, node.phase)
@@ -2257,6 +2261,8 @@ def advance_wbs_node_status(
     if is_subtask and payload.new_status == "Done" and node.actual_end_datetime is None:
         node.actual_end_datetime = datetime.now(timezone.utc)
     end_sessions_if_done(db, node)  # Done takes no more time: whoever is logged in to it is logged out
+    if is_subtask and payload.new_status == "Done":
+        notify_subtask_done(db, node, user, today_utc())  # after the logout: its hours are all in
 
     history_entry = models.WbsNodeHistory(
         node_id=node_id,

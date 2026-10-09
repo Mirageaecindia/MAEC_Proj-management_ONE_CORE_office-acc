@@ -8,8 +8,11 @@ Hours are approved per day, per subtask, per engineer:
    over, or the lead is the engineer themselves): the BU Head.
 Nobody approves their own hours, and no hours are left without a reviewer.
 
-Only finished days are reviewed, and only once every session the engineer
-started on that day has closed, so a reviewed row never changes afterwards.
+A row is reviewed once it can no longer change: as soon as its subtask is Done
+(Done logs the engineer out of it and takes no more time; decided 2026-10-09), or
+otherwise once its day is over and every session started that day has closed.
+The day's total (the 8-hour mark, "Approve week") still waits for the day to end.
+The reviewer is notified when a subtask is Done (`notify_subtask_done`).
 Usage counts each day as it is approved; the week is nothing more than the sum
 of its days.
 
@@ -36,7 +39,9 @@ from app.domain.timesheets import (
     review_transition,
     reviewable,
 )
+from app.domain.wbs import DONE, is_sub_subtask
 from app.repositories.tracking import ACTIVE, ENDED
+from app.services import notifications as notify
 from app.services.tracking import unattended_seconds
 
 BU_HEAD = None  # reviewer id meaning "the BU Head"
@@ -44,7 +49,7 @@ NOT_YOUR_HOURS = (
     "These hours are approved by the task's lead, or by the BU Head when the task has no active lead "
     "or they are a project lead's own."
 )
-DAY_NOT_OVER = "A day is reviewed once it is over (yesterday or earlier)."
+DAY_NOT_OVER = "These hours can be reviewed once the subtask is Done, or once the day is over."
 REAPPROVED_ONCE = "These hours were rejected and approved again once already. From here only the BU Head decides them."
 SESSION_STILL_OPEN = (
     "The engineer is still logged in to a session started on that day. Review it once the session has closed."
@@ -119,8 +124,26 @@ class HoursReview:
             )
         }
         self._active_leads = {user_id for user_id, employee_id in rows if employee_id not in ended}
-        open_sessions = db.query(models.TimeSession.employee_id, models.TimeSession.login_at).filter_by(status=ACTIVE)
-        self._open_days = {(employee_id, as_utc(login_at).date()) for employee_id, login_at in open_sessions}
+        open_sessions = db.query(
+            models.TimeSession.employee_id, models.TimeSession.subtask_id, models.TimeSession.login_at
+        ).filter_by(status=ACTIVE)
+        self._open_days, self._open_subtasks = set(), set()
+        for employee_id, subtask_id, login_at in open_sessions:
+            self._open_days.add((employee_id, as_utc(login_at).date()))
+            self._open_subtasks.add((employee_id, subtask_id))
+
+    def ready(self, entry: models.TimeLogEntry, task: models.WbsNode | None) -> str | None:
+        """Why the row can't be reviewed yet, or None when it can: its subtask is Done (no more
+        time can come), or its day is over and no session from that day is still running."""
+        if (entry.employee_id, entry.task_id) in self._open_subtasks:
+            return SESSION_STILL_OPEN
+        if task is not None and task.deliverable_status == DONE:
+            return None
+        if not reviewable(entry.work_date, self.today):
+            return DAY_NOT_OVER
+        if self.session_open(entry):
+            return SESSION_STILL_OPEN
+        return None
 
     def session_open(self, entry: models.TimeLogEntry) -> bool:
         """The engineer still has a session running that started on the row's day."""
@@ -163,10 +186,8 @@ class HoursReview:
         """One decision on one day's hours. The caller checks the project lock and commits."""
         if not self.may_decide(user, entry, task):
             raise ForbiddenError(REAPPROVED_ONCE if entry.reapproved_at is not None else NOT_YOUR_HOURS)
-        if not reviewable(entry.work_date, self.today):
-            raise ConflictError(DAY_NOT_OVER)
-        if self.session_open(entry):
-            raise ConflictError(SESSION_STILL_OPEN)
+        if waiting := self.ready(entry, task):
+            raise ConflictError(waiting)
         problem = review_transition(entry.approval_status, action, reason)
         if problem == REASON_REQUIRED:
             raise BadRequestError(problem)
@@ -249,3 +270,44 @@ class HoursReview:
         for entry in decided:
             self.review(user, entry, tasks.get(entry.task_id), action, reason, now)
         return len(decided), len(over), len(unattended)
+
+
+SUBTASK_DONE = "subtask_done"  # notification type
+
+
+def notify_subtask_done(db: Session, node: models.WbsNode, actor: models.User, today: date) -> None:
+    """A subtask just became Done: tell whoever reviews its hours (the task's lead, or the BU Head
+    for a lead's own work) that it is ready, with a link to that day in the engineer's weekly log.
+    Nobody is notified of their own action. Sub-subtasks take no hours and notify nobody. Caller commits."""
+    if node.parent_id is None or node.assigned_engineer_id is None:
+        return
+    parent = db.get(models.WbsNode, node.parent_id)
+    if is_sub_subtask(parent):
+        return
+    project = db.get(models.Project, node.project_id)
+    if project is None:
+        return
+    db.flush()  # the time Done just banked (sessions it ended) counts below
+    reviewer = HoursReview(db, project, today).reviewer(parent, node.assigned_engineer_id)
+    pending = sum(
+        float(hours or 0)
+        for (hours,) in db.query(models.TimeLogEntry.hours).filter_by(
+            task_id=node.id, employee_id=node.assigned_engineer_id, approval_status=PENDING_REVIEW
+        )
+    )
+    employee = db.get(models.Employee, node.assigned_engineer_id)
+    who = employee.name if employee else "An engineer"
+    label = f"{node.wbs_code or ''} {node.task_name}".strip()
+    hours = f"{pending:g} h waiting for your review" if pending else "no hours waiting for review"
+    week = today - timedelta(days=today.weekday())
+    link = f"/weekly-logs?projectId={project.id}&employeeId={node.assigned_engineer_id}&weekStart={week.isoformat()}"
+    title = f"Subtask done: {label}"
+    message = f"{who} finished {label} on {project.project_name}: {hours}."
+    actor_name = actor.full_name or actor.username
+    if reviewer is BU_HEAD:
+        if actor.role != Role.BU_HEAD:
+            notify.notify_role(db, Role.BU_HEAD, SUBTASK_DONE, title, message, project.id, actor_name, link=link)
+    elif reviewer != actor.id:
+        notify.notify_users(
+            db, [reviewer], Role.ENGINEER, SUBTASK_DONE, title, message, project.id, actor_name, link=link
+        )

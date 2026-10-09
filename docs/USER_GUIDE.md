@@ -244,6 +244,15 @@ Hours are recorded **per subtask and per day**, and approved **per day** by the
 lead of the task they were worked on. There is no week submission: the week is
 just the sum of its days.
 
+- **A subtask is reviewable as soon as it is Done**, the same day: Done logs the engineer out of it and
+  it takes no more time. Otherwise a day is reviewable once it is over. The day's total (the 8-hour
+  mark, **Approve week**) still waits for the day to end.
+- **Done tells the reviewer:** when an engineer sets a subtask to Done, the task's lead gets a
+  notification ("Subtask done: … 3 h waiting for your review"); a lead's own subtask goes to the BU Head.
+  **Open** in the notification goes to that day in the engineer's weekly log. Nobody is notified of their own action.
+- If a lead reopens a Done subtask whose hours were already reviewed today, it takes no more time that
+  day (a reviewed day never changes): Login on it works again from tomorrow.
+
 - The weekly sheet shows each engineer's hours per day, coloured by that day's
   status, with the week's status and e.g. **"2 of 3 days approved"**.
 - **Approve week** on an engineer's row approves every pending, finished day of

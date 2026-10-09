@@ -37,6 +37,7 @@ def notification_output(notification: models.Notification) -> dict:
         "project_id": notification.project_id,
         "actor_name": notification.actor_name,
         "is_read": notification.is_read,
+        "link": notification.link,
         "created_at": notification.created_at.isoformat() if notification.created_at else None,
     }
 
@@ -49,8 +50,9 @@ def notify_role(
     message: str,
     project_id: int | None = None,
     actor_name: str | None = None,
+    link: str | None = None,
 ) -> models.Notification:
-    """One notification visible to every user of `role`. Caller commits."""
+    """One notification visible to every user of `role`; `link` is a page to open. Caller commits."""
     notification = models.Notification(
         recipient_role=role,
         notification_type=notification_type,
@@ -58,6 +60,7 @@ def notify_role(
         message=message,
         project_id=project_id,
         actor_name=actor_name,
+        link=link,
     )
     db.add(notification)
     db.flush()
@@ -73,6 +76,7 @@ def notify_users(
     message: str,
     project_id: int | None = None,
     actor_name: str | None = None,
+    link: str | None = None,
 ) -> None:
     """One notification per distinct user id (None ids are skipped). Caller commits."""
     for user_id in sorted({uid for uid in user_ids if uid}):
@@ -85,6 +89,7 @@ def notify_users(
                 message=message,
                 project_id=project_id,
                 actor_name=actor_name,
+                link=link,
             )
         )
     db.flush()

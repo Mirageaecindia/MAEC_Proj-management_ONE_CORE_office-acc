@@ -253,7 +253,7 @@ describe('Reviewing days on the Engineer Weekly Logs page', () => {
     renderPage();
 
     expect(await screen.findByText('6 h not approved (unattended)')).toBeTruthy();
-    expect(screen.getByText('Reviewable from tomorrow.')).toBeTruthy();
+    expect(screen.getByText('Reviewable once the subtask is Done, or from tomorrow.')).toBeTruthy();
   });
 
   it('taking approved hours back asks for a reason and shows it', async () => {

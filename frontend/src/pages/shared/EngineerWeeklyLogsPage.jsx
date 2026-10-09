@@ -294,7 +294,7 @@ export function EngineerWeeklyLogsPage() {
                         {pending && !entry.finished && (
                           <small className="review-progress">
                             {entry.work_date === todayUtc
-                              ? 'Reviewable from tomorrow.'
+                              ? 'Reviewable once the subtask is Done, or from tomorrow.'
                               : 'Reviewable once the session still running from that day has closed.'}
                           </small>
                         )}

@@ -84,6 +84,10 @@ PROJECT_ARCHIVED = "project_archived"  # the BU Head archived the project while 
 SUBTASK_DONE = "subtask_done"  # the subtask was set to Done while the engineer was logged in
 SUBTASK_IS_DONE = "This subtask is Done, so no more time can be logged on it."
 STARTED_WITH_LOGIN = "Started with Login"
+ALREADY_REVIEWED_TODAY = (
+    "Your hours on this subtask today were already reviewed, so it takes no more time today. "
+    "Log in to it again tomorrow, or work on another subtask."
+)
 NOT_FOR_TIME = "Sub-subtasks are for reference only: log in on the subtask above it."
 
 
@@ -389,6 +393,18 @@ class TrackingService:
             return ForbiddenError("You can only log in to subtasks assigned to you.")
         if is_finished(node.deliverable_status):
             return ConflictError(SUBTASK_IS_DONE)
+        reviewed = (
+            self.db.query(models.TimeLogEntry.id)
+            .filter(
+                models.TimeLogEntry.task_id == node.id,
+                models.TimeLogEntry.employee_id == user.employee_id,
+                models.TimeLogEntry.work_date == utcnow().date(),
+                models.TimeLogEntry.approval_status != PENDING_REVIEW,
+            )
+            .first()
+        )
+        if reviewed is not None:  # reviewed once Done, then reopened: a reviewed row never changes
+            return ConflictError(ALREADY_REVIEWED_TODAY)
         project = self.sessions.project(node.project_id)
         if project is None or not user_can_access_project(self.db, user, project):
             return ForbiddenError(NO_PROJECT_ACCESS)

@@ -189,6 +189,7 @@ class Notification(Base):
     message = Column(Text, nullable=True)
     project_id = Column(Integer, nullable=True, index=True)
     actor_name = Column(String(150), nullable=True)
+    link = Column(String(300), nullable=True)  # a page in the app to open, e.g. the weekly log of a day
     is_read = Column(Boolean, nullable=False, default=False)
     created_at = Column(UTCDateTime, server_default=func.now())
 
