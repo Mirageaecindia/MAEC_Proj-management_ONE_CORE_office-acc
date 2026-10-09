@@ -1566,6 +1566,21 @@ def validate_subtask_rules(estimated_hours, start_date, end_date):
         )
 
 
+def cascade_engineer(db: Session, task: models.WbsNode, previous_engineer_id: int | None) -> None:
+    """A task's engineer carries down (decided 2026-10-09): its subtasks and their steps that had no
+    engineer, or had the task's previous one, take the new one. One given to someone else on purpose
+    keeps them, and started or finished work keeps its plan. Each can be changed afterwards."""
+    following = {None, previous_engineer_id}
+    level, frontier = [task.id], True
+    while frontier:  # subtasks, then their sub-subtasks
+        children = db.query(models.WbsNode).filter(models.WbsNode.parent_id.in_(level)).all()
+        for child in children:
+            if child.deliverable_status == TO_DO and child.assigned_engineer_id in following:
+                child.assigned_engineer_id = task.assigned_engineer_id
+        level = [child.id for child in children]
+        frontier = bool(level)
+
+
 def cascade_phase(db: Session, parent_id: int, phase: str):
     for child in db.query(models.WbsNode).filter_by(parent_id=parent_id).all():
         if child.phase != phase:
@@ -1773,8 +1788,11 @@ def update_wbs_node(
                 detail=f"'{node.task_name}' is {node.deliverable_status}: its engineer, hours and dates stay as they "
                 "are. Move it back to To Do first to change them.",
             )
+    previous_engineer = node.assigned_engineer_id
     for field, value in payload.model_dump(exclude={"subtask", "phase", "parent_id"}).items():
         setattr(node, field, value)
+    if node.parent_id is None and node.assigned_engineer_id != previous_engineer:
+        cascade_engineer(db, node, previous_engineer)
     parent = db.get(models.WbsNode, node.parent_id) if node.parent_id is not None else None
     if is_sub_subtask(parent):
         node.estimated_hours = None  # for reference: no estimate
