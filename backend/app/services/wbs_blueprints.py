@@ -23,7 +23,7 @@ BLUEPRINT_DIR = Path(__file__).resolve().parents[1] / "blueprints"
 BLUEPRINTS: dict[str, tuple[str, str]] = {
     "space-planning": ("Space Planning", "space_planning.xlsx"),
     "str-coordination": ("STR Coordination", "str_coordination.xlsx"),
-    "id-coordination": ("ID Coordination", "id_coordination.xlsx"),
+    "id-rcp-coordination": ("ID - RCP Coordination", "id_coordination.xlsx"),
     "boh-area-rcp-coordination": ("BoH Area RCP Coordination", "boh_area_rcp_coordination.xlsx"),
     "submission": ("Submission", "submission.xlsx"),
 }

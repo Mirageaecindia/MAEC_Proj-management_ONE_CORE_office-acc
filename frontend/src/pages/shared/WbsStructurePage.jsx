@@ -12,7 +12,7 @@ import { countWorkingDays, plannedHoursForRange } from '../../lib/hours';
 import { canDelete, describeCount, impliedSelection, summarizeSelection } from '../../utils/wbsSelection';
 
 
-const PHASES = ['Space Planning', 'STR Coordination', 'ID Coordination', 'BoH Area RCP Coordination', 'Submission'];
+const PHASES = ['Space Planning', 'STR Coordination', 'ID - RCP Coordination', 'BoH Area RCP Coordination', 'Submission'];
 
 const EMPTY_NODE = {
   wbs_code: '',

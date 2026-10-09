@@ -3,6 +3,8 @@ from typing import Literal, List, Optional
 
 from pydantic import Field, BaseModel, ConfigDict, field_validator, model_validator
 
+from app.domain.wbs import PHASES, current_phase
+
 PROJECT_TYPES = {
     "MEP Design",
     "Structural Design",
@@ -12,7 +14,7 @@ PROJECT_TYPES = {
     "Other",
 }
 
-WBS_PHASES = ("Space Planning", "STR Coordination", "ID Coordination", "BoH Area RCP Coordination", "Submission")
+WBS_PHASES = PHASES
 
 WBS_TASK_STATUSES = ["To Do", "In-Progress", "Submitted for Approval", "Approved"]
 WBS_SUBTASK_STATUSES = ["To Do", "In-Progress", "Done"]
@@ -339,8 +341,8 @@ class WbsNodeBase(BaseModel):
     def phase_is_fixed(cls, value):
         if value is None or not str(value).strip():
             return None
-        phase = str(value).strip()
-        if phase not in WBS_PHASES:
+        phase = current_phase(value)  # an old phase name is taken under its new one
+        if phase is None:
             raise ValueError("Phase must be one of the five fixed phases.")
         return phase
 

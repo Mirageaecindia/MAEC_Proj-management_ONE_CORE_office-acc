@@ -129,7 +129,7 @@ def test_unnamed_merged_blocks_take_the_phase_by_position(client, db, world):
         {
             "_1": [("Load estimate", True), ("Substations", False)],
             "_2": [("Plinths", True)],
-            "ID Coordination": [("LV strategy", True)],
+            "ID - RCP Coordination": [("LV strategy", True)],
             "BOH Area RCP Coordination": [("Ceilings", True)],
             "Submission": [("Package", True)],
         }
@@ -141,7 +141,7 @@ def test_unnamed_merged_blocks_take_the_phase_by_position(client, db, world):
     assert [(phase, name) for phase, _, name, parent in _tree(db, project_id) if parent is None] == [
         ("Space Planning", "Load estimate"),
         ("STR Coordination", "Plinths"),
-        ("ID Coordination", "LV strategy"),
+        ("ID - RCP Coordination", "LV strategy"),
         ("BoH Area RCP Coordination", "Ceilings"),
         ("Submission", "Package"),
     ]
@@ -158,3 +158,22 @@ def test_a_bad_number_in_the_csv_is_reported_with_its_row(client, world):
 
     assert response.status_code == 422
     assert "Row 2: Parent Id, Assigned Engineer Id and Estimated Hours must be numbers" in response.json()["detail"]
+
+
+def test_the_old_phase_name_is_still_taken_under_the_new_one(client, world):
+    """'ID Coordination' was renamed 'ID - RCP Coordination' (2026-10-09): old workbooks and calls still work."""
+    project_id = world.create_project()["id"]
+    workbook = write_template({"ID Coordination": [("LV strategy", True), ("LV schematics", False)]})
+
+    response = _upload(client, world, project_id, workbook)
+    listed = client.get(f"/api/projects/{project_id}/wbs-structure", headers=world.lead_h).json()
+
+    assert response.status_code == 200, response.text
+    assert {n["phase"] for n in listed} == {"ID - RCP Coordination"}
+    node = client.post(
+        f"/api/projects/{project_id}/wbs-nodes",
+        json={"task_name": "RCP check", "phase": "ID Coordination"},
+        headers=world.lead_h,
+    )
+    assert node.status_code == 201, node.text
+    assert node.json()["phase"] == "ID - RCP Coordination"

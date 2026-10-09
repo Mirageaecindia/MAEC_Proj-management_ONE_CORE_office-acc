@@ -8,7 +8,7 @@ import { RejectedHoursPanel } from '../../features/hours/RejectedHours';
 import { DAY_KEYS, DAY_LEGEND, HOURS_STATUS_LABELS, HOURS_STATUS_PILL, bulkNotice, describeTotals, groupByEngineer, isOverMark, summarizeWeek } from '../../utils/hours';
 import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 
-const WBS_PHASES = ['Space Planning', 'STR Coordination', 'ID Coordination', 'BoH Area RCP Coordination'];
+const WBS_PHASES = ['Space Planning', 'STR Coordination', 'ID - RCP Coordination', 'BoH Area RCP Coordination'];
 const INITIAL_VIEWPORT_START = new Date(2026, 8, 1);
 const INITIAL_VIEWPORT_END = new Date(2026, 11, 31, 23, 59, 59);
 const INITIAL_VIEWPORT_MONTH_COUNT =

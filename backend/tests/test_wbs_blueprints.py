@@ -79,10 +79,10 @@ def test_only_the_projects_leads_add_blueprints(client, world):
 def test_adding_a_blueprint_is_in_the_audit_log(client, world):
     project_id = world.create_project()["id"]
 
-    client.post(ADD.format(project_id, "id-coordination"), headers=world.lead_h)
+    client.post(ADD.format(project_id, "id-rcp-coordination"), headers=world.lead_h)
 
     latest = client.get("/api/audit/mine", headers=world.lead_h).json()["events"][0]
-    assert latest["summary"] == "Added the id coordination blueprint"
+    assert latest["summary"] == "Added the ID - RCP Coordination blueprint"
     assert latest["project_id"] == project_id
 
 

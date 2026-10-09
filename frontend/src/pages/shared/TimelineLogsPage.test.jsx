@@ -60,7 +60,7 @@ const NODES = [
     wbs_code: null,
     task_name: 'task 2',
     deliverable_status: 'Not Started',
-    phase: 'ID Coordination',
+    phase: 'ID - RCP Coordination',
     assigned_engineer_id: 3,
     start_date: '2026-09-24',
     end_date: '2026-10-10',
@@ -73,7 +73,7 @@ const NODES = [
     wbs_code: null,
     task_name: 'subtask 2',
     deliverable_status: 'Done',
-    phase: 'ID Coordination',
+    phase: 'ID - RCP Coordination',
     assigned_engineer_id: 3,
     start_date: '2026-09-25',
     end_date: '2026-09-25',
@@ -140,7 +140,7 @@ const TIMELINE = {
     {
       id: 3,
       task_name: 'task 2',
-      phase: 'ID Coordination',
+      phase: 'ID - RCP Coordination',
       deliverable_status: 'Not Started',
       start_date: '2026-09-24',
       end_date: '2026-10-10',
@@ -148,14 +148,14 @@ const TIMELINE = {
     {
       id: 4,
       task_name: 'subtask 2',
-      phase: 'ID Coordination',
+      phase: 'ID - RCP Coordination',
       deliverable_status: 'Done',
       start_date: '2026-09-25',
       end_date: '2026-09-25',
     },
   ],
   phases: [
-    { phase: 'ID Coordination', total_tasks: 2, completed_tasks: 1, percent_complete: 50 },
+    { phase: 'ID - RCP Coordination', total_tasks: 2, completed_tasks: 1, percent_complete: 50 },
     { phase: 'Space Planning', total_tasks: 2, completed_tasks: 1, percent_complete: 50 },
   ],
 };

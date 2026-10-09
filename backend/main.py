@@ -35,6 +35,7 @@ from app.domain.wbs import (
     TO_DO,
     by_code,
     child_prefix,
+    current_phase,
     is_finished,
     is_sub_subtask,
     next_code,
@@ -2026,8 +2027,8 @@ async def upload_wbs(
         if requested_phase:
             phase = requested_phase
         else:
-            phase = phase_raw if phase_raw in schemas.WBS_PHASES else "Space Planning"
-            if phase_raw and phase_raw not in schemas.WBS_PHASES:
+            phase = current_phase(phase_raw) or "Space Planning"
+            if phase_raw and current_phase(phase_raw) is None:
                 raise HTTPException(status_code=422, detail=f"Phase '{phase_raw}' is not one of the five fixed phases.")
         engineer_id = engineer_id_raw
         if engineer_id is None and normalized.get("assigned_engineer"):

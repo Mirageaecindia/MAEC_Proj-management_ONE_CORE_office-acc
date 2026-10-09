@@ -91,8 +91,10 @@ def _target(db: Session, path_params: dict, body: dict, before: Before) -> tuple
         return f"{who} on {entry.work_date.isoformat()} ({task})", entry.project_id
     if (user_id := number(path_params.get("user_id"))) is not None:
         return person_label(db.get(models.User, user_id)), project_id
-    if phase := path_params.get("phase"):  # a phase blueprint: "space-planning" -> "space planning"
-        return str(phase).replace("-", " "), project_id
+    if phase := path_params.get("phase"):  # a phase blueprint, by its phase's name
+        from app.services.wbs_blueprints import BLUEPRINTS
+
+        return BLUEPRINTS.get(str(phase), (str(phase).replace("-", " "),))[0], project_id
     if (booking_id := number(path_params.get("booking_id"))) is not None:
         booking = db.get(models.ResourceBooking, booking_id)
         employee = db.get(models.Employee, booking.employee_id) if booking else None

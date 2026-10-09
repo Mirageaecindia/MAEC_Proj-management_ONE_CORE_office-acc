@@ -97,7 +97,7 @@ def seed_and_verify():
                 WbsNode(
                     project_id=project_id, wbs_code="WBS 2.1", task_name="BIM Modeling",
                     assigned_lead="Mohan Daniel", estimated_hours=160, deliverable_status="Not Started",
-                    start_date=date(2026, 11, 1), target_due_date=date(2026, 12, 15), phase="ID Coordination",
+                    start_date=date(2026, 11, 1), target_due_date=date(2026, 12, 15), phase="ID - RCP Coordination",
                 ),
                 WbsNode(
                     project_id=project_id, wbs_code="WBS 3.1", task_name="BoH Area RCP Coordination",

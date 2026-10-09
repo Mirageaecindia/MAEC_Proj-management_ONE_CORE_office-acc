@@ -10,7 +10,7 @@ const WAIT = { timeout: 5000 };
 const PHASES = [
   'Space Planning',
   'STR Coordination',
-  'ID Coordination',
+  'ID - RCP Coordination',
   'BoH Area RCP Coordination',
   'Submission',
 ];
@@ -214,7 +214,7 @@ describe('WBS phase cards (lead)', () => {
   );
 
   it('the phase name still adds a single task by hand, with the phase chosen', async () => {
-    const phase = 'ID Coordination';
+    const phase = 'ID - RCP Coordination';
     renderPage();
     const filePicker = vi.spyOn(HTMLInputElement.prototype, 'click');
 

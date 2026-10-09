@@ -11,6 +11,19 @@ Older code and the Excel upload used other names ("Not Started",
 import re
 from collections.abc import Callable, Iterable
 
+# The five fixed phases, in order (WBS_PHASES in schemas, the outline workbook, the blueprints).
+PHASES = ("Space Planning", "STR Coordination", "ID - RCP Coordination", "BoH Area RCP Coordination", "Submission")
+# A renamed phase keeps its old name as an alias: old workbooks and old API calls still work.
+RENAMED_PHASES = {"ID Coordination": "ID - RCP Coordination"}  # 2026-10-09
+
+
+def current_phase(name) -> str | None:
+    """The phase by its current name (an old name is taken too), or None when it is not a phase."""
+    text = str(name or "").strip()
+    text = RENAMED_PHASES.get(text, text)
+    return text if text in PHASES else None
+
+
 TO_DO = "To Do"
 IN_PROGRESS = "In-Progress"
 SUBMITTED = "Submitted for Approval"

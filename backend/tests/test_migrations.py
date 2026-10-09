@@ -54,3 +54,27 @@ def test_database_created_before_alembic_is_refused(tmp_path):
         migrate(old)
 
     assert "alembic_version" not in inspect(old).get_table_names()  # untouched
+
+
+def test_renaming_id_coordination_moves_existing_items_and_back(tmp_path):
+    """0021: WBS items of 'ID Coordination' take its new name, 'ID - RCP Coordination'."""
+    from alembic import command
+
+    url = f"sqlite:///{tmp_path / 'rename.db'}"
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    db = create_engine(url)
+    with db.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.upgrade(cfg, "0020")
+        connection.exec_driver_sql(
+            "INSERT INTO wbs_nodes (project_id, task_name, deliverable_status, phase) VALUES "
+            "(1, 'RCP check', 'To Do', 'ID Coordination'), (1, 'Plinths', 'To Do', 'STR Coordination')"
+        )
+        command.upgrade(cfg, "0021")
+        phases = sorted(p for (p,) in connection.exec_driver_sql("SELECT phase FROM wbs_nodes"))
+        assert phases == ["ID - RCP Coordination", "STR Coordination"]
+        command.downgrade(cfg, "0020")
+        phases = sorted(p for (p,) in connection.exec_driver_sql("SELECT phase FROM wbs_nodes"))
+        assert phases == ["ID Coordination", "STR Coordination"]

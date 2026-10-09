@@ -24,11 +24,11 @@ from sqlalchemy.orm import Session
 
 import models
 from app.core.errors import BadRequestError
-from app.domain.wbs import TO_DO, child_prefix, next_code
+from app.domain.wbs import PHASES, RENAMED_PHASES, TO_DO, child_prefix, next_code
 
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-PHASES = ("Space Planning", "STR Coordination", "ID Coordination", "BoH Area RCP Coordination", "Submission")
-_PHASE_BY_KEY = {re.sub(r"[^a-z]", "", p.lower()): p for p in PHASES}
+_PHASE_BY_KEY = {re.sub(r"[^a-z]", "", p.lower()): p for p in (*PHASES, *RENAMED_PHASES)}
+_PHASE_BY_KEY = {key: RENAMED_PHASES.get(p, p) for key, p in _PHASE_BY_KEY.items()}  # old names -> new
 
 # The example rows in the downloadable template, per phase: (name, is_task).
 TEMPLATE_ROWS = {
@@ -42,7 +42,7 @@ TEMPLATE_ROWS = {
         ("Provide equipment plinth locations to STR", False),
         ("Review the structure model and highlight clashes", False),
     ],
-    "ID Coordination": [
+    "ID - RCP Coordination": [
         ("Electrical distribution strategy", True),
         ("Obtain the power requirements for VT", False),
         ("Prepare the overall LV schematics", False),
