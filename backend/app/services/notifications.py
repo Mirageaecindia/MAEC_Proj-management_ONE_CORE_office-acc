@@ -26,6 +26,41 @@ BU_HEAD_APPOINTED = "bu_head_appointed"
 BU_HEAD_REMOVED = "bu_head_removed"
 
 
+SUBTASK_DONE = "subtask_done"  # sent with its own link: that day in the engineer's weekly log
+
+# Where each kind of notification opens (decided 2026-10-09), by who receives it: the page where
+# they act on it. `{p}` is the notification's project. A notification created with its own link
+# keeps it. A kind with nothing to open (an archived project, a lead role that ended) has none.
+_BOOKINGS = "/resource-booking?projectId={p}"
+_EXECUTIVE = "/executive-dashboard?projectId={p}"
+_PERFORMANCE = "/engineer-performance-dashboard?projectId={p}"
+LINKS: dict[str, dict[str, str]] = {
+    RESOURCE_BOOKING_APPROVAL: {Role.BU_HEAD: _BOOKINGS},
+    RESOURCE_BOOKING_APPROVED: {Role.ENGINEER: _BOOKINGS},
+    RESOURCE_BOOKING_REJECTED: {Role.ENGINEER: _BOOKINGS},
+    EXTENSION_REQUESTED: {Role.BU_HEAD: _EXECUTIVE},
+    EXTENSION_DECIDED: {Role.ENGINEER: _PERFORMANCE},
+    THRESHOLD_WARNING: {Role.BU_HEAD: _EXECUTIVE, Role.ENGINEER: _PERFORMANCE},
+    EXECUTION_LOCKED: {Role.BU_HEAD: _EXECUTIVE, Role.ENGINEER: _PERFORMANCE},
+    EXECUTION_RESUMED: {Role.BU_HEAD: _EXECUTIVE, Role.ENGINEER: _PERFORMANCE},
+    PROJECT_UNARCHIVED: {Role.ENGINEER: "/wbs-structure?projectId={p}"},
+    PROJECT_LEAD_ASSIGNED: {Role.ENGINEER: _BOOKINGS},
+    BU_HEAD_APPOINTED: {Role.BU_HEAD: "/created-projects"},
+    BU_HEAD_REMOVED: {Role.BU_HEAD: "/created-projects"},
+}
+NO_LINK = frozenset({PROJECT_ARCHIVED, PROJECT_LEAD_REMOVED, SUBTASK_DONE})  # SUBTASK_DONE: its own link
+
+
+def link_for(notification: models.Notification) -> str | None:
+    """The page this notification opens: its own link, else the one for its kind and recipient."""
+    if notification.link:
+        return notification.link
+    template = LINKS.get(notification.notification_type, {}).get(notification.recipient_role)
+    if template is None or ("{p}" in template and notification.project_id is None):
+        return None
+    return template.format(p=notification.project_id)
+
+
 def notification_output(notification: models.Notification) -> dict:
     return {
         "id": notification.id,
@@ -37,7 +72,7 @@ def notification_output(notification: models.Notification) -> dict:
         "project_id": notification.project_id,
         "actor_name": notification.actor_name,
         "is_read": notification.is_read,
-        "link": notification.link,
+        "link": link_for(notification),
         "created_at": notification.created_at.isoformat() if notification.created_at else None,
     }
 

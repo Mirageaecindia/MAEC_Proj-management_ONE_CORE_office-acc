@@ -88,7 +88,7 @@ view. The account badge reads "Lead / Engineer" once you lead any project.
 
 The **bell** in the header (BU Head and project leads) shows notifications: bookings to
 approve, decisions, threshold alerts, locks, archive notices. Open it to read
-them; **Mark read** clears one. A session lasts 12 hours; five wrong passwords lock that
+them; **Mark read** clears one, and **Open** goes to the page where you act on it (bookings to approve: Resource Booking; an extension request or a threshold alert: the dashboard; a finished subtask: that day in the engineer's weekly log) and marks it read. A session lasts 12 hours; five wrong passwords lock that
 username for 15 minutes.
 
 **My activity** (account menu, top right, everyone): what you did in ProManage, newest first:

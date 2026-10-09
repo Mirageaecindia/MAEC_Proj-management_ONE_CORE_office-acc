@@ -272,7 +272,7 @@ class HoursReview:
         return len(decided), len(over), len(unattended)
 
 
-SUBTASK_DONE = "subtask_done"  # notification type
+SUBTASK_DONE = notify.SUBTASK_DONE
 
 
 def notify_subtask_done(db: Session, node: models.WbsNode, actor: models.User, today: date) -> None:
