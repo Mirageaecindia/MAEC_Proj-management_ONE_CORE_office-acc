@@ -318,12 +318,11 @@ describe('Editing in the table (lead)', () => {
     vi.unstubAllGlobals();
   });
 
-  it('assigns an engineer from the cell: pick, then the tick saves', async () => {
+  it('assigns an engineer from the cell: picking a name saves it', async () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Change engineer of Risers' }, WAIT));
     fireEvent.change(screen.getByLabelText('engineer of Risers'), { target: { value: '3' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save engineer of Risers' }));
 
     expect(await screen.findByText('Ravi Kumar', {}, WAIT)).toBeTruthy();
     expect(saved[0].id).toBe(11);
@@ -339,7 +338,6 @@ describe('Editing in the table (lead)', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Change start date of Risers' }, WAIT));
     fireEvent.change(screen.getByLabelText('start date of Risers'), { target: { value: '2026-10-12' } });
-    fireEvent.keyDown(screen.getByLabelText('start date of Risers'), { key: 'Enter' });
 
     await vi.waitFor(() => expect(saved).toHaveLength(1), WAIT);
     expect(saved[0].body).toMatchObject({

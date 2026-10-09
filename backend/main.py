@@ -1546,15 +1546,19 @@ SUBTASK_MIN_HOURS = 1
 SUBTASK_MAX_HOURS = 8  # a whole working day (raised from 4 on 2026-09-29)
 
 
-def validate_subtask_rules(estimated_hours, start_date, end_date):
+def validate_subtask_rules(estimated_hours, start_date, end_date, *, hours_required=True):
     """Enforce the subtask working-time rules that underpin automatic
     tracking: planned hours are required and must be 1-8 whole hours, and a
     subtask is a single-day unit whose Start and End dates must be identical.
 
     Only values explicitly present on the payload are checked, so subtasks
-    that inherit dates from their parent main task keep working.
+    that inherit dates from their parent main task keep working. An edit
+    (`hours_required=False`) may leave the hours unset, e.g. a blueprint subtask
+    given its engineer first; hours that are set are still 1-8.
     """
-    if estimated_hours is None or not (SUBTASK_MIN_HOURS <= estimated_hours <= SUBTASK_MAX_HOURS):
+    if estimated_hours is None and not hours_required:
+        pass
+    elif estimated_hours is None or not (SUBTASK_MIN_HOURS <= estimated_hours <= SUBTASK_MAX_HOURS):
         raise HTTPException(
             status_code=400,
             detail=f"Subtask planned hours must be between {SUBTASK_MIN_HOURS} and {SUBTASK_MAX_HOURS} hours.",
@@ -1800,7 +1804,7 @@ def update_wbs_node(
         merged_hours = payload.estimated_hours if payload.estimated_hours is not None else node.estimated_hours
         merged_start = payload.start_date if payload.start_date is not None else node.start_date
         merged_end = payload.end_date if payload.end_date is not None else node.end_date
-        validate_subtask_rules(merged_hours, merged_start, merged_end)
+        validate_subtask_rules(merged_hours, merged_start, merged_end, hours_required=False)
     else:
         derived = estimated_hours_from_dates(payload.start_date, payload.end_date)
         if derived is not None:

@@ -67,3 +67,19 @@ def test_a_subtask_can_still_be_given_to_someone_else_afterwards(client, db, mak
     assert client.put(f"/api/wbs-nodes/{subtask.id}", json=edit, headers=world.lead_h).status_code == 200
     db.expire_all()
     assert db.get(models.WbsNode, subtask.id).assigned_engineer_id == world.emp2.id
+
+
+def test_a_subtask_without_hours_can_be_given_an_engineer(client, db, make, world):
+    """A blueprint subtask has no hours yet: giving it an engineer first must work; set hours stay 1-8."""
+    project_id = world.create_project()["id"]
+    task = make.wbs_node(project_id, world.lead_e, wbs_code="3.")
+    subtask = make.wbs_node(project_id, world.lead_e, parent_id=task.id, wbs_code="3.1", estimated_hours=None)
+    edit = {"task_name": subtask.task_name, "parent_id": task.id, "start_date": subtask.start_date.isoformat()}
+
+    assigned = client.put(
+        f"/api/wbs-nodes/{subtask.id}", json={**edit, "assigned_engineer_id": world.emp1.id}, headers=world.lead_h
+    )
+    too_many = client.put(f"/api/wbs-nodes/{subtask.id}", json={**edit, "estimated_hours": 12}, headers=world.lead_h)
+
+    assert assigned.status_code == 200, assigned.text
+    assert too_many.status_code == 400 and "between 1 and 8" in too_many.json()["detail"]
