@@ -32,7 +32,11 @@ def test_without_maec_one_s_cookie_the_answer_is_401_with_where_to_sign_in(clien
 def test_core_down_is_503_never_a_pass(client, core, world):
     core.down = True
 
-    for response in (client.get(ME, headers=world.bu_h), client.post(PROJECTS, json={}, headers=world.bu_h)):
+    for response in (
+        client.get(ME, headers=world.bu_h),
+        client.post(PROJECTS, json={}, headers=world.bu_h),
+        client.get("/api/server-date", headers=world.bu_h),  # no session dependency: the gate alone refuses
+    ):
         assert response.status_code == 503
         assert response.json()["detail"] == "MAEC One is unavailable"
 
@@ -135,11 +139,14 @@ def test_the_first_visit_links_the_profile_by_email_and_later_visits_use_the_lin
 def test_an_email_change_in_core_keeps_the_link(client, db, core, make):
     kavya = make.user("kavya@mirageaec.com", "engineer", "Kavya Raman")
     client.get(ME, headers=core.headers(core.sign_in("kavya@mirageaec.com", core_id="core-k")))
-    other = make.user("kavya.r@mirageaec.com", "engineer", "Another Kavya")  # someone already has the new address
 
+    renamed = client.get(ME, headers=core.headers(core.sign_in("k.raman@mirageaec.com", core_id="core-k")))
+    assert renamed.status_code == 200 and renamed.json()["id"] == kavya.id  # by core_user_id: no profile has that email
+
+    other = make.user("kavya.r@mirageaec.com", "engineer", "Another Kavya")  # someone already has the next address
     after = client.get(ME, headers=core.headers(core.sign_in("kavya.r@mirageaec.com", core_id="core-k")))
 
-    assert after.status_code == 200 and after.json()["id"] == kavya.id  # by core_user_id, not the new email
+    assert after.status_code == 200 and after.json()["id"] == kavya.id
     db.refresh(other)
     assert other.core_user_id is None
 
