@@ -1,9 +1,20 @@
-# MAEC ProManage: the whole app in three containers. Needs only Docker on the host.
-#   cp .env.example .env   (then fill it in)
-#   docker compose up -d --build
-# Deployment guide: docs/DEPLOYMENT.md
-
-name: maec
+# MAEC ProManage behind MAEC One's single sign-on: three containers, needing only Docker.
+#
+# Set here, not derived from the folder name: this stack runs NEXT TO what is already on the
+# VPS and must collide with none of it:
+#   - the old Project Management (project "promanage", 127.0.0.1:8081, promanage.mirageaec.com),
+#     left exactly as it is, with its own database volume;
+#   - the old Engineering Tools (project "maec", 127.0.0.1:8080, 172.30.57.0/24);
+#   - MAEC One Core (project "maec-core", 127.0.0.1:8001, 10.231.0.0/24 and 10.231.1.0/24);
+#   - the new Engineering Tools (project "maec-et", 127.0.0.1:8082, 10.231.2.0/24).
+# It is served as pm.mirageaec.com: the host's Caddy terminates TLS and points that name at
+# 127.0.0.1:${PM_PORT}. Nothing here publishes 80 or 443.
+#
+# No docker-compose.override.yml is needed on the server, and none should exist there. Every
+# command passes the settings file explicitly (docs/DEPLOYMENT.md):
+#   docker compose -f docker-compose.yml --env-file .env up -d --build
+# Bring MAEC One Core's stack up first: it answers on maec_core_net, which this stack joins.
+name: maec-pm
 
 x-logging: &logging
   driver: json-file
@@ -20,23 +31,45 @@ services:
       POSTGRES_USER: promanage
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
-      - db-data:/var/lib/postgresql
+      # This stack's own volume (maec-pm_db). Never the old stack's.
+      - db:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U promanage -d promanage"]
       interval: 5s
       timeout: 5s
       retries: 20
+    networks: [pm_net]
     logging: *logging
 
   backend:
     build: ./backend
+    # maec-pm-*, not promanage-* or maec-*: building under another stack's image name would
+    # retag that stack's image, and its next recreate would start THIS code.
+    image: maec-pm-backend:latest
     restart: unless-stopped
+    # Everything else (SharePoint, AUDIT_RETENTION_DAYS) comes from .env too.
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://promanage:${POSTGRES_PASSWORD}@db:5432/promanage
+      # MAEC One's gate: the backend refuses to start without these (app/core/config.py).
+      CORE_URL: ${CORE_URL:?Set CORE_URL in .env}
+      CORE_PUBLIC_URL: ${CORE_PUBLIC_URL:?Set CORE_PUBLIC_URL in .env}
+      MAEC_APP_KEY: ${MAEC_APP_KEY:?Set MAEC_APP_KEY in .env}
+      MAEC_GATE_SECRET: ${MAEC_GATE_SECRET:?Set MAEC_GATE_SECRET in .env}
+      # The only peers whose X-Forwarded-Proto and X-Forwarded-Host are believed
+      # (app/api/proxy.py): pm_net, where the frontend container lives. Built from the same
+      # variable as the subnet below, so the two cannot drift. NOT maec_core_net: Core and
+      # other apps reach this backend directly there, and must not choose its scheme or host.
+      TRUSTED_PROXIES: "${PM_NET_SUBNET:-10.231.3.0/24}"
     volumes:
       # Optional HR seed (employee_leads.csv): copied to the server by hand, never baked into the image.
       - ./backend/data:/app/data:ro
+    expose:
+      - "8000" # internal networks only, never published to the host
+    # pm_net: frontend -> backend -> db. maec_core_net: MAEC One Core's network, where Core
+    # answers as maec-core, so CORE_URL=http://maec-core:8000 and the gate check never
+    # leaves the machine.
+    networks: [pm_net, maec_core_net]
     depends_on:
       db:
         condition: service_healthy
@@ -44,23 +77,45 @@ services:
 
   frontend:
     build: ./frontend
+    image: maec-pm-frontend:latest
     restart: unless-stopped
     environment:
-      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      # The frontend's Caddy passes X-Forwarded-Proto and -Host on only from here
+      # (frontend/Caddyfile): the host's Caddy reaches this container through pm_net's gateway.
+      PM_NET_SUBNET: "${PM_NET_SUBNET:-10.231.3.0/24}"
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - caddy-data:/data
-      - caddy-config:/config
+      # The only port published, and only on the loopback interface: Docker's DNAT rules sit
+      # in front of the host firewall, so a plain "8083:80" would be reachable from the
+      # internet. The host's Caddy, which terminates TLS, reaches it through loopback.
+      # PM_PORT, default 8083: 8080 (old Engineering Tools), 8081 (old Project Management),
+      # 8082 (new Engineering Tools) and 8001 (Core) are taken. The default is the right port,
+      # so it is right even if --env-file is forgotten.
+      - "127.0.0.1:${PM_PORT:-8083}:80"
     depends_on:
       backend:
         condition: service_healthy
+    networks: [pm_net]
     logging: *logging
 
-# The database and the HTTPS certificates survive rebuilds and restarts.
 volumes:
-  db-data:
-  caddy-data:
-  caddy-config:
+  db:
+    name: maec-pm_db
+
+networks:
+  pm_net:
+    name: maec_pm_net
+    driver: bridge
+    # A fixed range, so TRUSTED_PROXIES above can name it. It must overlap none of the old
+    # Engineering Tools' 172.30.57.0/24, Core's 10.231.0.0/24 and 10.231.1.0/24, or the new
+    # Engineering Tools' 10.231.2.0/24. It is in 10.231.x beside them, outside Docker's
+    # default address pools (172.17-31.x, 192.168.x), so a network Docker created on its own
+    # cannot already hold it. Check what the host uses before changing it:
+    #   docker network inspect $(docker network ls -q) --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}}{{end}}'
+    ipam:
+      config:
+        - subnet: "${PM_NET_SUBNET:-10.231.3.0/24}"
+  maec_core_net:
+    # MAEC One Core's network, created once on the host, outside every stack. External: this
+    # stack joins it and never creates or removes it.
+    external: true
+    name: maec_core_net

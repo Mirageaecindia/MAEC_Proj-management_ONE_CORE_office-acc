@@ -25,5 +25,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 
 # One process: importing main runs migrations and seeding, which must not run
 # concurrently. Sync endpoints still run in parallel on uvicorn's thread pool.
-# Only the web container can reach this port, so its forwarded headers are trusted.
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# --no-proxy-headers: X-Forwarded-Proto and -Host are believed only from the peers in
+# TRUSTED_PROXIES, by the app itself (app/api/proxy.py); uvicorn's own list would believe
+# them from anyone, including the other services on MAEC One's network.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]

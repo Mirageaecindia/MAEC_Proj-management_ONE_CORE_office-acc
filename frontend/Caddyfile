@@ -1,7 +1,19 @@
-# SITE_ADDRESS comes from the root .env. A domain name (promanage.example.com)
-# makes Caddy fetch and renew a Let's Encrypt certificate and redirect HTTP to
-# HTTPS; ":80" serves plain HTTP (only for a first test by IP address).
-{$SITE_ADDRESS::80} {
+# The frontend container: serves the built React app and forwards /api to the backend.
+# Plain HTTP on :80 inside the container: no TLS and no certificates here. The host's Caddy
+# terminates TLS for pm.mirageaec.com and reaches this container through 127.0.0.1:${PM_PORT}.
+{
+	auto_https off
+	admin off
+	servers {
+		# X-Forwarded-Proto and X-Forwarded-Host from the host's Caddy are passed through to the
+		# backend unchanged, and believed only from pm_net (where the host's connections arrive,
+		# through its gateway). From anyone else Caddy replaces them with what it saw itself.
+		# The backend needs them: it tells MAEC One the address the browser used.
+		trusted_proxies static {$PM_NET_SUBNET:10.231.3.0/24}
+	}
+}
+
+:80 {
 	encode zstd gzip
 
 	header {

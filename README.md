@@ -47,8 +47,10 @@ copy .env.example .env
 backend\.venv\Scripts\pre-commit.exe install
 ```
 
-### Accounts
-Accounts are created from the command line. See [backend/USERS.md](backend/USERS.md).
+### Signing in
+Nobody signs in to this app: MAEC One Core does, and the API asks it about every request.
+People's profiles here (role, employee record) are managed by a BU Head under People. See
+[backend/USERS.md](backend/USERS.md).
 
 ## Running locally
 ```powershell
@@ -63,17 +65,21 @@ cd backend
 cd backend
 ..\.venv\Scripts\python.exe -m uvicorn main:app --reload
 
-# terminal 2 — web app on http://localhost:5173
+# terminal 2 — web app; open it at http://pm.maec.local:5173 (not localhost)
 cd frontend
 npm run dev
 ```
 The database defaults to `backend/promanage.db` wherever you start uvicorn from.
-Set `DATABASE_URL` in `backend/.env` to use another database.
+Set `DATABASE_URL` in `backend/.env` to use another database. The API needs MAEC One's gate
+settings in `backend/.env` and a local MAEC One Core: see "Local development" in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Deployment
-The server needs only Docker: `docker compose up -d --build` builds and starts the
-web, API and Postgres containers. Step-by-step server setup, updates and backups:
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+The server needs only Docker. From the stack's folder, always with the settings file:
+`docker compose -f docker-compose.yml --env-file .env up -d --build` builds and starts the
+web, API and Postgres containers (project `maec-pm`, next to the other stacks on the VPS).
+Step-by-step setup, updates and backups: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Copying
+the old stack's data: [deploy/RUNBOOK-PM.md](deploy/RUNBOOK-PM.md).
 
 ## Quality checks
 | Command (run inside the folder) | What it does |

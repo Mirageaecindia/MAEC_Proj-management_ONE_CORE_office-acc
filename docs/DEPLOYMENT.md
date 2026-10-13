@@ -1,209 +1,189 @@
-# Deploying MAEC ProManage (Docker)
+# Deploying MAEC ProManage (Docker, behind MAEC One)
 
-The whole app runs as three containers from [`docker-compose.yml`](../docker-compose.yml).
-The server needs **only Docker and git**. Python, Node, Postgres and the web server
-all live inside the images, which are built on the server from the code in GitHub.
+The app runs as three containers from [`docker-compose.yml`](../docker-compose.yml), compose
+project **`maec-pm`**. Nobody signs in to it: **MAEC One Core** does
+(`auth.mirageaec.com`), and on every request the backend asks Core who the browser is
+([backend/app/api/gate.py](../backend/app/api/gate.py)). The server needs **only Docker and
+git**: Python, Node, Postgres and the web server live inside the images, built on the
+server from the code in GitHub.
+
+It runs on the VPS **next to** what is already there and changes none of it:
+
+| Stack | Compose project | Host port | Network |
+|---|---|---|---|
+| Old Project Management (`promanage.mirageaec.com`) | `promanage` | 127.0.0.1:8081 | its own |
+| Old Engineering Tools | `maec` | 127.0.0.1:8080 | 172.30.57.0/24 |
+| MAEC One Core | `maec-core` | 127.0.0.1:8001 | 10.231.0.0/24, and `maec_core_net` 10.231.1.0/24 |
+| New Engineering Tools | `maec-et` | 127.0.0.1:8082 | 10.231.2.0/24 |
+| **This stack (`pm.mirageaec.com`)** | **`maec-pm`** | **127.0.0.1:8083** (`PM_PORT`) | **10.231.3.0/24** (`PM_NET_SUBNET`) |
 
 | Container | Image | What it does | Reachable from |
 |---|---|---|---|
-| `frontend` | [`frontend/Dockerfile`](../frontend/Dockerfile): Node builds the React app, then Caddy serves it | Serves the web app, forwards `/api/*` to the backend, gets and renews the HTTPS certificate | The internet, ports 80 and 443 |
-| `backend` | [`backend/Dockerfile`](../backend/Dockerfile): Python 3.14 + FastAPI/uvicorn | The API. It applies the Alembic migrations each time it starts | The `frontend` container only |
-| `db` | `postgres:18-alpine` | The database, kept in the `db-data` volume | The `backend` container only |
+| `frontend` | `maec-pm-frontend` ([`frontend/Dockerfile`](../frontend/Dockerfile)): Node builds the React app, then Caddy serves it on plain HTTP | Serves the web app, forwards `/api/*` to the backend with the host's `X-Forwarded-Proto`/`-Host` | The host's Caddy, through 127.0.0.1:8083 |
+| `backend` | `maec-pm-backend` ([`backend/Dockerfile`](../backend/Dockerfile)): Python 3.14 + FastAPI/uvicorn | The API. Asks Core about every request; applies the Alembic migrations each time it starts | `frontend` (on `maec_pm_net`); Core (on `maec_core_net`) |
+| `db` | `postgres:18-alpine`, volume `maec-pm_db` | The database. Never the old stack's volume | `backend` only |
 
 ```
-browser ──HTTPS──► frontend (Caddy) ──/api/*──► backend:8000 ──► db:5432
-                     └── everything else: the React app (index.html, /assets)
+browser ─HTTPS─► host Caddy ─► 127.0.0.1:8083 ─► frontend (Caddy, HTTP) ─/api/*─► backend:8000 ─► db:5432
+                 (TLS for pm.mirageaec.com)                                          │
+                                                        maec_core_net: GET http://maec-core:8000/api/gate/check
 ```
 
-The browser and the API share one origin, so CORS isn't involved. The database and
-the API aren't published on any host port.
+Core's session cookie (`maec_one_session`) is set for `.mirageaec.com`, so the browser sends it
+to `pm.mirageaec.com` by itself. The browser and the API share one origin, so CORS isn't
+involved. Nothing in this stack publishes 80 or 443.
 
-Target server: a netcup VPS in Vienna. The steps below assume **Ubuntu 24.04** (a
-standard netcup image); any Linux that runs Docker works the same.
+**Every compose command for this stack passes the settings file explicitly**, from its folder:
+`docker compose -f docker-compose.yml --env-file .env ...`. No `docker-compose.override.yml` is
+needed on the server, and none should exist there.
 
 ---
 
 ## 1. Before you start
 
-1. **A domain name** for the app, e.g. `promanage.example.com`. At your DNS provider,
-   create an **A record** pointing it at the VPS IPv4 address (and an **AAAA** record for
-   its IPv6 address, if you use one). HTTPS certificates are issued only after DNS
-   points at the server.
-2. **SSH access** to the VPS. The netcup Server Control Panel shows the IP and root password.
+1. **MAEC One Core is running** (its `deploy/RUNBOOK.md`), and the shared network exists:
+   `docker network inspect maec_core_net` answers. This stack joins it and never creates it.
+2. **Core knows Project Management**: its seed registers the application `projects`. Making
+   it live with `base_url` `https://pm.mirageaec.com`, and adding `projects=<secret>` to Core's
+   `GATE_SECRETS`, are the last steps of Core's runbook ("Make Project Management live").
+3. **The port and range are free**: nothing listens on 8083, and no Docker network uses
+   10.231.3.0/24:
+   `docker network inspect $(docker network ls -q) --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}}{{end}}'`
+4. **DNS**: an A record for `pm.mirageaec.com` pointing at the VPS.
 
-## 2. Prepare the server (once)
+## 2. Get the code
 
-```bash
-ssh root@<server-ip>
-
-apt update && apt upgrade -y
-
-# Docker Engine + the compose plugin (official install script)
-curl -fsSL https://get.docker.com | sh
-
-# Firewall: SSH and the web ports only
-ufw allow OpenSSH
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw allow 443/udp
-ufw enable
-```
-
-Docker writes its own firewall rules for the ports it publishes. Only 80 and 443 are
-published, so Postgres and the API stay unreachable from outside.
-
-## 3. Get the code
-
-The repository is on GitHub. If it's private, give the server a read-only **deploy key**:
+A folder of its own, never the old stack's:
 
 ```bash
-ssh-keygen -t ed25519 -f ~/.ssh/maec_deploy -N "" -C "maec-server"
-cat ~/.ssh/maec_deploy.pub
+git clone --branch gate-client git@github.com:Sajjadahmeddd/MAEC_project_management.git /opt/maec-pm
+cd /opt/maec-pm
 ```
 
-On GitHub, open the repository → **Settings → Deploy keys → Add deploy key**, paste the
-key and leave "Allow write access" **off**. Then:
-
-```bash
-cat >> ~/.ssh/config <<'EOF'
-Host github.com
-  IdentityFile ~/.ssh/maec_deploy
-  IdentitiesOnly yes
-EOF
-
-git clone git@github.com:Sajjadahmeddd/MAEC_project_management.git /opt/maec
-cd /opt/maec
-```
-
-## 4. Configure
+## 3. Configure
 
 ```bash
 cp .env.example .env
 chmod 600 .env
-openssl rand -hex 32        # paste the output as POSTGRES_PASSWORD
+openssl rand -hex 32                                            # POSTGRES_PASSWORD
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"   # MAEC_GATE_SECRET
 nano .env
 ```
 
 | Setting | Value |
 |---|---|
-| `POSTGRES_PASSWORD` | The generated value. Use letters and digits only, because it goes into a URL. Set it **before the first start**: Postgres stores it when it creates the database. |
-| `SITE_ADDRESS` | Your domain, e.g. `promanage.example.com`. With `:80` the app runs on plain HTTP by IP address; use that only for a first test. |
-| `AZURE_*`, `SHAREPOINT_*` | SharePoint settings; leave them empty until SharePoint is set up. |
+| `POSTGRES_PASSWORD` | The generated value; letters and digits only, because it goes into a URL. Set it **before the first start**: Postgres stores it when it creates the database. |
+| `CORE_URL` | `http://maec-core:8000` (Core inside Docker; the check never leaves the machine) |
+| `CORE_PUBLIC_URL` | `https://auth.mirageaec.com` (where Sign out and Change password point) |
+| `MAEC_APP_KEY` | `projects` |
+| `MAEC_GATE_SECRET` | The generated value; the same one goes into Core's `GATE_SECRETS` as `projects=<value>`. At least 32 characters; the backend refuses to start with the placeholder. |
+| `AZURE_*`, `SHAREPOINT_*` | SharePoint settings, as for the old stack. |
+| `PM_PORT`, `PM_NET_SUBNET` | Leave unset: the defaults (8083, 10.231.3.0/24) are the VPS's values. |
 
-**Employee list (optional).** On first start the employees table is seeded from
-`backend/data/employee_leads.csv`. That file holds personal data and isn't in git, so
-copy it from your PC:
+## 4. The data
 
-```powershell
-scp backend\data\employee_leads.csv root@<server-ip>:/opt/maec/backend/data/
-```
+Copy the old stack's database into this one, read-only on the old side, with
+[`deploy/RUNBOOK-PM.md`](../deploy/RUNBOOK-PM.md). It also renames the two plain BU Head usernames
+to their MAEC One emails (in the copy only) and applies this stack's migration.
 
 ## 5. Build and start
 
 ```bash
-cd /opt/maec
-docker compose up -d --build
-docker compose ps           # all three should become "healthy" / "running"
+cd /opt/maec-pm
+docker compose -f docker-compose.yml --env-file .env up -d --build
+docker compose -f docker-compose.yml --env-file .env ps
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8083/api/auth/me
 ```
 
-The first build takes a few minutes. Open `https://<your-domain>`: Caddy fetches the
-certificate on the first request, which takes a few seconds.
+All three containers should become healthy / running. The `curl` answering `401` means the whole
+chain works (frontend, backend, Core: "not signed in"); `503` means the backend can't reach Core:
+check `maec_core_net` and `CORE_URL`. The backend refuses to start without the four gate
+settings, and its log names what is missing.
 
-## 6. Create the accounts
+## 6. The host's Caddy
 
-Accounts are never seeded. There are two account types: the **BU Head**, and
-**engineers**, each linked to an employee record. Leads are engineers that the BU Head
-picks per project on Create Project. Create the accounts in the backend container; the
-password is prompted for.
+Add a block for the new name next to the existing ones (keep a dated copy of the Caddyfile
+first, as in Core's runbook). `promanage.mirageaec.com` is not touched.
 
-```bash
-docker compose exec backend python create_user.py --username bu.head --role bu_head --full-name "Your Name"
-
-# Engineers need the id of their employee record. List the ids:
-docker compose exec db psql -U promanage -d promanage -c "SELECT id, employee_code, name FROM employees ORDER BY id"
-docker compose exec backend python create_user.py --username eng.arjun --role engineer --employee-id 1
+```
+pm.mirageaec.com {
+	reverse_proxy 127.0.0.1:8083
+}
 ```
 
-All options are in [backend/USERS.md](../backend/USERS.md).
+Caddy sets `X-Forwarded-Proto: https` and `X-Forwarded-Host: pm.mirageaec.com`; this stack's
+frontend passes them on, and the backend believes them only from its own network, so it tells
+Core the address the browser used.
 
 ## 7. Deploy an update
 
 ```bash
-cd /opt/maec
+cd /opt/maec-pm
 git pull
-docker compose up -d --build
-docker image prune -f       # remove the previous images
+docker compose -f docker-compose.yml --env-file .env up -d --build
+docker image prune -f
 ```
 
-Only the containers whose code changed are rebuilt and restarted. The backend applies
-any new Alembic migrations when it starts. The database and certificates are in volumes,
-so they are kept.
+The backend applies any new Alembic migrations when it starts. The database is in its volume,
+so it is kept. `docker image prune -f` removes the previous images.
 
 ## 8. Backups
 
-Take a nightly database dump and keep 14 days of dumps:
-
-```bash
-mkdir -p /opt/maec-backups
-crontab -e
-```
+Create `/opt/maec-pm-backups` first (`mkdir -p`, `chmod 700`): the dumps hold everyone's work.
 
 ```cron
-0 2 * * * cd /opt/maec && docker compose exec -T db pg_dump -U promanage -d promanage -Fc > /opt/maec-backups/promanage-$(date +\%F).dump && find /opt/maec-backups -name '*.dump' -mtime +14 -delete
+0 2 * * * cd /opt/maec-pm && docker compose -f docker-compose.yml --env-file .env exec -T db pg_dump -U promanage -d promanage -Fc > /opt/maec-pm-backups/promanage-$(date +\%F).dump && find /opt/maec-pm-backups -name '*.dump' -mtime +14 -delete
 ```
 
-A backup that exists only on the same server doesn't protect against losing the server.
-Copy `/opt/maec-backups` somewhere else as well, e.g. pull it to another machine with
-`rsync` or `scp`, and use netcup's snapshots.
+A backup only on the same server doesn't protect against losing the server: copy it elsewhere too.
 
-**Restore** (this replaces the current data):
+**Restore** (replaces the current data):
 
 ```bash
-cd /opt/maec
-docker compose stop backend
-docker compose exec -T db pg_restore -U promanage -d promanage --clean --if-exists < /opt/maec-backups/promanage-2026-10-01.dump
-docker compose start backend
+cd /opt/maec-pm
+docker compose -f docker-compose.yml --env-file .env stop backend
+docker compose -f docker-compose.yml --env-file .env exec -T db pg_restore -U promanage -d promanage --clean --if-exists < /opt/maec-pm-backups/promanage-2026-10-01.dump
+docker compose -f docker-compose.yml --env-file .env start backend
 ```
 
-## 9. Day-to-day commands
+## 9. Day-to-day
 
-Run these from `/opt/maec`.
+Run these from `/opt/maec-pm`:
 
-| Task | Command |
+| Task | Command or place |
 |---|---|
-| Status | `docker compose ps` |
-| Logs (follow) | `docker compose logs -f backend` (or `frontend`, `db`) |
-| Restart everything | `docker compose restart` |
-| Stop / start | `docker compose down` / `docker compose up -d` (the data is kept) |
-| Database shell | `docker compose exec db psql -U promanage -d promanage` |
-| Deactivate a leaver | `docker compose exec backend python create_user.py --username eng.arjun --deactivate` |
+| Status | `docker compose -f docker-compose.yml --env-file .env ps` |
+| Logs (follow) | `docker compose -f docker-compose.yml --env-file .env logs -f backend` |
+| Database shell | `docker compose -f docker-compose.yml --env-file .env exec db psql -U promanage -d promanage` |
+| Someone has no access, or forgot their password | MAEC One: sign-in, access (a seat) and passwords are managed there |
+| Someone has a seat but "no profile" | A BU Head adds them under People (Add one person) |
 
-Logs are rotated automatically: each container keeps at most 5 × 10 MB.
-
-**Never run `docker compose down -v`** on the server. `-v` deletes the volumes, which
-means the database and the certificates.
+**Never run `docker compose down -v`** here: `-v` deletes the volume, which is the database.
 
 ## 10. Troubleshooting
 
 | Symptom | Check |
 |---|---|
-| The browser shows a certificate error, or the site doesn't load over HTTPS | `docker compose logs frontend`. Usually DNS doesn't point at the server yet, or port 80/443 is blocked. Let's Encrypt must reach port 80 or 443 from the internet. |
-| The page loads but login fails with a network error | `docker compose ps`: is `backend` healthy? Then check `docker compose logs backend`. |
-| `backend` restarts in a loop | `docker compose logs backend`. A migration error or a wrong `POSTGRES_PASSWORD` shows up there. |
-| You changed `POSTGRES_PASSWORD` after the first start | Postgres keeps the original password. Change it back, or change it in the database: `docker compose exec db psql -U promanage -c "ALTER USER promanage PASSWORD '<new>'"`. |
+| Every page says "Project Management is unavailable"; the API answers 503 | The backend can't reach Core: the backend's logs, `docker network inspect maec_core_net`, `CORE_URL`. |
+| The API answers 403 `bad_app` | `MAEC_APP_KEY` / `MAEC_GATE_SECRET` don't match Core's `GATE_SECRETS`, or `projects` isn't live in Core. |
+| After signing in, the browser lands on Core's launcher instead of the app | Core's `projects` `base_url` isn't `https://pm.mirageaec.com`, or the forwarded headers didn't arrive (the host's Caddy block). |
+| `backend` restarts in a loop | Its logs: a missing gate setting, a migration error or a wrong `POSTGRES_PASSWORD` shows up there. |
 
 ## Local development
 
-Nothing changes for development. The backend uses SQLite, and `npm run dev` points at
-`http://localhost:8000` (see the [README](../README.md)). To try the production stack on a
-PC with Docker Desktop, create a root `.env` as in step 4 with `SITE_ADDRESS=:80`, then
-run `docker compose up -d --build` and open `http://localhost`.
+Run MAEC One Core locally at `http://auth.maec.local:8000` (its README), with
+`SESSION_COOKIE_DOMAIN=.maec.local` and `GATE_SECRETS=projects=<secret>`, and the `projects`
+application live with `base_url` `http://pm.maec.local:5173`. Add `auth.maec.local` and
+`pm.maec.local` to the hosts file as `127.0.0.1`. Then run the backend as in the
+[README](../README.md), with the gate settings in `backend/.env` (see `backend/.env.example`),
+and `npm run dev`, opened at `http://pm.maec.local:5173` (never `localhost`: Core's cookie is
+set for `.maec.local`). Vite forwards `/api` to the backend.
 
 To run the backend tests against Postgres, start an empty, throwaway Postgres and set
-`TEST_DATABASE_URL` (the tests wipe every table):
+`TEST_DATABASE_URL` (the tests wipe every table; Core is faked in-process):
 
 ```powershell
-docker run -d --rm --name maec-pgtest -e POSTGRES_USER=t -e POSTGRES_PASSWORD=t -e POSTGRES_DB=t -p 55432:5432 postgres:18-alpine
-$env:TEST_DATABASE_URL = "postgresql+psycopg://t:t@127.0.0.1:55432/t"; .venv\Scripts\python.exe -m pytest
+docker run -d --rm --name maec-pgtest -e POSTGRES_USER=t -e POSTGRES_PASSWORD=t -e POSTGRES_DB=t -p 15433:5432 postgres:18-alpine
+$env:TEST_DATABASE_URL = "postgresql+psycopg://t:t@127.0.0.1:15433/t"; .venv\Scripts\python.exe -m pytest
 docker stop maec-pgtest
 ```

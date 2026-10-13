@@ -1,5 +1,6 @@
-# MAEC ProManage web: builds the React app, then Caddy serves it, proxies /api
-# to the backend and handles HTTPS. Built and run by the root docker-compose.yml.
+# MAEC ProManage web: builds the React app, then Caddy serves it over plain HTTP and
+# proxies /api to the backend. TLS is the host's Caddy's (pm.mirageaec.com).
+# Built and run by the root docker-compose.yml.
 
 FROM node:24-alpine AS build
 WORKDIR /app
