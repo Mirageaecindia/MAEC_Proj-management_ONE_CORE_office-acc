@@ -174,11 +174,9 @@ MAEC_project_management/
 │   ├── models.py              SQLAlchemy models (14 tables)
 │   ├── schemas.py             Pydantic request/response models, status and phase constants
 │   ├── database.py            Shim re-exporting app.core.database (old imports keep working)
-│   ├── auth.py                Shim re-exporting app.core.security
-│   ├── create_user.py         CLI to create and (de)activate login accounts
+│   ├── auth.py                Shim re-exporting app.core.security.get_current_user
 │   ├── backup_db.py           Nightly SQLite backup with retention (see §12)
-│   ├── seed_and_verify.py     Older end-to-end smoke script (TestClient)
-│   ├── seed_users.py, check_users.py, inspect_db.py, temp_*.py, leads_loader.py
+│   ├── inspect_db.py, temp_check.py, leads_loader.py
 │   │                          Leftover dev scripts, mostly dead code (roadmap 1.6)
 │   ├── data/
 │   │   ├── employee_leads.example.csv   Column layout of the HR export (fake data)
@@ -283,8 +281,8 @@ There are no database foreign keys. Relationships are plain integer columns and 
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `users` | Login accounts | `username` (unique), `password_hash`, `full_name`, `role` (`bu_head`/`engineer`), `employee_id` (engineers), `is_active` (deactivated accounts can't log in) |
-| `login_sessions` | Bearer tokens | `token` (unique), `user_id` |
+| `users` | Profiles (people sign in at MAEC One) | `username` (unique; the work email), `full_name`, `role` (`bu_head`/`engineer`), `employee_id` (engineers), `is_active` (deactivated profiles are refused), `core_user_id` (unique; the person's MAEC One id, linked at their first visit). `password_hash` and `must_change_password` are no longer used |
+| `login_sessions` | Retired with the move to MAEC One; dropped by a later migration | `token`, `user_id` |
 | `employees` | HR roster (seeded from CSV) | `employee_code`, `name`, `role_title`, `discipline` (= designation) |
 $1`sharepoint_disciplines` (JSON list), `sharepoint_site_url`, `archived_at` (set when archived) |
 | `resource_bookings` | Engineer allocated to a project | `project_id`, `employee_id`, `planned_hours`, `utilization_rate` (%), `start_date`, `end_date`, `approval_status` (`draft` → `pending_approval` → `approved`), `submitted_at`, `approved_at` |
@@ -421,22 +419,19 @@ Decided 2026-09-28: approval is **per day**; there is no week submission or week
 
 ## 8. API reference
 
-All endpoints are under `/api` and need a bearer token, except `/health` and `/api/server-date`. Interactive docs are at `http://localhost:8000/docs`. "Scoped" means lead/engineer access is limited to their projects or nodes (§6.2).
+Every endpoint is under `/api`, and every request is checked with MAEC One Core first (its cookie, `app/api/gate.py`); only `/health` is not. Interactive docs are at `http://localhost:8000/docs`. "Scoped" means lead/engineer access is limited to their projects or nodes (§6.2).
 
 **Auth**
 | Method | Path | Roles | Purpose |
 |---|---|---|---|
-| POST | `/api/auth/login` | public | Log in and get a token |
-| POST | `/api/auth/logout` | any | Delete the token |
-| POST | `/api/auth/change-password` | any (also with a temporary password) | Set your own password; your other sessions end |
-| POST | `/api/people/import` | BU Head | Import engineers from an HR CSV export; returns each new account's temporary password once |
-| POST | `/api/people/reset-password` | BU Head | A new temporary password for an engineer |
-| GET | `/api/people` | BU Head | Everyone with an account, status and what may be done (never passwords) |
-| PATCH | `/api/people/{id}` | BU Head | Correct an engineer's `full_name`, `username` (work email) or `job_role`; a new name also updates the project and task lead name copies |
-| POST | `/api/people/{id}/deactivate` · `/reactivate` | BU Head | A leaver can't sign in (sessions end); data stays |
-| DELETE | `/api/people/{id}` | BU Head | Only an engineer account with no work on record; otherwise 409 |
-| POST | `/api/people/{id}/make-bu-head` · `/remove-bu-head` | BU Head | `{password}` (the caller's own). Promote only an engineer on no live project (409 names the projects and roles); remove only from a promoted BU Head, never yourself or the last one. The person is signed out; BU Heads are notified |
-| GET | `/api/auth/me` | any | Current user (restore session) |
+| POST | `/api/people/import` | BU Head | Import engineers' profiles from an HR CSV export (no passwords) |
+| POST | `/api/people` | BU Head | One profile: `{employee_code, full_name, email, job_role}`, for someone with a seat in MAEC One and none here |
+| GET | `/api/people` | BU Head | Everyone with a profile, status and what may be done |
+| PATCH | `/api/people/{id}` | BU Head | Correct an engineer's `full_name` or `job_role` (not the email: the MAEC One identity); a new name also updates the project and task lead name copies |
+| POST | `/api/people/{id}/make-bu-head` · `/remove-bu-head` | BU Head | `{confirm: true}`. Promote only an engineer on no live project (409 names the projects and roles); remove only from a promoted BU Head, never yourself or the last one. BU Heads are notified |
+| GET | `/api/auth/me` | any | The signed-in person's profile, `leads_projects` and `core_url` (MAEC One, for Sign out and Change password) |
+
+Signing in and out, passwords, deactivating and deleting people are MAEC One's.
 
 **Projects and SharePoint**
 | Method | Path | Roles | Purpose |
@@ -607,7 +602,7 @@ All endpoints are under `/api` and need a bearer token, except `/health` and `/a
 ## 12. Development workflow
 
 - **Setup and run:** see [README.md](../README.md). Backend: `backend\.venv\Scripts\python.exe -m uvicorn main:app --reload` (port 8000). Frontend: `npm run dev` (port 5173).
-- **Accounts:** `backend\.venv\Scripts\python.exe create_user.py --username … --role bu_head|engineer --full-name "…" [--employee-id N]` (engineers need an employee record; project leads are chosen among them on Create Project). Leavers: `create_user.py --username … --deactivate` logs them out at once and blocks login; `--activate` reverses it. See [backend/USERS.md](../backend/USERS.md).
+- **People:** signing in happens at MAEC One Core (run one locally, see [DEPLOYMENT.md](DEPLOYMENT.md)); profiles here are added by a BU Head under People. See [backend/USERS.md](../backend/USERS.md).
 - **Backups:** `backend\.venv\Scripts\python.exe backup_db.py` takes a consistent snapshot (safe while the server runs) into `backend/backups/` and keeps the newest 14. Schedule it nightly with Windows Task Scheduler; the command and the restore steps are in the script's docstring.
 - **Tests:** `backend\.venv\Scripts\python.exe -m pytest` runs 77 characterization tests of the BU Head API against an isolated temp database with SharePoint disabled. Assertions marked `KNOWN (roadmap X.Y)` record current, known-wrong behaviour.
 - **Quality:** ruff (backend), ESLint + Prettier (frontend), and pre-commit hooks that also block secrets, databases and data CSVs. Legacy shared files are on a "ratchet" exception list and are cleaned up when they're refactored.

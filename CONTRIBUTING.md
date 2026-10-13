@@ -105,7 +105,7 @@ in `main.py`. See also the merge-conflict rules in `CLAUDE.md`.)
 | Old name in `main.py` | New home |
 |---|---|
 | `require_role` | `app/core/security.py` (plus guards `require_bu_head`, `require_lead_or_bu_head`, `require_any_role`) |
-| `get_current_user`, `hash_password`, `verify_password` | `app/core/security.py` (`auth.py` re-exports them) |
+| `get_current_user` | `app/core/security.py` (`auth.py` re-exports it); who the person is comes from MAEC One's gate (`app/api/gate.py`, `app/core/identity.py`). `hash_password` and `verify_password` are gone |
 | `time_entry_total` (7-day total) | `app/domain/timesheets.py` → `entry_total` |
 | `_get_month_key`, `_distribute_hours_over_months` | `app/domain/calendar.py` |
 | `engineer_wbs_condition`, `engineer_wbs_ids`, `engineer_approved_project_ids`, `lead_project_ids`, `user_can_access_project` | `app/services/access.py` |

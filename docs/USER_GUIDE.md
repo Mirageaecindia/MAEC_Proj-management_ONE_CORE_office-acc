@@ -21,58 +21,48 @@ cd backend
 cd frontend
 npm run dev
 ```
-Open **http://localhost:5173** and log in. After pulling new code, run
+Open **http://pm.maec.local:5173** (not localhost): MAEC One signs you in. Locally that needs
+MAEC One Core running at auth.maec.local; see "Local development" in [DEPLOYMENT.md](DEPLOYMENT.md).
+After pulling new code, run
 `backend\.venv\Scripts\python.exe -m pip install -r requirements.txt` once
 (new dependencies), then start the API; database changes are applied
 automatically at startup.
 
-### 1.2 Accounts
-**Onboarding engineers (BU Head, no server access needed).** On **Projects**, press **People**:
-1. Choose the HR export (CSV with the columns Employee Id, Full Name, Work Email and Job Role; other columns,
-   such as phone numbers, are ignored) and press **Import**. Remove anyone who shouldn't have an account first.
-2. Each new person gets an engineer account: the username is their work email and the profile name their full
-   name. Anyone who already has an account, or appears twice, is skipped and the reason is listed.
-3. Press **Download the temporary passwords**. Each person has their own random temporary password. It is shown
-   only this once and is not stored readable: download it right away and give each person theirs.
-4. At the first sign-in the app asks the person to set their own password, and nothing else works until they
-   do. Usernames are not case-sensitive.
+### 1.2 Signing in and people
+**Signing in happens at MAEC One** (`auth.mirageaec.com`), the company's single sign-on, not in
+this app. Opening Project Management while signed out takes you to MAEC One's sign-in and back to
+the page you asked for. **Sign out** and **Change password** in the account menu (your name, top
+right) open MAEC One; signing out there signs you out of every MAEC One app. Who may use Project
+Management at all (a seat), passwords, and removing a leaver's access are managed in MAEC One.
 
-**Seeing and correcting people:** the same card lists everyone with an account (name, work email, employee ID,
-job role and status: active, not signed in yet, or deactivated), with a search box. Passwords are never shown.
-For an engineer the BU Head can **Edit** the name, the work email they sign in with (tell them) or the job role;
-a new name also replaces it where the person is shown as a project or task lead. **Deactivate** a leaver: they
-can't sign in and their bookings and hours stay on record; **Reactivate** brings them back. **Delete** appears
-only for an account with no work on record at all, such as one imported by mistake. BU Head accounts are listed
-but not changed here.
+Without a seat on Project Management, the app says **No access**. With a seat but no profile in
+Project Management yet, it says **Your Project Management profile hasn't been set up yet. Ask a
+Business Head.** Your first visit links your MAEC One account to your profile here by your work
+email; after that the link holds even if the email changes in MAEC One.
 
-**Appointing a BU Head:** **Make BU Head** on an engineer's row, confirmed with your own password. It works only
+**Profiles (BU Head).** On **Projects**, press **People**:
+1. **Import** the HR export (CSV with the columns Employee Id, Full Name, Work Email and Job Role; other
+   columns, such as phone numbers, are ignored). Remove anyone who shouldn't have a profile first. Each new
+   person gets an engineer profile: the username is their work email and the profile name their full name.
+   Anyone who already has a profile, or appears twice, is skipped and the reason is listed. No passwords:
+   each person still needs a seat on Project Management in MAEC One.
+2. **Add one person** for someone with a seat in MAEC One whose profile isn't set up yet: Employee Id, full
+   name, work email (the one they sign in to MAEC One with) and job role.
+
+**Seeing and correcting people:** the same card lists everyone with a profile (name, work email, employee ID,
+job role, status), with a search box. For an engineer the BU Head can **Edit** the name or the job role; a new
+name also replaces it where the person is shown as a project or task lead. The work email is not edited here:
+it is who the person is in MAEC One. BU Head profiles are listed but not changed here.
+
+**Appointing a BU Head:** **Make BU Head** on an engineer's row, then confirm in the dialog. It works only
 if they are on no live project (not a lead, not booked, no tasks on a project that isn't archived); otherwise the
 dialog names the projects and the role they hold there, and they must be removed from those first. A BU Head
 doesn't lead projects, get booked or log hours. **Remove BU Head** turns a promoted BU Head back into an engineer;
-never yourself and never the last BU Head. The person is signed out and signs in again with the new role, and
+never yourself and never the last BU Head. The person's pages follow the new role from their next click, and
 the other BU Heads get a notification.
 
-**Forgotten password:** the BU Head enters the work email under **Reset a forgotten password** on the same card
-and gives the person the new temporary password; they set their own at the next sign-in, and any browser
-still signed in as them is signed out. **Changing your password** any time: the account menu (your name, top
-right) → **Change password**.
-
-This is temporary: when the company's global admin application exists, people and access are managed there.
-
-Accounts can also be created from the command line, in `backend/`:
-
-```powershell
-# BU Head
-.venv\Scripts\python.exe create_user.py --username buhead --role bu_head --full-name "BU Head"
-# Everyone else is an engineer, linked to an employee row (employees come from backend/data/employee_leads.csv).
-# There are no lead accounts: the BU Head picks any engineer as a project's lead on Create Project.
-.venv\Scripts\python.exe create_user.py --username eng.arjun --role engineer --full-name "Arjun Mehta" --employee-id 1
-# A leaver
-.venv\Scripts\python.exe create_user.py --username eng.arjun --deactivate
-```
-You are prompted for the password. For testing, create **one BU Head and at
-least four engineers** (some will be chosen as leads), and use three browsers
-(or one normal and two private windows) to be logged in as several people at once.
+For testing, use one BU Head and at least four engineers (some will be chosen as leads), each with a seat in
+MAEC One, and three browsers (or one normal and two private windows) to be signed in as several people at once.
 
 ### 1.3 After login
 | Role | Lands on | Tabs |
@@ -373,7 +363,7 @@ completed, schedule index, your monthly chart and **My Tasks by Status** (To Do,
 | BU Head **edits** the project | Audit entry per change | Replaced Lead loses it, new Lead gains it; figures update | Figures update |
 | BU Head **archives** | Only with Show archived; read-only | Bell; project disappears | Project disappears; active tracking ended |
 | BU Head **reopens** | Back in the list, as before | Bell; project back | Project back (if booking approved) |
-| An account is **deactivated** | — | A deactivated Lead disappears from the Create/Edit dropdowns | The person is logged out and can't log in |
+| A seat on Project Management is **removed in MAEC One** | — | — | The person sees "No access" from their next click |
 
 ---
 
