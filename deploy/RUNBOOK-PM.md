@@ -99,22 +99,25 @@ visit. Nothing else is renamed, and the old database still has the old names.
 docker compose -f docker-compose.yml --env-file .env exec -T db psql -U promanage -d promanage -v ON_ERROR_STOP=1 <<'SQL'
 BEGIN;
 UPDATE users SET username = 'bu.anitha@mirageaec.com' WHERE username = 'bu.anitha';
+SELECT :ROW_COUNT AS anitha \gset
 UPDATE users SET username = 'bu.mohan@mirageaec.com' WHERE username = 'bu.mohan';
-DO $$
-BEGIN
-  IF (SELECT count(*) FROM users WHERE username IN ('bu.anitha@mirageaec.com', 'bu.mohan@mirageaec.com')) <> 2 THEN
-    RAISE EXCEPTION 'expected exactly the two renamed accounts: nothing was changed';
-  END IF;
-END $$;
+SELECT :ROW_COUNT AS mohan \gset
+SELECT :anitha = 1 AND :mohan = 1 AS both_renamed \gset
+\if :both_renamed
 COMMIT;
+\else
+ROLLBACK;
+\echo 'Not exactly one account each: nothing was changed.'
+\endif
 SQL
 ```
 ```
-# Renames the two accounts in one transaction. Must print, in order: BEGIN, UPDATE 1,
-# UPDATE 1, DO, COMMIT. If either says UPDATE 0, or the check raises its error, psql stops
-# before COMMIT and nothing is changed: stop and look (has it been run already? see
-# section 5). The unique index on users.username refuses the rename if either address is
-# already taken by another account.
+# Renames the two accounts in one transaction, and keeps it only if each UPDATE changed
+# exactly one row. Must print, in order: BEGIN, UPDATE 1, UPDATE 1, COMMIT. If either says
+# UPDATE 0, it prints ROLLBACK and "Not exactly one account each: nothing was changed."
+# Stop and look: has it been run already on this copy? (Then the copy is already right.)
+# The unique index on users.username refuses the rename, and nothing is changed, if either
+# address is already taken by another account.
 ```
 
 ## 4. Start the new stack: the migration runs, then check
