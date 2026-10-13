@@ -1,142 +1,68 @@
-import { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { API_BASE_URL, TOKEN_KEY } from './api/client';
+import { createContext, useContext, useEffect, useState } from 'react';
+import { GATE_BLOCKED, api, reauthorizationWorked } from './api/client';
 
+/**
+ * Who is using the app. Nobody signs in here: MAEC One does, and the backend asks it
+ * about every request. This asks /api/auth/me once: the person's profile in this app
+ * (role, leads_projects) and where MAEC One is (`core_url`, for Sign out and Change
+ * password). A 401 sends the window to MAEC One's sign-in (api/client.js); a refusal
+ * (no seat, no profile here) is kept in `blocked` and shown instead of the app.
+ */
 const AuthContext = createContext(null);
-
-
-async function fetchLogin(username, password) {
-  const resp = await fetch(`${API_BASE_URL}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(data.detail || 'Login failed.');
-  return data;
-}
-
-async function fetchMe(token) {
-  const resp = await fetch(`${API_BASE_URL}/api/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!resp.ok) return null;
-  return resp.json();
-}
-
-async function fetchChangePassword(token, currentPassword, newPassword) {
-  const resp = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
-  });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(data.detail || 'Could not change the password.');
-  return data;
-}
-
-async function fetchLogout(token) {
-  try {
-    await fetch(`${API_BASE_URL}/api/auth/logout`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-  } catch { /* best effort */ }
-}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(() => {
-    try {
-      return localStorage.getItem(TOKEN_KEY);
-    } catch { return null; }
-  });
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
+  const [blocked, setBlocked] = useState(null); // { kind, message } once MAEC One or this app refuses
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const onBlocked = (event) => setBlocked(event.detail);
+    window.addEventListener(GATE_BLOCKED, onBlocked);
+    return () => window.removeEventListener(GATE_BLOCKED, onBlocked);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      if (token) {
-        try {
-          const me = await fetchMe(token);
-          if (!cancelled) {
-            if (me) {
-              setUser(me);
-            } else {
-              try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
-              setToken(null);
-            }
-          }
-        } catch {
-          if (!cancelled) {
-            try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
-            setToken(null);
-          }
-        }
-      }
-      if (!cancelled) setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [token]);
-
-  const login = useCallback(async (username, password) => {
-    const data = await fetchLogin(username, password);
-    try {
-      localStorage.setItem(TOKEN_KEY, data.token);
-    } catch { /* ignore */ }
-    setToken(data.token);
-    setUser({
-      id: data.id ?? null,
-      username: data.username,
-      full_name: data.full_name || null,
-      role: data.role,
-      employee_id: data.engineer_id || null,
-      leads_projects: Boolean(data.leads_projects),
-      must_change_password: Boolean(data.must_change_password),
-    });
-    return data;
+    api
+      .get('/api/auth/me')
+      .then((me) => {
+        if (cancelled) return;
+        reauthorizationWorked();
+        setUser(me);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        // 401: the window is on its way to MAEC One's sign-in; keep showing "loading".
+        if (err?.status === 401) return;
+        setError(err?.message || 'Could not reach Project Management.');
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  // Replace the password (a temporary one at the first login, or any time from the account menu).
-  const changePassword = useCallback(
-    async (currentPassword, newPassword) => {
-      await fetchChangePassword(token, currentPassword, newPassword);
-      setUser((current) => (current ? { ...current, must_change_password: false } : current));
-    },
-    [token],
-  );
-
-  const logout = useCallback(async () => {
-    if (token) await fetchLogout(token);
-    try {
-      localStorage.removeItem(TOKEN_KEY);
-    } catch { /* ignore */ }
-    setToken(null);
-    setUser(null);
-    navigate('/login');
-  }, [navigate, token]);
-
-  const authHeaders = useCallback(() => {
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }, [token]);
 
   const role = user ? user.role : null;
   // Leading is a role on a project; an engineer who leads any project also gets the lead pages.
   const leadsProjects = Boolean(user?.leads_projects);
+  const coreUrl = (user?.core_url || '').replace(/\/+$/, '');
 
   return (
-    <AuthContext.Provider value={{
-      user,
-      role,
-      leadsProjects,
-      token,
-      loading,
-      login,
-      logout,
-      changePassword,
-      authHeaders,
-    }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        role,
+        leadsProjects,
+        loading,
+        blocked,
+        error,
+        // Signing out at MAEC One signs out everywhere; its launcher has the button.
+        signOutUrl: coreUrl ? `${coreUrl}/` : '',
+        changePasswordUrl: coreUrl ? `${coreUrl}/change-password` : '',
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

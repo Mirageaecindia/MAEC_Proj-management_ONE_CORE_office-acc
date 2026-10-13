@@ -4,18 +4,12 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { PeopleCard } from './PeopleCard';
-import { credentialsCsv } from './peopleCsv';
+
+vi.mock('../../AuthContext', () => ({ useAuth: () => ({ signOutUrl: 'https://auth.mirageaec.com/' }) }));
 
 const IMPORTED = {
-  created: [
-    {
-      username: 'kavya.raman@mirageaec.com',
-      full_name: 'Kavya Raman',
-      employee_code: 'M0101',
-      temporary_password: 'abc23DEF45gh',
-    },
-  ],
-  skipped: [{ row: 3, name: 'Arun Kumar', email: 'arun@mirageaec.com', reason: 'Already has an account.' }],
+  created: [{ username: 'kavya.raman@mirageaec.com', full_name: 'Kavya Raman', employee_code: 'M0101' }],
+  skipped: [{ row: 3, name: 'Arun Kumar', email: 'arun@mirageaec.com', reason: 'Already has a profile.' }],
 };
 
 let people = [];
@@ -28,9 +22,7 @@ const PERSON = {
   employee_code: 'M0101',
   job_role: 'Senior Electrical Engineer',
   is_active: true,
-  must_change_password: true,
   can_edit: true,
-  can_delete: true,
   can_make_bu_head: true,
   can_remove_bu_head: false,
 };
@@ -46,21 +38,15 @@ const json = (body) =>
 function fakeApi(url, options = {}) {
   const method = options.method || 'GET';
   if (url.endsWith('/api/people/import')) return json(IMPORTED);
-  if (url.endsWith('/api/people/reset-password')) {
+  if (url.endsWith('/api/people') && method === 'POST') {
+    const person = JSON.parse(options.body);
     return json({
-      username: 'kavya.raman@mirageaec.com',
-      full_name: 'Kavya Raman',
-      temporary_password: 'NewTemp23xyz',
+      username: person.email.toLowerCase(),
+      full_name: person.full_name,
+      employee_code: person.employee_code,
     });
   }
   if (url.endsWith('/api/people') && method === 'GET') return json(people);
-  const deactivate = url.match(/\/api\/people\/(\d+)\/(deactivate|reactivate)$/);
-  if (deactivate) {
-    people = people.map((p) =>
-      String(p.id) === deactivate[1] ? { ...p, is_active: deactivate[2] === 'reactivate' } : p,
-    );
-    return json(people[0]);
-  }
   if (/\/api\/people\/\d+$/.test(url) && method === 'PATCH') {
     const id = url.match(/(\d+)$/)[1];
     people = people.map((p) => (String(p.id) === id ? { ...p, ...JSON.parse(options.body) } : p));
@@ -68,8 +54,7 @@ function fakeApi(url, options = {}) {
   }
   const role = url.match(/\/api\/people\/(\d+)\/(make-bu-head|remove-bu-head)$/);
   if (role) {
-    const { password } = JSON.parse(options.body);
-    if (password !== 'my password') return error(403, 'Your password is not correct.');
+    if (JSON.parse(options.body).confirm !== true) return error(400, 'Confirm the role change first.');
     if (onLiveProject)
       return error(
         409,
@@ -79,10 +64,6 @@ function fakeApi(url, options = {}) {
       String(p.id) === role[1] ? { ...p, role: 'bu_head', can_edit: false, can_make_bu_head: false } : p,
     );
     return json(people[0]);
-  }
-  if (/\/api\/people\/\d+$/.test(url) && method === 'DELETE') {
-    people = [];
-    return json({ ok: true });
   }
   return Promise.resolve(new Response(JSON.stringify({ detail: `No fixture for ${url}` }), { status: 404 }));
 }
@@ -105,15 +86,27 @@ describe('People card (BU Head onboarding)', () => {
   beforeEach(() => {
     people = [PERSON];
     vi.stubGlobal('fetch', vi.fn(fakeApi));
-    URL.createObjectURL = vi.fn(() => 'blob:passwords');
-    URL.revokeObjectURL = vi.fn();
   });
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
   });
 
-  it('uploads the HR export, reports what happened and offers the passwords as a file', async () => {
+  it('says MAEC One manages sign-in, access and passwords, and links to it', async () => {
+    renderCard();
+
+    expect(screen.getByText(/Sign-in, access and passwords are managed in MAEC One/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'open MAEC One' }).getAttribute('href')).toBe(
+      'https://auth.mirageaec.com/',
+    );
+    for (const gone of [/Reset/, /Deactivate/, /Reactivate/, /Delete/, /Download/]) {
+      expect(screen.queryByRole('button', { name: gone })).toBeNull();
+    }
+    expect(screen.queryByLabelText(/password/i)).toBeNull();
+    expect(await screen.findByText('kavya.raman@mirageaec.com')).toBeTruthy();
+  });
+
+  it('uploads the HR export, reports what happened and reminds that each needs a seat in MAEC One', async () => {
     renderCard();
     const file = new File(['Employee Id,Full Name,Work Email,Job Role\n'], 'people.csv', {
       type: 'text/csv',
@@ -122,28 +115,31 @@ describe('People card (BU Head onboarding)', () => {
     fireEvent.change(screen.getByLabelText('Employee CSV file'), { target: { files: [file] } });
     fireEvent.click(screen.getByRole('button', { name: /Import/ }));
 
-    expect(await screen.findByText(/account created/)).toBeTruthy();
-    expect(screen.getByText(/Line 3: Arun Kumar – Already has an account\./)).toBeTruthy();
+    expect(await screen.findByText(/profile created/)).toBeTruthy();
+    expect(screen.getAllByText(/needs a seat on Project Management in MAEC One/).length).toBeGreaterThan(1);
+    expect(screen.getByText(/Line 3: Arun Kumar – Already has a profile\./)).toBeTruthy();
     const [url, options] = calls(/\/api\/people\/import$/, 'POST')[0];
     expect(url).toMatch(/\/api\/people\/import$/);
     expect(options.body.get('file').name).toBe('people.csv');
-
-    fireEvent.click(screen.getByRole('button', { name: /Download the temporary passwords/ }));
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText('abc23DEF45gh')).toBeNull(); // passwords are in the file, not on screen
   });
 
-  it('resets a forgotten password and shows the new temporary one', async () => {
+  it('adds one person who has a seat in MAEC One but no profile here', async () => {
     renderCard();
+    const add = screen.getByRole('button', { name: /Add/ });
+    expect(add.disabled).toBe(true); // every field first
 
-    fireEvent.change(screen.getByLabelText('Username to reset'), {
-      target: { value: ' kavya.raman@mirageaec.com ' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /Reset/ }));
+    fireEvent.change(screen.getByLabelText('Employee Id'), { target: { value: 'M0301' } });
+    fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'Neha Rao' } });
+    fireEvent.change(screen.getByLabelText('Work email'), { target: { value: 'Neha.Rao@mirageaec.com' } });
+    fireEvent.change(screen.getByLabelText('Job role'), { target: { value: 'Intern' } });
+    fireEvent.click(add);
 
-    expect(await screen.findByText('NewTemp23xyz')).toBeTruthy();
-    expect(JSON.parse(calls(/reset-password$/, 'POST')[0][1].body)).toEqual({
-      username: 'kavya.raman@mirageaec.com',
+    expect(await screen.findByText(/Profile created for/)).toBeTruthy();
+    expect(JSON.parse(calls(/\/api\/people$/, 'POST')[0][1].body)).toEqual({
+      employee_code: 'M0301',
+      full_name: 'Neha Rao',
+      email: 'Neha.Rao@mirageaec.com',
+      job_role: 'Intern',
     });
   });
 });
@@ -160,9 +156,7 @@ describe('People list (BU Head)', () => {
         role: 'bu_head',
         employee_code: null,
         job_role: null,
-        must_change_password: false,
         can_edit: false,
-        can_delete: false,
       },
     ];
     vi.stubGlobal('fetch', vi.fn(fakeApi));
@@ -176,34 +170,28 @@ describe('People list (BU Head)', () => {
     renderCard();
 
     expect(await screen.findByText('kavya.raman@mirageaec.com')).toBeTruthy();
-    expect(screen.getByText('Not signed in yet')).toBeTruthy();
-    expect(screen.getByText(/2 accounts · 1 not signed in yet/)).toBeTruthy();
+    expect(screen.getAllByText('Active')).toHaveLength(2);
+    expect(screen.getByText('2 profiles')).toBeTruthy();
     expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1); // not on the BU Head's row
 
     fireEvent.change(screen.getByLabelText('Search people'), { target: { value: 'M0101' } });
     expect(screen.queryByText('Mohan Daniel')).toBeNull();
   });
 
-  it('corrects a name and email, deactivates, and deletes an account made by mistake', async () => {
+  it('corrects a name or job role, never the email', async () => {
     renderCard();
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getByLabelText('Work email (signs in with)'), {
-      target: { value: 'kavya.r@mirageaec.com' },
+    const form = within(document.querySelector('.people-edit-form'));
+
+    expect(form.queryByLabelText(/email/i)).toBeNull(); // who they are in MAEC One
+    fireEvent.change(form.getByLabelText('Job role'), { target: { value: 'Electrical Lead' } });
+    fireEvent.click(form.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Electrical Lead')).toBeTruthy();
+    expect(JSON.parse(calls(/\/api\/people\/7$/, 'PATCH')[0][1].body)).toEqual({
+      full_name: 'Kavya Raman',
+      job_role: 'Electrical Lead',
     });
-
-    expect(screen.getByText(/They will sign in with the new email/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(await screen.findByText('kavya.r@mirageaec.com')).toBeTruthy();
-    expect(JSON.parse(calls(/\/api\/people\/7$/, 'PATCH')[0][1].body)).toMatchObject({
-      username: 'kavya.r@mirageaec.com',
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
-    expect(await screen.findByText('Deactivated')).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
-    await vi.waitFor(() => expect(calls(/\/api\/people\/7$/, 'DELETE')).toHaveLength(1));
   });
 });
 
@@ -229,37 +217,19 @@ describe('Making someone a BU Head', () => {
     const dialog = await openDialog();
     const confirm = within(dialog).getByRole('button', { name: 'Make BU Head' });
 
-    expect(confirm.disabled).toBe(true); // your password first
-    fireEvent.change(within(dialog).getByLabelText('Your password, to confirm'), {
-      target: { value: 'my password' },
-    });
+    expect(within(dialog).queryByLabelText(/password/i)).toBeNull(); // confirmed in the dialog, no password
     fireEvent.click(confirm);
 
     expect(await within(dialog).findByText(/assigned to Hotel Tower as engineer/)).toBeTruthy();
     expect(screen.getByRole('dialog')).toBeTruthy(); // stays open
   });
 
-  it('promotes with the right password and closes', async () => {
+  it('promotes once confirmed and closes', async () => {
     const dialog = await openDialog();
-    fireEvent.change(within(dialog).getByLabelText('Your password, to confirm'), {
-      target: { value: 'my password' },
-    });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Make BU Head' }));
 
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(await screen.findByText('BU Head')).toBeTruthy();
-    expect(JSON.parse(calls(/make-bu-head$/, 'POST')[0][1].body)).toEqual({ password: 'my password' });
-  });
-});
-
-describe('credentialsCsv', () => {
-  it('writes one quoted line per account, safe for names with commas or quotes', () => {
-    const csv = credentialsCsv([
-      { username: 'a@x.com', full_name: 'Raman, "KV"', employee_code: 'M1', temporary_password: 'p' },
-    ]);
-
-    expect(csv).toBe(
-      '"Username","Full Name","Employee Id","Temporary Password"\r\n"a@x.com","Raman, ""KV""","M1","p"\r\n',
-    );
+    expect(JSON.parse(calls(/make-bu-head$/, 'POST')[0][1].body)).toEqual({ confirm: true });
   });
 });

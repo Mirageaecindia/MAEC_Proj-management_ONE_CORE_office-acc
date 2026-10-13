@@ -1,4 +1,4 @@
-import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query';
 import { ApiError } from './client';
 
 const isClientError = (error) => error instanceof ApiError && error.status >= 400 && error.status < 500;
@@ -9,15 +9,11 @@ const isClientError = (error) => error instanceof ApiError && error.status >= 40
  * - Data is considered fresh for 30 s and refetched when the window regains
  *   focus, replacing the old fixed-interval polling.
  * - 4xx responses are never retried; network/5xx errors retry once.
- * - A 401 anywhere means the session expired: `onUnauthorized` logs out.
+ * - A refusal by MAEC One (401: sign in; 403: no access) is handled for every request
+ *   by the client itself (api/client.js `handleGateRefusal`), not here.
  */
-export function createQueryClient(onUnauthorized) {
-  const handleError = (error) => {
-    if (error instanceof ApiError && error.status === 401) onUnauthorized();
-  };
+export function createQueryClient() {
   return new QueryClient({
-    queryCache: new QueryCache({ onError: handleError }),
-    mutationCache: new MutationCache({ onError: handleError }),
     defaultOptions: {
       queries: {
         staleTime: 30_000,

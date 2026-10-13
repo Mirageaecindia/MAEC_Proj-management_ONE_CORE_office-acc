@@ -10,9 +10,8 @@ let reviewBody = { reviewed: 0, skipped_over_mark: 0, action: 'approved' };
 let timesheetData;
 let rejectedData = [];
 
-const authHeaders = () => ({}); // stable, like the real context
 vi.mock('../../AuthContext', () => ({
-  useAuth: () => ({ role: currentRole, authHeaders, logout: vi.fn() }),
+  useAuth: () => ({ role: currentRole }),
 }));
 
 const SERVER_DATE = { date: '2026-09-24', datetime: '2026-09-24T10:00:00+00:00', timezone: 'UTC' };

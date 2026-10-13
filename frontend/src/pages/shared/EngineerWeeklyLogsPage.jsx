@@ -1,8 +1,7 @@
 import { ArrowLeft } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { API_BASE_URL } from '../../api/client';
-import { useAuth } from '../../AuthContext';
+import { apiFetch } from '../../api/client';
 import { pickProject, rememberProject } from '../../hooks/currentProject';
 import { useServerToday } from '../../hooks/useServerToday';
 import {
@@ -18,7 +17,6 @@ import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 
 export function EngineerWeeklyLogsPage() {
   const [searchParams] = useSearchParams();
-  const { authHeaders } = useAuth();
   const { today, todayStr: todayUtc } = useServerToday(); // rows are dated by the server's UTC day
 
   const targetProjectId = searchParams.get('projectId') ? Number(searchParams.get('projectId')) : null;
@@ -51,7 +49,7 @@ export function EngineerWeeklyLogsPage() {
   const weekInfo = useMemo(() => getWeekInfo(monday), [monday]);
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/projects`, { headers: authHeaders() })
+    apiFetch(`/api/projects`)
       .then((res) => {
         if (!res.ok) throw new Error('Could not fetch projects');
         return res.json();
@@ -64,7 +62,7 @@ export function EngineerWeeklyLogsPage() {
         rememberProject(selected?.id);
       })
       .catch((err) => setError(err.message));
-  }, [targetProjectId, authHeaders]);
+  }, [targetProjectId]);
 
   // An engineer is always restricted to their OWN rows server-side, so even a
   // hand-edited employeeId in the URL cannot reveal another engineer's logs.
@@ -96,15 +94,11 @@ export function EngineerWeeklyLogsPage() {
         setError('');
         // Only the first load says "Loading"; after an approval the table stays and updates.
         const requests = [
-          fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/wbs-structure`, { headers: authHeaders() }),
-          fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timesheet?week_start=${weekStr}`, {
-            headers: authHeaders(),
-          }),
+          apiFetch(`/api/projects/${projectIdNum}/wbs-structure`),
+          apiFetch(`/api/projects/${projectIdNum}/timesheet?week_start=${weekStr}`, {}),
         ];
         if (isEngineer || isLead) {
-          requests.push(
-            fetch(`${API_BASE_URL}/api/projects/${projectIdNum}/timeline-logs`, { headers: authHeaders() }),
-          );
+          requests.push(apiFetch(`/api/projects/${projectIdNum}/timeline-logs`));
         }
         const [nodesRes, timesheetRes, timelineRes] = await Promise.all(requests);
         if (!nodesRes.ok || !timesheetRes.ok) {
@@ -125,7 +119,7 @@ export function EngineerWeeklyLogsPage() {
         setLoaded(true);
       }
     },
-    [authHeaders, isEngineer, isLead],
+    [isEngineer, isLead],
   );
 
   useEffect(() => {
@@ -145,9 +139,9 @@ export function EngineerWeeklyLogsPage() {
   const decide = async (entry, action, reason = null) => {
     try {
       setError('');
-      const response = await fetch(`${API_BASE_URL}/api/time-log-entries/${entry.id}/${action}`, {
+      const response = await apiFetch(`/api/time-log-entries/${entry.id}/${action}`, {
         method: 'POST',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
       if (!response.ok) {

@@ -10,7 +10,7 @@ import { ResourceBookingPage } from './ResourceBookingPage';
 const WAIT = { timeout: 5000 };
 
 vi.mock('../../AuthContext', () => {
-  const auth = { role: 'bu_head', authHeaders: () => ({}), logout: vi.fn() }; // stable, like the real context
+  const auth = { role: 'bu_head' }; // stable, like the real context
   return { useAuth: () => auth };
 });
 

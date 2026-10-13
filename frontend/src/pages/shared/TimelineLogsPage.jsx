@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { API_BASE_URL } from '../../api/client';
+import { apiFetch } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { pickProject, useProjectChoice } from '../../hooks/currentProject';
 import { useServerToday } from '../../hooks/useServerToday';
@@ -35,7 +35,7 @@ function clampPct(value) {
 
 export function TimelineLogsPage() {
   const [searchParams] = useSearchParams();
-  const { role, authHeaders } = useAuth();
+  const { role } = useAuth();
   const targetProjectId = searchParams.get('projectId') ? Number(searchParams.get('projectId')) : null;
 
   const [projects, setProjects] = useState([]);
@@ -65,7 +65,7 @@ export function TimelineLogsPage() {
   const isLead = project?.my_role === 'lead';
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/projects`, { headers: authHeaders() })
+    apiFetch(`/api/projects`)
       .then((res) => {
         if (!res.ok) throw new Error('Could not fetch projects');
         return res.json();
@@ -74,7 +74,7 @@ export function TimelineLogsPage() {
         setProjects(Array.isArray(data) ? data : []);
       })
       .catch((err) => setError(err.message));
-  }, [authHeaders]);
+  }, []);
 
   useEffect(() => {
     setSelectedId((current) => String(pickProject(projects, targetProjectId ?? current)?.id ?? ''));
@@ -97,9 +97,9 @@ export function TimelineLogsPage() {
     setEntries([]);
     try {
       const [nodesRes, timesheetRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/projects/${id}/wbs-structure`, { headers: authHeaders() }),
+        apiFetch(`/api/projects/${id}/wbs-structure`),
         // One row per subtask, engineer and day, banked by Logout.
-        fetch(`${API_BASE_URL}/api/projects/${id}/timesheet?week_start=${weekStr}`, { headers: authHeaders() }),
+        apiFetch(`/api/projects/${id}/timesheet?week_start=${weekStr}`),
       ]);
 
       if (!nodesRes.ok || !timesheetRes.ok) {
@@ -119,7 +119,7 @@ export function TimelineLogsPage() {
       setEntries(Array.isArray(timesheetData) ? timesheetData : []);
 
       if (isEngineer || isLead) {
-        const timelineRes = await fetch(`${API_BASE_URL}/api/projects/${id}/timeline-logs`, { headers: authHeaders() });
+        const timelineRes = await apiFetch(`/api/projects/${id}/timeline-logs`);
         if (!timelineRes.ok) {
           throw new Error('Failed to load task timeline data.');
         }
@@ -136,7 +136,7 @@ export function TimelineLogsPage() {
         setError(err.message);
       }
     }
-  }, [authHeaders, isEngineer, isLead]);
+  }, [isEngineer, isLead]);
 
   useEffect(() => {
     if (projectId) {
@@ -272,9 +272,9 @@ export function TimelineLogsPage() {
     if (!projectId || !weekStartStr) return;
     try {
       setSheetMessage(null);
-      const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/hours/review`, {
+      const response = await apiFetch(`/api/projects/${projectId}/hours/review`, {
         method: 'POST',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'approved', week_start_date: weekStartStr, employee_id: employeeId }),
       });
       const data = await response.json().catch(() => ({}));

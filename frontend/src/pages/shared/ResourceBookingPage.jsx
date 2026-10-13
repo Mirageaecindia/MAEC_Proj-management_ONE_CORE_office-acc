@@ -1,7 +1,7 @@
 import { ChevronDown, Pencil, Search, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
-import { API_BASE_URL } from '../../api/client';
+import { apiFetch } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { pickProject, useProjectChoice } from '../../hooks/currentProject';
 import { useServerToday } from '../../hooks/useServerToday';
@@ -104,7 +104,7 @@ function statusClass(status) {
 export function ResourceBookingPage() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const { role, authHeaders, logout } = useAuth();
+  const { role } = useAuth();
   const isBuHead = role === 'bu_head';
 
   const rawTargetId = searchParams.get('projectId') || location.state?.projectId;
@@ -178,16 +178,16 @@ export function ResourceBookingPage() {
   const loadNotifications = useCallback(async () => {
     if (!isBuHead) { setNotifications([]); return; }
     try {
-      const response = await fetch(`${API_BASE_URL}/api/notifications`, { headers: authHeaders() });
+      const response = await apiFetch(`/api/notifications`);
       if (response.ok) setNotifications(await response.json());
     } catch { /* ignore */ }
-  }, [isBuHead, authHeaders]);
+  }, [isBuHead]);
 
   const loadProjectData = useCallback(async (id) => {
     try {
       const [bookingResponse, summaryResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/projects/${id}/resource-bookings`, { headers: authHeaders() }),
-        fetch(`${API_BASE_URL}/api/projects/${id}/resource-summary`, { headers: authHeaders() }),
+        apiFetch(`/api/projects/${id}/resource-bookings`),
+        apiFetch(`/api/projects/${id}/resource-summary`),
       ]);
       if (!bookingResponse.ok || !summaryResponse.ok) throw new Error('Could not load resource data.');
       setBookings(await bookingResponse.json());
@@ -196,7 +196,7 @@ export function ResourceBookingPage() {
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, [authHeaders]);
+  }, []);
 
   // The timeline shows the selected project's engineers (with their other commitments).
   const loadGantt = useCallback(async () => {
@@ -205,16 +205,16 @@ export function ResourceBookingPage() {
       return;
     }
     try {
-      const response = await fetch(`${API_BASE_URL}/api/resource-bookings/gantt?project_id=${projectId}`, { headers: authHeaders() });
+      const response = await apiFetch(`/api/resource-bookings/gantt?project_id=${projectId}`);
       if (response.ok) {
         const data = await response.json();
         setGanttData(data);
       }
     } catch { /* ignore */ }
-  }, [authHeaders, projectId]);
+  }, [projectId]);
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/projects`, { headers: authHeaders() })
+    apiFetch(`/api/projects`)
       .then((response) => {
         if (!response.ok) throw new Error('Could not fetch projects');
         return response.json();
@@ -224,7 +224,7 @@ export function ResourceBookingPage() {
         setProjectsLoaded(true);
       })
       .catch((loadError) => setError(loadError.message));
-  }, [authHeaders]);
+  }, []);
 
   useEffect(() => {
     setSelectedId((current) => String(pickProject(projects, targetProjectId ?? current)?.id ?? ''));
@@ -236,14 +236,14 @@ export function ResourceBookingPage() {
   }, [projectId, loadProjectData, loadGantt]);
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/employees`, { headers: authHeaders() })
+    apiFetch(`/api/employees`)
       .then((response) => {
         if (!response.ok) throw new Error('Could not load employees');
         return response.json();
       })
       .then((data) => setEmployees(data))
       .catch(() => {});
-  }, [authHeaders]);
+  }, []);
 
   const intervalRef = useRef(null);
   useEffect(() => {
@@ -329,9 +329,8 @@ export function ResourceBookingPage() {
     if (!window.confirm('Are you sure you want to remove this resource booking?')) return;
     setError('');
     try {
-      const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/resource-bookings/${booking.id}`, {
+      const response = await apiFetch(`/api/projects/${projectId}/resource-bookings/${booking.id}`, {
         method: 'DELETE',
-        headers: authHeaders(),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.detail || 'Could not delete booking.');
@@ -352,11 +351,11 @@ export function ResourceBookingPage() {
       if (!form.start_date || !form.end_date) throw new Error('Give the booking a start and an end date: they decide when the engineer’s time is taken.');
       if (form.end_date < form.start_date) throw new Error('End date cannot be before start date.');
       const url = modalMode === 'edit'
-        ? `${API_BASE_URL}/api/projects/${projectId}/resource-bookings/${editingBookingId}`
-        : `${API_BASE_URL}/api/projects/${projectId}/resource-bookings`;
-      const response = await fetch(url, {
+        ? `/api/projects/${projectId}/resource-bookings/${editingBookingId}`
+        : `/api/projects/${projectId}/resource-bookings`;
+      const response = await apiFetch(url, {
         method: modalMode === 'edit' ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           employee_id: Number(form.employee_id),
           planned_hours: computedPlannedHours,
@@ -367,10 +366,7 @@ export function ResourceBookingPage() {
       });
       const body = await response.json();
       if (!response.ok) {
-        if (response.status === 401) {
-          await logout();
-          return;
-        }
+        if (response.status === 401) return; // on its way to MAEC One's sign-in (apiFetch)
         if (response.headers.get('X-Error-Code') === 'ALLOCATION_LIMIT') {
           setCapError(body.detail || 'Allocation limit reached.');
         } else {
@@ -393,12 +389,11 @@ export function ResourceBookingPage() {
     if (!projectId) return;
     setError('');
     try {
-      const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/resource-bookings/submit`, {
+      const response = await apiFetch(`/api/projects/${projectId}/resource-bookings/submit`, {
         method: 'POST',
-        headers: authHeaders(),
       });
       const body = await response.json();
-      if (response.status === 401) { await logout(); return; }
+      if (response.status === 401) return; // on its way to MAEC One's sign-in (apiFetch)
       if (!response.ok) throw new Error(body.detail || 'Could not submit for approval.');
       await Promise.all([loadProjectData(projectId), loadNotifications()]);
       loadGantt();
@@ -411,12 +406,11 @@ export function ResourceBookingPage() {
     if (!projectId) return;
     setError('');
     try {
-      const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/resource-bookings/approve`, {
+      const response = await apiFetch(`/api/projects/${projectId}/resource-bookings/approve`, {
         method: 'POST',
-        headers: authHeaders(),
       });
       const body = await response.json();
-      if (response.status === 401) { await logout(); return; }
+      if (response.status === 401) return; // on its way to MAEC One's sign-in (apiFetch)
       if (!response.ok) throw new Error(body.detail || 'Could not approve allocation.');
       await Promise.all([loadProjectData(projectId), loadNotifications()]);
       loadGantt();
@@ -450,9 +444,8 @@ export function ResourceBookingPage() {
 
   async function markNotificationRead(id) {
     try {
-      await fetch(`${API_BASE_URL}/api/notifications/${id}/read`, {
+      await apiFetch(`/api/notifications/${id}/read`, {
         method: 'POST',
-        headers: authHeaders(),
       });
     } catch { /* ignore */ }
   }

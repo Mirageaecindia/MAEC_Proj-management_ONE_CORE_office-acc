@@ -6,9 +6,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { EngineerWeeklyLogsPage } from './EngineerWeeklyLogsPage';
 
 let currentRole = 'engineer';
-const authHeaders = () => ({});
 vi.mock('../../AuthContext', () => ({
-  useAuth: () => ({ role: currentRole, authHeaders, logout: vi.fn() }),
+  useAuth: () => ({ role: currentRole }),
 }));
 
 const PROJECTS = [{ id: 1, project_name: 'TEST 1' }];

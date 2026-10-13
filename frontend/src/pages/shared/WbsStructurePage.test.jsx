@@ -19,8 +19,6 @@ vi.mock('../../AuthContext', () => {
   const auth = {
     user: { id: 1, employee_id: 3 },
     role: 'engineer',
-    authHeaders: () => ({}),
-    logout: vi.fn(),
   };
   return { useAuth: () => auth };
 });

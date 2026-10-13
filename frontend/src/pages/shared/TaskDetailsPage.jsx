@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { X } from 'lucide-react';
-import { API_BASE_URL } from '../../api/client';
+import { apiFetch } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useLogoutTracking, useStartTracking, useTrackingState } from '../../hooks/useTracking';
@@ -27,7 +27,7 @@ function formatDate(dateStr) {
 export function TaskDetailsPage() {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
-    const { user, role, authHeaders, logout } = useAuth();
+    const { user, role } = useAuth();
     const isStaff = role === 'engineer'; // everyone but the BU Head
     const isBuHead = role === 'bu_head';
 
@@ -77,7 +77,7 @@ export function TaskDetailsPage() {
         if (!quiet) setLoading(true);
         setError('');
         try {
-            const resp = await fetch(`${API_BASE_URL}/api/wbs-nodes/${nodeId}`, { headers: authHeaders() });
+            const resp = await apiFetch(`/api/wbs-nodes/${nodeId}`);
             if (!resp.ok) {
                 const body = await resp.json().catch(() => ({}));
                 throw new Error(body.detail || 'Could not load task details.');
@@ -89,15 +89,15 @@ export function TaskDetailsPage() {
         } finally {
             setLoading(false);
         }
-    }, [nodeId, authHeaders]);
+    }, [nodeId]);
 
     const loadProject = useCallback(async () => {
         if (!projectId) return;
         try {
-            const resp = await fetch(`${API_BASE_URL}/api/projects/${projectId}`, { headers: authHeaders() });
+            const resp = await apiFetch(`/api/projects/${projectId}`);
             if (resp.ok) setProject(await resp.json());
         } catch { /* project optional */ }
-    }, [projectId, authHeaders]);
+    }, [projectId]);
 
     useEffect(() => {
         loadData();
@@ -122,16 +122,16 @@ export function TaskDetailsPage() {
         setUpdating(true);
         setError('');
         try {
-            const resp = await fetch(`${API_BASE_URL}/api/wbs-nodes/${nodeId}/advance-status`, {
+            const resp = await apiFetch(`/api/wbs-nodes/${nodeId}/advance-status`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     new_status: statusSelect,
                     comment: commentText || null,
                 }),
             });
             const body = await resp.json().catch(() => ({}));
-            if (resp.status === 401) { await logout(); return; }
+            if (resp.status === 401) return; // on its way to MAEC One's sign-in (apiFetch)
             if (!resp.ok) throw new Error(body.detail || 'Could not update status.');
             setCommentText('');
             setStatusSelect('');
@@ -156,13 +156,13 @@ export function TaskDetailsPage() {
         setUpdating(true);
         setConfirmError('');
         try {
-            const resp = await fetch(`${API_BASE_URL}/api/wbs-nodes/${nodeId}/advance-status`, {
+            const resp = await apiFetch(`/api/wbs-nodes/${nodeId}/advance-status`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ new_status: pendingStatus, comment: null }),
             });
             const body = await resp.json().catch(() => ({}));
-            if (resp.status === 401) { await logout(); return; }
+            if (resp.status === 401) return; // on its way to MAEC One's sign-in (apiFetch)
             if (!resp.ok) throw new Error(body.detail || 'Could not update status.');
             setNode((current) => (current ? { ...current, deliverable_status: pendingStatus } : current));
             setPendingStatus(null);
@@ -184,13 +184,13 @@ export function TaskDetailsPage() {
         setUpdating(true);
         setError('');
         try {
-            const resp = await fetch(`${API_BASE_URL}/api/wbs-nodes/${nodeId}/approve`, {
+            const resp = await apiFetch(`/api/wbs-nodes/${nodeId}/approve`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ new_status: 'Approved', comment: commentText || null }),
             });
             const body = await resp.json().catch(() => ({}));
-            if (resp.status === 401) { await logout(); return; }
+            if (resp.status === 401) return; // on its way to MAEC One's sign-in (apiFetch)
             if (!resp.ok) throw new Error(body.detail || 'Could not approve the task.');
             setCommentText('');
             showToast('success', 'Task approved.');
@@ -206,13 +206,13 @@ export function TaskDetailsPage() {
     async function handleAddComment() {
         if (!commentText.trim() || !nodeId) return;
         try {
-            const resp = await fetch(`${API_BASE_URL}/api/wbs-nodes/${nodeId}/comments`, {
+            const resp = await apiFetch(`/api/wbs-nodes/${nodeId}/comments`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ comment: commentText }),
             });
             const body = await resp.json().catch(() => ({}));
-            if (resp.status === 401) { await logout(); return; }
+            if (resp.status === 401) return; // on its way to MAEC One's sign-in (apiFetch)
             if (!resp.ok) throw new Error(body.detail || 'Could not add comment.');
             setCommentText('');
             showToast('success', 'Comment added.');

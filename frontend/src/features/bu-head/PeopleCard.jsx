@@ -1,40 +1,47 @@
-import { Download, KeyRound, Upload } from 'lucide-react';
+import { Upload, UserPlus } from 'lucide-react';
 import { useState } from 'react';
+import { useAuth } from '../../AuthContext';
 import { ErrorBanner } from '../../components/Feedback';
-import { useImportPeople, useResetPassword } from '../../hooks/usePeople';
-import { credentialsCsv } from './peopleCsv';
+import { useAddPerson, useImportPeople } from '../../hooks/usePeople';
 import { PeopleList } from './PeopleList';
 
-/** Hand the temporary passwords over as a CSV file, built in the browser: never sent anywhere else. */
-function downloadCredentials(created) {
-  const url = URL.createObjectURL(new Blob([credentialsCsv(created)], { type: 'text/csv' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'temporary-passwords.csv';
-  link.click();
-  URL.revokeObjectURL(url);
-}
+const NO_ONE = { employee_code: '', full_name: '', email: '', job_role: '' };
+const SEAT_REMINDER = 'Each person still needs a seat on Project Management in MAEC One to sign in.';
 
 /**
- * Onboarding for the BU Head, until the company's global admin application takes it over:
- * import engineers from the HR export, see and correct everyone with an account, deactivate
- * a leaver, and reset a forgotten password.
+ * People, for the BU Head: profiles in Project Management (employee record and role here),
+ * from the HR export or one at a time, then seen and corrected in the list below.
+ * Signing in, access and passwords are managed in MAEC One.
  */
 export function PeopleCard() {
+  const { signOutUrl: maecOneUrl } = useAuth();
   const importPeople = useImportPeople();
-  const resetPassword = useResetPassword();
+  const addPerson = useAddPerson();
   const [file, setFile] = useState(null);
-  const [username, setUsername] = useState('');
+  const [person, setPerson] = useState(NO_ONE);
   const result = importPeople.data;
-  const reset = resetPassword.data;
+  const added = addPerson.data;
+  const field = (name) => ({
+    value: person[name],
+    onChange: (event) => setPerson((current) => ({ ...current, [name]: event.target.value })),
+  });
 
   return (
     <section className="people-card" aria-label="People">
       <h2>People</h2>
       <p className="people-hint">
-        Import engineers from the HR export (CSV with Employee Id, Full Name, Work Email and Job Role). Each
-        new person signs in with their work email and a temporary password, and must set their own at the
-        first login. Remove anyone who shouldn&apos;t have an account from the file first.
+        Sign-in, access and passwords are managed in MAEC One
+        {maecOneUrl && (
+          <>
+            {' '}
+            (<a href={maecOneUrl}>open MAEC One</a>)
+          </>
+        )}
+        .
+      </p>
+      <p className="people-hint">
+        Import engineers&apos; profiles from the HR export (CSV with Employee Id, Full Name, Work Email and
+        Job Role). Remove anyone who shouldn&apos;t have a profile from the file first. {SEAT_REMINDER}
       </p>
 
       <div className="people-row">
@@ -58,24 +65,10 @@ export function PeopleCard() {
       {result && (
         <div className="people-result" role="status">
           <p>
-            <strong>{result.created.length}</strong> account{result.created.length === 1 ? '' : 's'} created,{' '}
+            <strong>{result.created.length}</strong> profile{result.created.length === 1 ? '' : 's'} created,{' '}
             <strong>{result.skipped.length}</strong> skipped.
+            {result.created.length > 0 && ` ${SEAT_REMINDER}`}
           </p>
-          {result.created.length > 0 && (
-            <>
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => downloadCredentials(result.created)}
-              >
-                <Download size={15} /> Download the temporary passwords (CSV)
-              </button>
-              <p className="people-warning">
-                Download it now: the passwords are shown only once and are not stored. Give each person their
-                own.
-              </p>
-            </>
-          )}
           {result.skipped.length > 0 && (
             <ul className="people-skipped">
               {result.skipped.map((row) => (
@@ -88,35 +81,33 @@ export function PeopleCard() {
         </div>
       )}
 
-      <h3>Reset a forgotten password</h3>
+      <h3>Add one person</h3>
+      <p className="people-hint">
+        For someone with a seat in MAEC One whose profile here isn&apos;t set up yet.
+      </p>
       <form
         className="people-row"
         onSubmit={(event) => {
           event.preventDefault();
-          if (username.trim()) resetPassword.mutate(username.trim());
+          addPerson.mutate(person, { onSuccess: () => setPerson(NO_ONE) });
         }}
       >
-        <input
-          type="text"
-          aria-label="Username to reset"
-          placeholder="Work email"
-          value={username}
-          onChange={(event) => setUsername(event.target.value)}
-        />
+        <input type="text" aria-label="Employee Id" placeholder="Employee Id" {...field('employee_code')} />
+        <input type="text" aria-label="Full name" placeholder="Full name" {...field('full_name')} />
+        <input type="email" aria-label="Work email" placeholder="Work email" {...field('email')} />
+        <input type="text" aria-label="Job role" placeholder="Job role" {...field('job_role')} />
         <button
           type="submit"
           className="button button-secondary"
-          disabled={!username.trim() || resetPassword.isPending}
+          disabled={Object.values(person).some((value) => !value.trim()) || addPerson.isPending}
         >
-          <KeyRound size={15} /> Reset
+          <UserPlus size={15} /> Add
         </button>
       </form>
-      <ErrorBanner error={resetPassword.error} />
-      {reset && (
+      <ErrorBanner error={addPerson.error} />
+      {added && (
         <p className="people-result" role="status">
-          New temporary password for <strong>{reset.full_name || reset.username}</strong>:{' '}
-          <code className="people-password">{reset.temporary_password}</code>. They must change it when they
-          sign in.
+          Profile created for <strong>{added.full_name}</strong> ({added.username}). {SEAT_REMINDER}
         </p>
       )}
 

@@ -31,7 +31,7 @@ const APP_NAME = 'ProManage';
 
 export function MaecHeader() {
   const [accountOpen, setAccountOpen] = useState(false);
-  const { user, role, logout } = useAuth();
+  const { user, role, signOutUrl, changePasswordUrl } = useAuth();
   const leadsProjects = useLeadsProjects();
   const menuRef = useRef(null);
   const navigate = useNavigate();
@@ -61,11 +61,6 @@ export function MaecHeader() {
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [accountOpen]);
-
-  function handleLogout() {
-    setAccountOpen(false);
-    logout();
-  }
 
   return (
     // The logo bar and the tabs stay at the top of the window while the page scrolls.
@@ -98,16 +93,10 @@ export function MaecHeader() {
                   {displayName}
                   {roleLabel && <small> — {roleLabel}</small>}
                 </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setAccountOpen(false);
-                    navigate('/change-password');
-                  }}
-                >
+                {/* Passwords and signing out live in MAEC One, which signs in every app. */}
+                <a role="menuitem" href={changePasswordUrl}>
                   <KeyRound size={13} /> Change password
-                </button>
+                </a>
                 <button
                   type="button"
                   role="menuitem"
@@ -118,9 +107,9 @@ export function MaecHeader() {
                 >
                   <History size={13} /> My activity
                 </button>
-                <button className="account-logout" type="button" role="menuitem" onClick={handleLogout}>
-                  <LogOut size={13} /> Logout
-                </button>
+                <a className="account-logout" role="menuitem" href={signOutUrl} title="Sign out at MAEC One">
+                  <LogOut size={13} /> Sign out
+                </a>
               </div>
             )}
           </div>

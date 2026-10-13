@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { peopleApi } from '../api/people';
 import { queryKeys } from './queryKeys';
 
-/** Everyone with an account (BU Head). */
+/** Everyone with a profile (BU Head). */
 export function usePeople() {
   return useQuery({ queryKey: queryKeys.people, queryFn: peopleApi.list });
 }
@@ -16,31 +16,22 @@ function usePeopleMutation(mutationFn) {
   });
 }
 
-/** Import engineers from the HR export; the result holds the temporary passwords, once. */
+/** Import engineers' profiles from the HR export (no passwords: they sign in at MAEC One). */
 export function useImportPeople() {
   return usePeopleMutation(peopleApi.import);
 }
 
-/** A new temporary password for an engineer who forgot theirs. */
-export function useResetPassword() {
-  return usePeopleMutation(peopleApi.resetPassword);
+/** One profile, for someone with a seat in MAEC One and none here yet. */
+export function useAddPerson() {
+  return usePeopleMutation(peopleApi.add);
 }
 
-/** `{ id, full_name, username, job_role }` */
+/** `{ id, full_name, job_role }` */
 export function useUpdatePerson() {
   return usePeopleMutation(({ id, ...fields }) => peopleApi.update(id, fields));
 }
 
-/** `{ id, active }` */
-export function useSetPersonActive() {
-  return usePeopleMutation(({ id, active }) => peopleApi.setActive(id, active));
-}
-
-export function useDeletePerson() {
-  return usePeopleMutation(peopleApi.remove);
-}
-
-/** `{ id, makeBuHead, password }` */
+/** `{ id, makeBuHead }`, once the BU Head confirmed it. */
 export function useChangeRole() {
-  return usePeopleMutation(({ id, makeBuHead, password }) => peopleApi.changeRole(id, makeBuHead, password));
+  return usePeopleMutation(({ id, makeBuHead }) => peopleApi.changeRole(id, makeBuHead));
 }

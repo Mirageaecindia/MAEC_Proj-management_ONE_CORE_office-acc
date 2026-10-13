@@ -2,12 +2,11 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import { MaecHeader } from './components/MaecHeader';
-import { ChangePasswordPage } from './pages/ChangePasswordPage';
+import { SignInStatus } from './components/SignInStatus';
 import { TrackingBar } from './components/TrackingBar';
 import { useLeadsProjects } from './hooks/useProjects';
 import { useTrackingState } from './hooks/useTracking';
 import { canAccess } from './utils/access';
-import { LoginPage } from './pages/LoginPage';
 import { QueryProvider } from './providers/QueryProvider';
 
 // Pages are code-split: each role only downloads the screens it opens.
@@ -81,46 +80,26 @@ function WorkspaceRoute({ children, roles }) {
 }
 
 function AppRoutes() {
-  const { user, role, loading } = useAuth();
+  const { user, role, loading, blocked, error, signOutUrl } = useAuth();
   // An engineer's Login/Logout heartbeat runs on every page, not just Task Details.
-  useTrackingState({ enabled: role === 'engineer' && !user?.must_change_password });
+  useTrackingState({ enabled: role === 'engineer' && !blocked });
 
-  if (loading) {
+  // Nobody signs in here: MAEC One does (api/client.js sends the window there on a 401).
+  if (blocked)
     return (
-      <div className="login-page">
-        <div className="login-card">
-          <div className="login-logo">MAEC</div>
-          <div className="login-loading">Restoring session…</div>
-        </div>
-      </div>
+      <SignInStatus
+        kind={blocked.kind}
+        message={blocked.message}
+        maecOneUrl={blocked.maecOneUrl || signOutUrl}
+      />
     );
-  }
-
-  if (!user) {
-    return (
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
-    );
-  }
-
-  // A temporary password (onboarding, reset) opens nothing but this screen until it is replaced.
-  if (user.must_change_password) return <ChangePasswordPage forced />;
+  if (loading) return <SignInStatus kind="checking" />;
+  if (!user) return <SignInStatus kind="unavailable" message={error} />;
 
   return (
     <Suspense fallback={<div className="empty-state">Loading…</div>}>
       <Routes>
         <Route path="/" element={<HomeRedirect />} />
-        <Route
-          path="/change-password"
-          element={
-            <WorkspaceRoute roles={['bu_head', 'engineer']}>
-              <ChangePasswordPage />
-            </WorkspaceRoute>
-          }
-        />
-        <Route path="/login" element={<Navigate to="/" replace />} />
         <Route
           path="/my-activity"
           element={

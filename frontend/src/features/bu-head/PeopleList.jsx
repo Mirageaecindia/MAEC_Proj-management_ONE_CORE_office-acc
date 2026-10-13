@@ -1,19 +1,12 @@
 import { useMemo, useState } from 'react';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ErrorBanner } from '../../components/Feedback';
-import {
-  useChangeRole,
-  useDeletePerson,
-  usePeople,
-  useSetPersonActive,
-  useUpdatePerson,
-} from '../../hooks/usePeople';
-import { PasswordInput } from '../../components/PasswordInput';
+import { useChangeRole, usePeople, useUpdatePerson } from '../../hooks/usePeople';
 
+// Whether someone may sign in is MAEC One's to decide; a profile deactivated here before
+// the move stays deactivated.
 function statusOf(person) {
-  if (!person.is_active) return ['Deactivated', 'status-none'];
-  if (person.must_change_password) return ['Not signed in yet', 'status-pending'];
-  return ['Active', 'status-approved'];
+  return person.is_active ? ['Active', 'status-approved'] : ['Deactivated', 'status-none'];
 }
 
 const matches = (person, query) =>
@@ -22,12 +15,11 @@ const matches = (person, query) =>
   );
 
 /** One person's row, or their edit form. */
-function PersonRow({ person, onDelete, onChangeRole }) {
+function PersonRow({ person, onChangeRole }) {
   const update = useUpdatePerson();
-  const setActive = useSetPersonActive();
-  const [editing, setEditing] = useState(null); // { full_name, username, job_role } while editing
+  const [editing, setEditing] = useState(null); // { full_name, job_role } while editing
   const [status, pill] = statusOf(person);
-  const busy = update.isPending || setActive.isPending;
+  const busy = update.isPending;
 
   if (editing) {
     const save = (event) => {
@@ -46,13 +38,6 @@ function PersonRow({ person, onDelete, onChangeRole }) {
               />
             </label>
             <label>
-              <span>Work email (signs in with)</span>
-              <input
-                value={editing.username}
-                onChange={(event) => setEditing({ ...editing, username: event.target.value })}
-              />
-            </label>
-            <label>
               <span>Job role</span>
               <input
                 value={editing.job_role}
@@ -67,11 +52,6 @@ function PersonRow({ person, onDelete, onChangeRole }) {
                 Cancel
               </button>
             </span>
-            {person.username !== editing.username.trim().toLowerCase() && (
-              <small className="people-warning">
-                They will sign in with the new email from now on: tell them.
-              </small>
-            )}
             <ErrorBanner error={update.error} />
           </form>
         </td>
@@ -118,56 +98,33 @@ function PersonRow({ person, onDelete, onChangeRole }) {
               onClick={() =>
                 setEditing({
                   full_name: person.full_name || '',
-                  username: person.username,
                   job_role: person.job_role || '',
                 })
               }
             >
               Edit
             </button>
-            <button
-              type="button"
-              className={person.is_active ? 'review-btn review-reject' : 'review-btn review-approve'}
-              disabled={busy}
-              onClick={() => setActive.mutate({ id: person.id, active: !person.is_active })}
-            >
-              {person.is_active ? 'Deactivate' : 'Reactivate'}
-            </button>
-            {person.can_delete && (
-              <button
-                type="button"
-                className="review-btn review-reject"
-                disabled={busy}
-                onClick={() => onDelete(person)}
-              >
-                Delete
-              </button>
-            )}
           </span>
         )}
-        <ErrorBanner error={setActive.error} />
       </td>
     </tr>
   );
 }
 
 /**
- * Everyone with an account (never passwords). The BU Head corrects an engineer's name, work
- * email or job role, deactivates a leaver, and deletes only an account created by mistake.
+ * Everyone with a profile. The BU Head corrects an engineer's name or job role, and makes
+ * or unmakes a BU Head. The work email is who the person is in MAEC One: not edited here.
  */
 export function PeopleList() {
   const { data: people = [], error, isLoading } = usePeople();
-  const deletePerson = useDeletePerson();
   const [query, setQuery] = useState('');
-  const [deleting, setDeleting] = useState(null);
   const changeRole = useChangeRole();
-  const [roleChange, setRoleChange] = useState(null); // { person, makeBuHead, password }
+  const [roleChange, setRoleChange] = useState(null); // { person, makeBuHead }
 
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return needle ? people.filter((person) => matches(person, needle)) : people;
   }, [people, query]);
-  const waiting = people.filter((person) => person.is_active && person.must_change_password).length;
 
   return (
     <div className="people-list">
@@ -181,8 +138,7 @@ export function PeopleList() {
           onChange={(event) => setQuery(event.target.value)}
         />
         <span className="people-count">
-          {people.length} account{people.length === 1 ? '' : 's'}
-          {waiting > 0 && ` · ${waiting} not signed in yet`}
+          {people.length} profile{people.length === 1 ? '' : 's'}
         </span>
       </div>
       <ErrorBanner error={error} />
@@ -206,17 +162,16 @@ export function PeopleList() {
                 <PersonRow
                   key={person.id}
                   person={person}
-                  onDelete={setDeleting}
                   onChangeRole={(target, makeBuHead) => {
                     changeRole.reset();
-                    setRoleChange({ person: target, makeBuHead, password: '' });
+                    setRoleChange({ person: target, makeBuHead });
                   }}
                 />
               ))}
               {shown.length === 0 && (
                 <tr>
                   <td colSpan={6} className="timesheet-empty-cell">
-                    {people.length ? 'Nobody matches the search.' : 'No accounts yet.'}
+                    {people.length ? 'Nobody matches the search.' : 'No profiles yet.'}
                   </td>
                 </tr>
               )}
@@ -225,9 +180,8 @@ export function PeopleList() {
         </div>
       )}
       <p className="people-hint">
-        Deactivate a leaver: they can&apos;t sign in, and their bookings and hours stay on record. Delete is
-        offered only for an account with no work on record, such as one imported by mistake. Make BU Head
-        works only for someone on no live project, as engineer or lead.
+        A leaver&apos;s access is removed in MAEC One; their bookings and hours stay on record here. Make BU
+        Head works only for someone on no live project, as engineer or lead.
       </p>
       {roleChange && (
         <ConfirmDialog
@@ -240,11 +194,10 @@ export function PeopleList() {
           confirmLabel={roleChange.makeBuHead ? 'Make BU Head' : 'Remove BU Head'}
           busyLabel="Saving…"
           busy={changeRole.isPending}
-          confirmDisabled={!roleChange.password}
           error={changeRole.error}
           onConfirm={() =>
             changeRole.mutate(
-              { id: roleChange.person.id, makeBuHead: roleChange.makeBuHead, password: roleChange.password },
+              { id: roleChange.person.id, makeBuHead: roleChange.makeBuHead },
               { onSuccess: () => setRoleChange(null) },
             )
           }
@@ -254,32 +207,7 @@ export function PeopleList() {
             {roleChange.makeBuHead
               ? 'A BU Head approves bookings and extensions, sees costs and can stop projects. They no longer lead projects, get booked or log hours. Only someone on no live project can be made a BU Head.'
               : 'They become an engineer again and can be booked and made a lead.'}{' '}
-            They are signed out now and sign in again with the new role. The other BU Heads are notified.
-          </p>
-          <label className="field people-confirm-password">
-            <span className="field-label">Your password, to confirm</span>
-            <PasswordInput
-              aria-label="Your password, to confirm"
-              autoComplete="current-password"
-              value={roleChange.password}
-              onChange={(event) => setRoleChange({ ...roleChange, password: event.target.value })}
-            />
-          </label>
-        </ConfirmDialog>
-      )}
-      {deleting && (
-        <ConfirmDialog
-          title={`Delete ${deleting.full_name || deleting.username}?`}
-          confirmLabel="Delete"
-          busyLabel="Deleting…"
-          busy={deletePerson.isPending}
-          error={deletePerson.error}
-          onConfirm={() => deletePerson.mutate(deleting.id, { onSuccess: () => setDeleting(null) })}
-          onCancel={() => setDeleting(null)}
-        >
-          <p className="confirm-modal-text">This removes the account and its employee record.</p>
-          <p className="confirm-modal-subtext">
-            It has no work on record. To bring the person back later, import them again.
+            Their pages follow the new role from their next click. The other BU Heads are notified.
           </p>
         </ConfirmDialog>
       )}

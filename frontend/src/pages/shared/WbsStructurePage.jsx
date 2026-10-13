@@ -3,7 +3,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { wbsBlueprintsApi } from '../../api/wbsBlueprints';
-import { API_BASE_URL } from '../../api/client';
+import { apiFetch } from '../../api/client';
 import { useAuth } from '../../AuthContext';
 import { pickProject, useProjectChoice } from '../../hooks/currentProject';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
@@ -51,7 +51,7 @@ function SelectBox({ checked, indeterminate = false, disabled = false, label, on
 
 export function WbsStructurePage() {
   const navigate = useNavigate();
-  const { user, role, authHeaders } = useAuth();
+  const { user, role } = useAuth();
   const isBuHead = role === 'bu_head';
   const employeeId = user?.employee_id;
   const isAssignedToMe = (task) => task.assigned_engineer_id === employeeId;
@@ -92,7 +92,7 @@ export function WbsStructurePage() {
     setError('');
     const ancestorParam = isEngineer ? '?include_ancestors=true' : '';
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/projects/${projectId}/wbs-structure${ancestorParam}`, { headers: authHeaders() });
+      const resp = await apiFetch(`/api/projects/${projectId}/wbs-structure${ancestorParam}`);
       if (!resp.ok) throw new Error('Could not load WBS tasks.');
       const data = await resp.json();
       const list = Array.isArray(data) ? data : [];
@@ -102,12 +102,12 @@ export function WbsStructurePage() {
     } catch (err) {
       setError(err.message);
     }
-  }, [selectedId, authHeaders, isEngineer]);
+  }, [selectedId, isEngineer]);
 
   useEffect(() => {
     let active = true;
     setError('');
-    fetch(`${API_BASE_URL}/api/projects`, { headers: authHeaders() })
+    apiFetch(`/api/projects`)
       .then(async (projectsResp) => {
         if (!projectsResp.ok) throw new Error('Could not load projects.');
         const projs = await projectsResp.json();
@@ -118,7 +118,7 @@ export function WbsStructurePage() {
         if (active) setError(err.message);
       });
     return () => { active = false; };
-  }, [authHeaders]);
+  }, []);
 
   useEffect(() => {
     setSelectedId((current) => String(pickProject(projects, requestedId ?? current)?.id ?? ''));
@@ -135,7 +135,7 @@ export function WbsStructurePage() {
     if (!isLead) return undefined; // only a lead assigns engineers; the list is theirs to read
     // The Assign Engineer dropdown lists only engineers booked onto THIS
     // project via Resource Booking, refreshed whenever the project changes.
-    fetch(`${API_BASE_URL}/api/projects/${selectedId}/booked-engineers`, { headers: authHeaders() })
+    apiFetch(`/api/projects/${selectedId}/booked-engineers`)
       .then(async (resp) => {
         if (!resp.ok) return;
         const list = await resp.json();
@@ -143,7 +143,7 @@ export function WbsStructurePage() {
       })
       .catch(() => {});
     return () => { active = false; };
-  }, [selectedId, authHeaders, isLead]);
+  }, [selectedId, isLead]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -271,13 +271,13 @@ export function WbsStructurePage() {
       };
       const createUrl =
         nodeMode === 'subtask' && nodeForm.parent_id
-          ? `${API_BASE_URL}/api/wbs-nodes/${nodeForm.parent_id}/subtasks`
-          : `${API_BASE_URL}/api/projects/${selectedId}/wbs-nodes`;
-      const resp = await fetch(
-        isEdit ? `${API_BASE_URL}/api/wbs-nodes/${editNodeId}` : createUrl,
+          ? `/api/wbs-nodes/${nodeForm.parent_id}/subtasks`
+          : `/api/projects/${selectedId}/wbs-nodes`;
+      const resp = await apiFetch(
+        isEdit ? `/api/wbs-nodes/${editNodeId}` : createUrl,
         {
           method: isEdit ? 'PUT' : 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         },
       );
@@ -349,9 +349,9 @@ export function WbsStructurePage() {
       phase: task.phase || null,
       ...changes,
     };
-    const resp = await fetch(`${API_BASE_URL}/api/wbs-nodes/${task.id}`, {
+    const resp = await apiFetch(`/api/wbs-nodes/${task.id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     if (!resp.ok) {
@@ -457,9 +457,9 @@ export function WbsStructurePage() {
   async function undoRecent() {
     setUndoing(true);
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/projects/${selectedId}/wbs-nodes/delete`, {
+      const resp = await apiFetch(`/api/projects/${selectedId}/wbs-nodes/delete`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ node_ids: [...recent.ids] }),
       });
       if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || 'Could not undo.');
@@ -485,7 +485,7 @@ export function WbsStructurePage() {
   async function duplicateNode(task) {
     setDuplicating(true);
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/wbs-nodes/${task.id}/duplicate`, { method: 'POST', headers: authHeaders() });
+      const resp = await apiFetch(`/api/wbs-nodes/${task.id}/duplicate`, { method: 'POST' });
       const body = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(body.detail || 'Could not duplicate.');
       setToast({ type: 'success', message: `Duplicated ${task.wbs_code || task.task_name} as ${body.wbs_code || 'a new item'}.` });
@@ -506,9 +506,9 @@ export function WbsStructurePage() {
     setDeleting(true);
     setDeleteError(null);
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/projects/${selectedId}/wbs-nodes/delete`, {
+      const resp = await apiFetch(`/api/projects/${selectedId}/wbs-nodes/delete`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ node_ids: pendingDelete.ids }),
       });
       const body = await resp.json().catch(() => ({}));
@@ -533,9 +533,8 @@ export function WbsStructurePage() {
       try {
         const form = new FormData();
         form.append('file', file);
-        const resp = await fetch(`${API_BASE_URL}/api/projects/${selectedId}/wbs-upload`, {
+        const resp = await apiFetch(`/api/projects/${selectedId}/wbs-upload`, {
           method: 'POST',
-          headers: authHeaders(),
           body: form,
         });
         if (!resp.ok) throw new Error((await resp.json()).detail || 'Could not upload WBS file.');

@@ -9,7 +9,7 @@ import { TaskDetailsPage } from './TaskDetailsPage';
 const WAIT = { timeout: 5000 };
 
 vi.mock('../../AuthContext', () => {
-  const auth = { role: 'engineer', user: { employee_id: 3 }, authHeaders: () => ({}), logout: vi.fn() }; // stable
+  const auth = { role: 'engineer', user: { employee_id: 3 } }; // stable
   return { useAuth: () => auth };
 });
 
