@@ -101,16 +101,15 @@ def test_lead_does_a_subtask_on_their_own_project(client, db, make, world):
     assert len(client.get(f"/api/projects/{project_id}/wbs-structure", headers=lead).json()) == 3
 
 
-def test_login_and_me_say_whether_the_person_leads_a_project(client, db, world):
-    engineer = client.post("/api/auth/login", json={"username": "eng.arjun", "password": "Passw0rd!"}).json()
-    assert engineer["leads_projects"] is False
+def test_me_says_whether_the_person_leads_a_project(client, db, world):
+    assert client.get("/api/auth/me", headers=world.eng_h).json()["leads_projects"] is False
     assert client.get("/api/auth/me", headers=world.lead_h).json()["leads_projects"] is False  # no project yet
 
     leads = world.create_project()["id"]
     _make_lead(db, leads, world.engineer)
 
     assert client.get("/api/auth/me", headers=world.eng_h).json()["leads_projects"] is True
-    assert client.post("/api/auth/login", json={"username": "lead.e", "password": "Passw0rd!"}).json()["leads_projects"]
+    assert client.get("/api/auth/me", headers=world.lead_h).json()["leads_projects"] is True
 
 
 def test_each_project_tells_the_caller_their_role_on_it(client, db, world):

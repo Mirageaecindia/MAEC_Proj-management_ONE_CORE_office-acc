@@ -1,55 +1,29 @@
-"""Password hashing, bearer-token authentication and role checks.
+"""Who is asking, and role checks.
 
-Passwords are hashed with PBKDF2-HMAC-SHA256 (stdlib). Sessions are opaque
-bearer tokens stored in `login_sessions`. Identity and role always come from
-the token, never from a client-supplied header, query parameter or storage.
+Nobody signs in to this app: MAEC One Core does. The gate (app/api/gate.py) asks Core about
+every request and puts the answer on `request.state.maec`; app/core/identity.py maps it to
+the local users row. Identity and role always come from there, never from a client-supplied
+header, query parameter or storage. The role (bu_head | engineer) is this app's own, read
+from users.role on every request; leading a project is a role on the project
+(app/services/access.py).
 """
 
-import hashlib
-import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 import models
-from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.identity import CoreIdentity, local_user
 from app.core.roles import ALL_ROLES, Role
 
-PBKDF2_ITERATIONS = 100_000
-_ALGO = "pbkdf2_sha256"
-
 FORBIDDEN_FOR_ROLE = "This action is not allowed for the current role."
-SESSION_ERROR = "Session expired or invalid — please log in again."
+NOT_THROUGH_THE_GATE = "MAEC One is unavailable"
 
-
-def hash_password(password: str) -> str:
-    """Return a salted PBKDF2-HMAC-SHA256 hash string: algo$salt$hexdigest."""
-    salt = secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), PBKDF2_ITERATIONS)
-    return f"{_ALGO}${salt}${digest.hex()}"
-
-
-def verify_password(password: str, stored: str) -> bool:
-    try:
-        algo, salt, expected = (stored or "").split("$", 2)
-    except ValueError:
-        return False
-    if algo != _ALGO:
-        return False
-    try:
-        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), PBKDF2_ITERATIONS)
-    except ValueError:
-        return False
-    return secrets.compare_digest(digest.hex(), expected)
-
-
-def bearer_token(authorization: str | None) -> str | None:
-    """Extract the token from an `Authorization: Bearer <token>` header value."""
-    if not authorization or not authorization.lower().startswith("bearer "):
-        return None
-    return authorization.split(" ", 1)[1].strip() or None
+# What users.password_hash holds for an account created after the move to MAEC One: no
+# password matches it. The column is dropped by a later migration, after go-live.
+NO_PASSWORD = "!"
 
 
 def as_utc(value: datetime) -> datetime:
@@ -57,51 +31,24 @@ def as_utc(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
-def session_is_expired(created_at: datetime | None, ttl_hours: float, now: datetime | None = None) -> bool:
-    """A session expires `ttl_hours` after login. A missing timestamp counts as expired."""
-    if created_at is None:
-        return True
-    return (now or datetime.now(UTC)) - as_utc(created_at) > timedelta(hours=ttl_hours)
+def core_identity(request: Request) -> CoreIdentity:
+    """Core's answer for this request. Every API request passes the gate first; a request that
+    somehow did not is refused (503), never let through."""
+    maec = getattr(request.state, "maec", None)
+    if not maec:
+        raise HTTPException(status_code=503, detail=NOT_THROUGH_THE_GATE)
+    return CoreIdentity.from_gate(maec)
 
 
-PASSWORD_CHANGE_REQUIRED = "Set a new password before continuing."
-PASSWORD_CHANGE_CODE = "PASSWORD_CHANGE_REQUIRED"  # X-Error-Code
-
-
-def get_session_user(
-    authorization: str | None = Header(None),
-    db: Session = Depends(get_db),
-) -> models.User:
-    """The signed-in user, or 401, even while they still have to replace a temporary password.
-    Only the account endpoints use this directly (who am I, change my password).
-
-    Expired sessions are deleted on first use, so a stolen or forgotten token
-    stops working after SESSION_TTL_HOURS.
-    """
-    token = bearer_token(authorization)
-    if not token:
-        raise HTTPException(status_code=401, detail=SESSION_ERROR)
-    session = db.query(models.LoginSession).filter_by(token=token).first()
-    if not session:
-        raise HTTPException(status_code=401, detail=SESSION_ERROR)
-    if session_is_expired(session.created_at, get_settings().session_ttl_hours):
-        db.delete(session)
-        db.commit()
-        raise HTTPException(status_code=401, detail=SESSION_ERROR)
-    user = db.get(models.User, session.user_id)
-    if not user or not user.is_active:
-        raise HTTPException(status_code=401, detail=SESSION_ERROR)
-    return user
+def get_session_user(request: Request, db: Session = Depends(get_db)) -> models.User:
+    """The person MAEC One vouched for, as this app's users row; 403 when they have no
+    profile here or theirs is deactivated (app/core/identity.py)."""
+    return local_user(db, core_identity(request))
 
 
 def get_current_user(user: models.User = Depends(get_session_user)) -> models.User:
-    """FastAPI dependency returning the authenticated user, or 401; 403 while a temporary
-    password (onboarding, reset) has not been replaced, so it opens nothing but the
-    change-password screen."""
-    if user.must_change_password:
-        raise HTTPException(
-            status_code=403, detail=PASSWORD_CHANGE_REQUIRED, headers={"X-Error-Code": PASSWORD_CHANGE_CODE}
-        )
+    """FastAPI dependency returning the signed-in user. The same as get_session_user since
+    MAEC One took over passwords; kept as the name every endpoint uses."""
     return user
 
 

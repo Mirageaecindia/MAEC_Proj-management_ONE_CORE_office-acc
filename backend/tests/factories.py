@@ -7,20 +7,18 @@ from datetime import date
 from itertools import count
 
 import models
-from auth import hash_password
+from app.core.security import NO_PASSWORD
 
-PASSWORD = "Passw0rd!"
-# Hash once: PBKDF2 is deliberately slow and every test creates several users.
-_PASSWORD_HASH = hash_password(PASSWORD)
 WEEK = date(2026, 9, 7)
 
 
 class Factory:
-    """Builds rows directly in the database and logs users in via the API."""
+    """Builds rows directly in the database, and signs people in at the fake MAEC One Core."""
 
-    def __init__(self, db, client):
+    def __init__(self, db, client, core):
         self.db = db
         self.client = client
+        self.core = core
         self._seq = count(1)
 
     def next_seq(self):
@@ -36,7 +34,7 @@ class Factory:
         return self._save(
             models.User(
                 username=username,
-                password_hash=_PASSWORD_HASH,
+                password_hash=NO_PASSWORD,
                 full_name=full_name,
                 role=role,
                 employee_id=employee_id,
@@ -54,10 +52,12 @@ class Factory:
             models.Employee(employee_code=f"E{n:04d}", name=name, role_title=discipline, discipline=discipline)
         )
 
-    def headers(self, user):
-        response = self.client.post("/api/auth/login", json={"username": user.username, "password": PASSWORD})
-        assert response.status_code == 200, response.text
-        return {"Authorization": f"Bearer {response.json()['token']}"}
+    def headers(self, user, core_id=None):
+        """Sign the person in at (fake) MAEC One, by the email their profile carries: the
+        browser's cookie and Origin for every request after. Their profile is linked to the
+        Core identity at the first request, as in production (app/core/identity.py)."""
+        token = self.core.sign_in(user.username, user.full_name or "", core_id=core_id or f"core-user-{user.id}")
+        return self.core.headers(token)
 
     def wbs_node(self, project_id, lead, engineer=None, **fields):
         n = next(self._seq)

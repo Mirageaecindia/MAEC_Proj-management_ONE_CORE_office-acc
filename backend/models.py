@@ -115,15 +115,19 @@ class User(Base):
     # Engineers are linked to an employee row so data scoping (bookings,
     # assigned_engineer_id, hours) resolves server-side.
     employee_id = Column(Integer, nullable=True, index=True)
-    # Deactivated accounts (leavers) can't log in and their sessions stop working.
+    # Deactivated accounts (leavers) are refused, whatever MAEC One says.
     is_active = Column(Boolean, nullable=False, default=True, server_default=true())
+    # The person's id in MAEC One Core, which signs everyone in (app/services/identity.py). Linked by
+    # email at their first visit, then the only link: a later email change in Core keeps it.
+    core_user_id = Column(String(64), nullable=True, unique=True, index=True)
     created_at = Column(UTCDateTime, server_default=func.now())
 
 
 class LoginSession(Base):
     """
-    A bearer token row created on successful login and deleted on logout.
-    The token identifies the logged-in user on every subsequent request.
+    Retired with the move to MAEC One (sign-in happens there; app/api/gate.py). Nothing reads
+    or writes this table any more; it stays until a separate migration after go-live drops it,
+    together with users.password_hash and users.must_change_password.
     """
     __tablename__ = "login_sessions"
 

@@ -7,6 +7,9 @@ Isolation rules, applied before the app is imported:
 - Azure/SharePoint settings are blanked, so any code path that is not
   explicitly faked fails fast with a SharePointError instead of calling
   Microsoft Graph. (python-dotenv never overrides variables already set.)
+- MAEC One Core is faked in-process (fakes.FakeCore): the gate's settings are
+  throwaway values, and the gate's HTTP client talks to the fake. People sign
+  in through it (`make.headers`), never through this app.
 """
 
 import os
@@ -19,23 +22,28 @@ _TMP_DIR = tempfile.mkdtemp(prefix="maec-tests-")
 os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{Path(_TMP_DIR, 'test.db').as_posix()}"
 for _key in ("AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID", "SHAREPOINT_SITE_ID", "SHAREPOINT_DRIVE_ID"):
     os.environ[_key] = ""
+# Throwaway gate settings: the fake Core below is the only thing they reach.
+GATE_SECRET = "test-gate-secret-" + "x" * 32
+os.environ.update(
+    {
+        "CORE_URL": "http://core.test",
+        "CORE_PUBLIC_URL": "http://auth.test",
+        "MAEC_APP_KEY": "projects",
+        "MAEC_GATE_SECRET": GATE_SECRET,
+        "TRUSTED_PROXIES": "",
+    }
+)
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 import main
-from app.core import security
+from app.api import gate
 from app.core.database import Base, SessionLocal, engine
 from app.integrations.sharepoint import get_document_storage
-from app.services.auth import get_login_throttle
-from fakes import FakeDocumentStorage
-
-# PBKDF2 is intentionally slow (100k rounds). Tests log in hundreds of times,
-# so use a cheap cost here; hashing and verification still go through the
-# real code path. Must be set before factories computes its shared hash.
-security.PBKDF2_ITERATIONS = 1_000
-
 from factories import Factory
+from fakes import FakeCore, FakeDocumentStorage
 
 # Every lead holds 20% of their time on a project for a year (see test_lead_assignments.py).
 LEAD_PERIOD = {"start_date": "2026-09-01", "end_date": "2027-08-31", "utilization_pct": 20}
@@ -48,12 +56,21 @@ def pytest_sessionfinish(session, exitstatus):
 
 @pytest.fixture(autouse=True)
 def clean_db():
-    """Every test starts from empty tables (this also drops the CSV seed) and a
-    fresh login throttle, so failed logins never leak between tests."""
-    get_login_throttle.cache_clear()
+    """Every test starts from empty tables (this also drops the CSV seed)."""
     with engine.begin() as connection:
         for table in reversed(Base.metadata.sorted_tables):
             connection.execute(table.delete())
+
+
+@pytest.fixture(autouse=True)
+def core():
+    """A fresh MAEC One Core for every test, answering the gate's checks in-process."""
+    fake = FakeCore(secret=GATE_SECRET, public_url=os.environ["CORE_PUBLIC_URL"])
+    gate.transport = httpx.MockTransport(fake.handler)
+    gate.reset_client()
+    yield fake
+    gate.transport = None
+    gate.reset_client()
 
 
 @pytest.fixture
@@ -78,8 +95,8 @@ def storage():
 
 
 @pytest.fixture
-def make(db, client):
-    return Factory(db, client)
+def make(db, client, core):
+    return Factory(db, client, core)
 
 
 @pytest.fixture

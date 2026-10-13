@@ -13,7 +13,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 SOURCES = [
     *BACKEND.glob("app/**/*.py"),
     *BACKEND.glob("tests/*.py"),
-    *(BACKEND / name for name in ("main.py", "schemas.py", "models.py", "auth.py", "seed_manual_test.py")),
+    *(BACKEND / name for name in ("main.py", "schemas.py", "models.py", "auth.py")),
 ]
 LOCAL_CLOCK = re.compile(r"\bdate\.today\(\)|\bdatetime\.now\(\)|\bdatetime\.utcnow\(\)")
 ALLOWED = {"tests/test_clock_hygiene.py"}  # this file names the patterns

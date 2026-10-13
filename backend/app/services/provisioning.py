@@ -1,34 +1,35 @@
-"""Bringing people into the app: employee records and their engineer accounts.
+"""Bringing people into the app: employee records and their engineer profiles.
 
-Today the BU Head feeds it a CSV exported from HR (decided 2026-10-03). When the
-company's global admin application exists, it becomes the caller instead, and the
-temporary passwords go away with this app's own login. So the rules live here, not
-in the upload screen:
+Since the move to MAEC One (decided 2026-10-13), signing in, passwords and access (a seat on
+Project Management, deactivating a leaver) live in MAEC One Core. This app keeps each
+person's profile: the employee record (HR employee code, name, job role) and the users row
+that carries their role here (bu_head | engineer) and links to Core by email
+(app/core/identity.py). A person with a seat in Core but no profile here is told to ask a
+Business Head, who adds them: from the HR export, or one at a time.
 
-- the username is the work email (lowercase); the profile name is the full name;
+- the username is the work email (lowercase), the address the person signs in to MAEC One
+  with; the profile name is the full name;
 - the employee code is the HR employee id; the job role is stored as given;
 - nothing else is read from the file (no phone numbers, no personal data);
-- a person who already has an account, or appears twice in the file, is skipped
-  with the reason; an existing employee record without an account gets one;
-- each new account has its own random temporary password, returned once and never
-  stored readable, and must be changed at the first login.
+- a person who already has a profile, or appears twice in the file, is skipped with the
+  reason; an existing employee record without a profile gets one;
+- no passwords: a profile carries none, and the person still needs a seat in MAEC One.
 
-The BU Head also sees everyone with an account, corrects an engineer's name, work email
-or job role, and deactivates a leaver (they can't sign in; their bookings and hours stay,
-since pay is calculated from them). Only an account with no history at all (created by
-mistake) is deleted outright. BU Head accounts are listed but not changed here.
+The BU Head also sees everyone with a profile and corrects an engineer's name or job role.
+The email is not edited here: it is the person's MAEC One identity. BU Head profiles are
+listed but not changed here.
 
-A BU Head may make an engineer a BU Head (decided 2026-10-04): confirmed with their own
-password, and only when the engineer is on no live project (not a lead, not booked, no
-tasks on a project that isn't archived), since a BU Head doesn't lead, get booked or log
-hours. The role can be taken back from a promoted BU Head, never from the last one or
-from oneself. The other BU Heads are notified either way.
+A BU Head may make an engineer a BU Head (decided 2026-10-04), confirmed explicitly, and
+only when the engineer is on no live project (not a lead, not booked, no tasks on a project
+that isn't archived), since a BU Head doesn't lead, get booked or log hours. The role can be
+taken back from a promoted BU Head, never from the last one or from oneself. The other BU
+Heads are notified either way. The role is this app's, read on every request, so it applies
+from the person's next click.
 """
 
 import csv
 import io
 import re
-import secrets
 from dataclasses import asdict, dataclass
 
 from sqlalchemy import func, or_, update
@@ -37,34 +38,26 @@ from sqlalchemy.orm import Session
 import models
 from app.core.errors import BadRequestError, ConflictError, ForbiddenError, NotFoundError
 from app.core.roles import Role
-from app.core.security import hash_password, verify_password
+from app.core.security import NO_PASSWORD
 from app.services import notifications as notify
 
 # Header of the HR export -> the field it fills. Matched without regard to case or spacing.
 COLUMNS = {"employee id": "code", "full name": "name", "work email": "email", "job role": "role_title"}
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-# No 0/O, 1/l/I: the password is read off a list and typed in by hand.
-PASSWORD_ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-PASSWORD_LENGTH = 12
 
 MISSING_COLUMNS = "The file needs the columns {}. Found: {}."
-NOT_A_STAFF_ACCOUNT = "Only engineer accounts are reset here."
-NO_SUCH_ACCOUNT = "No engineer account with that username."
 NOT_FOUND = "No such account."
 ONLY_ENGINEERS = "BU Head accounts are not changed here."
-USERNAME_TAKEN = "Another account already signs in with {}."
-BAD_USERNAME = "Give a work email (or a username without spaces)."
 NAME_NEEDED = "The name can't be empty."
-WRONG_PASSWORD = "Your password is not correct."
+NOT_CONFIRMED = "Confirm the role change first."
 NOT_YOURSELF = "You can't change your own role."
-NOT_ACTIVE = "Reactivate the account first."
+NOT_ACTIVE = "This profile is deactivated."
 ON_PROJECTS = "{name} is assigned to {projects}. Remove them from these projects before making them a BU Head."
 NOT_A_BU_HEAD = "This account is not a BU Head."
 LAST_BU_HEAD = "There must always be at least one BU Head."
 NO_EMPLOYEE_RECORD = (
     "This BU Head has no employee record, so they can't work as an engineer. Deactivate the account instead."
 )
-HAS_HISTORY = "{} has work on record (bookings, hours, tasks or a project lead role). Deactivate the account instead."
 # Projects keep their leads' names next to the ids, for display: renaming updates these copies too.
 LEAD_NAME_COLUMNS = (
     (models.Project.project_lead_electrical, models.Project.project_lead_electrical_user_id),
@@ -87,7 +80,6 @@ class Created:
     username: str
     full_name: str
     employee_code: str
-    temporary_password: str
 
 
 @dataclass(frozen=True)
@@ -96,10 +88,6 @@ class Skipped:
     name: str
     email: str
     reason: str
-
-
-def temporary_password() -> str:
-    return "".join(secrets.choice(PASSWORD_ALPHABET) for _ in range(PASSWORD_LENGTH))
 
 
 def _clean(value: str | None) -> str:
@@ -151,16 +139,10 @@ class Provisioning:
             skipped.append(Skipped(person.row, person.name, person.email, reason))
 
         for person in people:
-            if not (person.code and person.name and person.email):
-                skip(person, "Employee Id, Full Name and Work Email are all needed.")
-            elif not EMAIL.match(person.email):
-                skip(person, "The work email is not a valid address.")
-            elif person.email in seen_emails or person.code in seen_codes:
+            if person.email in seen_emails or person.code in seen_codes:
                 skip(person, "Appears earlier in the file.")
-            elif person.email in usernames:
-                skip(person, "Already has an account.")
-            elif person.code in employees and employees[person.code].id in linked:
-                skip(person, f"Employee {person.code} already has an account.")
+            elif reason := _why_not(person, usernames, employees, linked):
+                skip(person, reason)
             else:
                 created.append(self._create(person, employees.get(person.code)))
             seen_emails.add(person.email)
@@ -171,19 +153,20 @@ class Provisioning:
             "skipped": [asdict(row) for row in skipped],
         }
 
-    def reset_password(self, username: str) -> dict:
-        """A new temporary password for an engineer, to be changed at their next login. Every
-        session of theirs ends, so whoever had the old password is out."""
-        user = self.db.query(models.User).filter(func.lower(models.User.username) == username.strip().lower()).first()
-        if user is None:
-            raise NotFoundError(NO_SUCH_ACCOUNT)
-        if user.role != Role.ENGINEER:
-            raise ForbiddenError(NOT_A_STAFF_ACCOUNT)
-        password = temporary_password()
-        user.password_hash, user.must_change_password = hash_password(password), True
-        self.db.query(models.LoginSession).filter_by(user_id=user.id).delete(synchronize_session=False)
+    def add_person(self, code: str, name: str, email: str, role_title: str) -> dict:
+        """One person, by the same rules as a row of the HR export: for someone given a seat in
+        MAEC One after go-live, who is told to ask a Business Head for their profile."""
+        person = Person(
+            row=0, code=_clean(code), name=_clean(name), email=_clean(email).lower(), role_title=_clean(role_title)
+        )
+        usernames = {username.lower() for (username,) in self.db.query(models.User.username)}
+        employees = {employee.employee_code: employee for employee in self.db.query(models.Employee)}
+        linked = {employee_id for (employee_id,) in self.db.query(models.User.employee_id) if employee_id}
+        if reason := _why_not(person, usernames, employees, linked):
+            raise (ConflictError if reason.startswith(ALREADY) else BadRequestError)(reason)
+        created = self._create(person, employees.get(person.code))
         self.db.commit()
-        return {"username": user.username, "full_name": user.full_name, "temporary_password": password}
+        return asdict(created)
 
     # -- the people already in the app ------------------------------------------------------
 
@@ -195,7 +178,6 @@ class Provisioning:
             .order_by(func.lower(func.coalesce(models.User.full_name, models.User.username)))
             .all()
         )
-        busy_users, busy_employees = self._with_history()
         bu_heads = self._active_bu_heads()
         out = []
         for user, employee in rows:
@@ -209,11 +191,7 @@ class Provisioning:
                     "employee_code": employee.employee_code if employee else None,
                     "job_role": employee.role_title if employee else None,
                     "is_active": user.is_active,
-                    "must_change_password": user.must_change_password,
                     "can_edit": engineer,
-                    "can_delete": engineer
-                    and user.id not in busy_users
-                    and (employee is None or employee.id not in busy_employees),
                     "can_make_bu_head": engineer and user.is_active,
                     # Only a promoted BU Head (they have an employee record) goes back to engineer.
                     "can_remove_bu_head": not engineer and employee is not None and bu_heads > 1,
@@ -221,8 +199,8 @@ class Provisioning:
             )
         return out
 
-    def update_person(self, user_id: int, full_name: str | None, username: str | None, job_role: str | None) -> dict:
-        """Correct an engineer's name, work email (their username) or job role."""
+    def update_person(self, user_id: int, full_name: str | None, job_role: str | None) -> dict:
+        """Correct an engineer's name or job role. Not their email: that is who they are in MAEC One."""
         user, employee = self._engineer(user_id)
         if full_name is not None:
             name = _clean(full_name)
@@ -236,51 +214,16 @@ class Provisioning:
             self.db.execute(
                 update(models.WbsNode).where(models.WbsNode.assigned_lead_user_id == user.id).values(assigned_lead=name)
             )
-        if username is not None:
-            new = username.strip().lower()
-            if not new or " " in new:
-                raise BadRequestError(BAD_USERNAME)
-            taken = (
-                self.db.query(models.User.id)
-                .filter(func.lower(models.User.username) == new, models.User.id != user.id)
-                .first()
-            )
-            if taken:
-                raise ConflictError(USERNAME_TAKEN.format(new))
-            user.username = new
         if job_role is not None and employee is not None:
             employee.role_title = employee.discipline = _clean(job_role)
         self.db.commit()
         return self._one(user.id)
 
-    def set_active(self, user_id: int, active: bool) -> dict:
-        """Deactivate a leaver (signed out everywhere, kept on record) or bring them back."""
-        user, _ = self._engineer(user_id)
-        user.is_active = active
-        if not active:
-            self.db.query(models.LoginSession).filter_by(user_id=user.id).delete(synchronize_session=False)
-        self.db.commit()
-        return self._one(user.id)
-
-    def delete_person(self, user_id: int) -> None:
-        """Remove an account created by mistake, and its employee record, only if neither has any
-        work on record. Anything else is deactivated, so hours and approvals stay intact."""
-        user, employee = self._engineer(user_id)
-        busy_users, busy_employees = self._with_history()
-        if user.id in busy_users or (employee is not None and employee.id in busy_employees):
-            raise ConflictError(HAS_HISTORY.format(user.full_name or user.username))
-        self.db.query(models.LoginSession).filter_by(user_id=user.id).delete(synchronize_session=False)
-        self.db.query(models.Notification).filter_by(recipient_user_id=user.id).delete(synchronize_session=False)
-        self.db.delete(user)
-        if employee is not None:
-            self.db.delete(employee)
-        self.db.commit()
-
     # -- the BU Head role -------------------------------------------------------------------
 
-    def make_bu_head(self, actor: models.User, user_id: int, password: str) -> dict:
-        """Promote an engineer who is on no live project. Signs them out, so they come back as BU Head."""
-        self._confirm(actor, password, user_id)
+    def make_bu_head(self, actor: models.User, user_id: int, confirmed: bool) -> dict:
+        """Promote an engineer who is on no live project. Their pages follow the new role from their next click."""
+        self._confirm(actor, confirmed, user_id)
         user, employee = self._engineer(user_id)
         if not user.is_active:
             raise ConflictError(NOT_ACTIVE)
@@ -292,9 +235,9 @@ class Provisioning:
         self._changed_role(actor, user, notify.BU_HEAD_APPOINTED, "New BU Head", "made {} a BU Head.")
         return self._one(user.id)
 
-    def remove_bu_head(self, actor: models.User, user_id: int, password: str) -> dict:
+    def remove_bu_head(self, actor: models.User, user_id: int, confirmed: bool) -> dict:
         """Take the BU Head role back: they become an engineer again. Never the last BU Head."""
-        self._confirm(actor, password, user_id)
+        self._confirm(actor, confirmed, user_id)
         user = self.db.get(models.User, user_id)
         if user is None:
             raise NotFoundError(NOT_FOUND)
@@ -310,15 +253,16 @@ class Provisioning:
         )
         return self._one(user.id)
 
-    def _confirm(self, actor: models.User, password: str, user_id: int) -> None:
+    def _confirm(self, actor: models.User, confirmed: bool, user_id: int) -> None:
+        """The BU Head said yes in a confirmation dialog: there is no local password to ask for."""
         if actor.id == user_id:
             raise ForbiddenError(NOT_YOURSELF)
-        if not verify_password(password or "", actor.password_hash):
-            raise ForbiddenError(WRONG_PASSWORD)
+        if confirmed is not True:
+            raise BadRequestError(NOT_CONFIRMED)
 
     def _changed_role(self, actor: models.User, user: models.User, kind: str, title: str, message: str) -> None:
-        """Sign the person out everywhere (their pages follow the new role) and tell the BU Heads."""
-        self.db.query(models.LoginSession).filter_by(user_id=user.id).delete(synchronize_session=False)
+        """Tell the BU Heads. The person's pages follow the new role from their next click: the role
+        is read on every request (app/core/security.py)."""
         actor_name = actor.full_name or actor.username
         text = f"{actor_name} " + message.format(user.full_name or user.username)
         notify.notify_role(self.db, Role.BU_HEAD, kind, title, text, None, actor_name)
@@ -378,32 +322,6 @@ class Provisioning:
     def _one(self, user_id: int) -> dict:
         return next(person for person in self.list_people() if person["id"] == user_id)
 
-    def _with_history(self) -> tuple[set[int], set[int]]:
-        """(user ids, employee ids) that have any work on record: what makes deleting unsafe."""
-        employees: set[int] = set()
-        for column in (
-            models.ResourceBooking.employee_id,
-            models.TimeLogEntry.employee_id,
-            models.TimeSession.employee_id,
-            models.WbsNode.assigned_engineer_id,
-            models.GanttTask.assigned_engineer_id,
-        ):
-            employees.update(value for (value,) in self.db.query(column).distinct() if value is not None)
-        users: set[int] = set()
-        for column in (
-            models.WbsNode.assigned_lead_user_id,
-            models.WbsNode.created_by_user_id,
-            models.WbsNodeHistory.user_id,
-            models.TimeLogEntry.reviewed_by_user_id,
-            models.TimeLogEntry.task_lead_user_id,
-        ):
-            users.update(value for (value,) in self.db.query(column).distinct() if value is not None)
-        leads = self.db.query(*(id_column for _, id_column in LEAD_NAME_COLUMNS)).filter(
-            or_(*(id_column.is_not(None) for _, id_column in LEAD_NAME_COLUMNS))
-        )
-        users.update(value for row in leads for value in row if value is not None)
-        return users, employees
-
     def _create(self, person: Person, employee: models.Employee | None) -> Created:
         if employee is None:
             employee = models.Employee(
@@ -411,15 +329,30 @@ class Provisioning:
             )
             self.db.add(employee)
             self.db.flush()
-        password = temporary_password()
         self.db.add(
             models.User(
                 username=person.email,
-                password_hash=hash_password(password),
+                password_hash=NO_PASSWORD,  # signs in at MAEC One
                 full_name=person.name,
                 role=Role.ENGINEER,
                 employee_id=employee.id,
-                must_change_password=True,
+                must_change_password=False,
             )
         )
-        return Created(person.email, person.name, person.code, password)
+        return Created(person.email, person.name, person.code)
+
+
+ALREADY = "Already"
+
+
+def _why_not(person: Person, usernames: set[str], employees: dict, linked: set[int]) -> str | None:
+    """Why this person can't be added, or None when they can."""
+    if not (person.code and person.name and person.email):
+        return "Employee Id, Full Name and Work Email are all needed."
+    if not EMAIL.match(person.email):
+        return "The work email is not a valid address."
+    if person.email in usernames:
+        return f"{ALREADY} has a profile."
+    if person.code in employees and employees[person.code].id in linked:
+        return f"{ALREADY} a profile for employee {person.code}."
+    return None

@@ -18,15 +18,15 @@ import models
 from app.domain.governance import WARNING
 from app.domain.timesheets import open_time
 from app.repositories.work import WorkRepository
-from factories import PASSWORD, WEEK
+from factories import WEEK
 
 DAY = WEEK  # a Monday in the past
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
 
 
-def _headers(client, username):
-    token = client.post("/api/auth/login", json={"username": username, "password": PASSWORD}).json()["token"]
-    return {"Authorization": f"Bearer {token}"}
+def _headers(make, username):
+    """Signs the person with this profile in at (fake) MAEC One."""
+    return make.headers(make.db.query(models.User).filter_by(username=username).one())
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ def rejected(client, db, make, world):
     row = make.time_entry(project_id, task, world.emp1, 8, day=DAY)
     response = client.post(f"/api/time-log-entries/{row.id}/reject", json={"reason": "Idle time"}, headers=world.lead_h)
     assert response.status_code == 200, response.text
-    return SimpleNamespace(project_id=project_id, task=task, row_id=row.id, priya=_headers(client, "lead.m"))
+    return SimpleNamespace(project_id=project_id, task=task, row_id=row.id, priya=_headers(make, "lead.m"))
 
 
 def _listed(client, headers, project_id):
@@ -220,7 +220,7 @@ def test_open_time_leaves_out_the_time_a_project_was_closed(events, expected_day
 def test_approving_rejected_hours_again_runs_the_governance_check(client, db, make, world, governed):
     """Usage is approved hours, so the second look must alert and lock like any other approval."""
     project_id, node_a, *_ = governed  # target 100 h, threshold 80%, 30 h approved
-    priya = _headers(client, "lead.m")
+    priya = _headers(make, "lead.m")
 
     def rejected_row(hours, day):
         row = make.time_entry(project_id, node_a, world.emp1, hours, status="rejected", day=day)
@@ -243,7 +243,9 @@ def test_approving_rejected_hours_again_runs_the_governance_check(client, db, ma
     assert actions.count("hours_reapproved") == 2 and "auto_lock" in actions
 
 
-def test_the_clock_stops_for_an_automatic_lock_and_restarts_when_an_extension_reopens_it(client, db, world, governed):
+def test_the_clock_stops_for_an_automatic_lock_and_restarts_when_an_extension_reopens_it(
+    client, db, make, world, governed
+):
     """Reject, the project locks itself two days later, an extension reopens it three days
     after that: the hours are still approvable on day 9 and final on day 10. The lock and the
     reopening are the real ones the system records, not hand-written audit rows."""
@@ -276,7 +278,7 @@ def test_the_clock_stops_for_an_automatic_lock_and_restarts_when_an_extension_re
         recorded["resume_execution"].created_at = rejected_at + timedelta(days=5)
         db.commit()
 
-    priya = _headers(client, "lead.m")
+    priya = _headers(make, "lead.m")
     on_day(10)  # seven open days are used up
     assert _listed(client, priya, project_id).json() == []
     assert _reapprove(client, priya, rejected_id).status_code == 409

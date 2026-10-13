@@ -24,6 +24,9 @@ import schemas
 from auth import get_current_user
 from database import SessionLocal, engine, get_db
 from app.api import api_router
+from app.api import proxy as gate_proxy
+from app.api.gate import GateMiddleware
+from app.core.config import require_gate_settings
 from app.core.errors import register_exception_handlers
 from app.core.migrations import migrate
 from app.core.security import require_role
@@ -92,6 +95,12 @@ def refuse_lead_as_resource(db: Session, project_id: int, employee: models.Emplo
             detail=f"{employee.name} leads this project; their lead assignment already covers their work here.",
         )
 
+# Nobody signs in here: MAEC One Core does, and the gate asks it about every request. Without
+# the gate's settings nothing could ever be let in, so refuse to start, before the database is
+# touched (app/core/config.py). A TRUSTED_PROXIES of "*" is refused too (app/api/proxy.py).
+require_gate_settings()
+gate_proxy.check()
+
 # Schema: Alembic migrations in migrations/, applied at startup (app/core/migrations.py).
 migrate(engine)
 
@@ -108,9 +117,16 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="ProManage API", version="1.0.0", lifespan=lifespan)
 
-# Every change request gets an audit log entry (app/api/middleware.py). Added before CORS,
-# so CORS stays the outermost layer.
+# Layers, innermost first (each add_middleware wraps the ones before it):
+# - the audit log entry for every change request (app/api/middleware.py), naming the person
+#   the gate identified;
+# - the gate: MAEC One Core says who the browser is, or the request is refused
+#   (app/api/gate.py);
+# - CORS, for the local dev servers;
+# - outermost, a trusted proxy's X-Forwarded-Proto and -Host (app/api/proxy.py), so the gate
+#   tells Core the address the browser used.
 app.add_middleware(AuditMiddleware)
+app.add_middleware(GateMiddleware)
 
 # Allow the React dev servers to call this API. The app pins two dev ports
 # (5173 = BU Head, 5174 = Lead) and is opened via localhost or 127.0.0.1.
@@ -131,6 +147,7 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Error-Code"],
 )
+app.add_middleware(gate_proxy.TrustedProxyHeaders)
 
 # No public static file mount: uploaded files (e.g. SOWs) must be served by an
 # authenticated endpoint that checks project access (docs/TODO.md S5/C3).

@@ -17,18 +17,12 @@ NOT_AUDITED = frozenset({
     ("POST", "/api/notifications/{notification_id}/read"),
 })  # fmt: skip
 
-FAILED_SIGN_IN = "Failed sign-in"
-
 CATALOG: dict[tuple[str, str], tuple[str, str]] = {
-    ("POST", "/api/auth/login"): (ACCOUNT, "Signed in"),
-    ("POST", "/api/auth/logout"): (ACCOUNT, "Signed out"),
-    ("POST", "/api/auth/change-password"): (ACCOUNT, "Changed their password"),
+    # Signing in and out, passwords, and deactivating people happen at MAEC One now; entries
+    # written before the move keep the "account" category.
     ("POST", "/api/people/import"): (PEOPLE, "Imported people from a CSV"),
-    ("POST", "/api/people/reset-password"): (PEOPLE, "Reset the password of {}"),
+    ("POST", "/api/people"): (PEOPLE, "Added {} to People"),
     ("PATCH", "/api/people/{user_id}"): (PEOPLE, "Edited {}"),
-    ("DELETE", "/api/people/{user_id}"): (PEOPLE, "Deleted the account of {}"),
-    ("POST", "/api/people/{user_id}/deactivate"): (PEOPLE, "Deactivated {}"),
-    ("POST", "/api/people/{user_id}/reactivate"): (PEOPLE, "Reactivated {}"),
     ("POST", "/api/people/{user_id}/make-bu-head"): (PEOPLE, "Made {} a BU Head"),
     ("POST", "/api/people/{user_id}/remove-bu-head"): (PEOPLE, "Removed the BU Head role from {}"),
     ("POST", "/api/projects"): (PROJECT, "Created a project"),

@@ -7,7 +7,6 @@ can replace any collaborator with `app.dependency_overrides`.
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
 from app.core.database import get_db
 from app.integrations.sharepoint import DocumentStorage, get_document_storage
 from app.repositories.bookings import BookingRepository
@@ -19,7 +18,6 @@ from app.repositories.users import UserRepository
 from app.repositories.work import WorkRepository
 from app.services import archive_guard
 from app.services.audit import AuditLog
-from app.services.auth import AuthService, LoginThrottle, get_login_throttle
 from app.services.booking_approval import BookingApprovalService
 from app.services.documents import ProjectDocumentService
 from app.services.governance import GovernanceService
@@ -34,12 +32,6 @@ from app.services.tracking import TrackingService
 from app.services.work_summary import WorkSummaryService
 
 archive_guard.install()  # archived projects are read-only for every database session
-
-
-def get_auth_service(
-    db: Session = Depends(get_db), throttle: LoginThrottle = Depends(get_login_throttle)
-) -> AuthService:
-    return AuthService(db, throttle, get_settings())
 
 
 def get_project_service(

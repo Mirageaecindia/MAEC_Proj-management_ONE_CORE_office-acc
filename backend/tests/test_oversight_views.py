@@ -84,6 +84,8 @@ def test_bu_head_cannot_open_engineer_dashboards(client, world):
     assert client.get("/api/engineer-performance", headers=world.bu_h).status_code == 403
 
 
-def test_public_utility_endpoints(client):
+def test_only_the_health_probe_is_public(client, world):
+    """/health answers without MAEC One (the container's probe); everything under /api asks Core."""
     assert client.get("/health").json() == {"status": "ok"}
-    assert set(client.get("/api/server-date").json()) == {"date", "datetime", "timezone"}
+    assert client.get("/api/server-date").status_code == 401
+    assert set(client.get("/api/server-date", headers=world.eng_h).json()) == {"date", "datetime", "timezone"}

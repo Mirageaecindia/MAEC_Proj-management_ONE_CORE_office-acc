@@ -20,8 +20,9 @@ from sqlalchemy.orm import Session
 import models
 from app.core.config import get_settings
 from app.core.errors import ForbiddenError
+from app.core.identity import CoreIdentity, local_user
 from app.core.roles import Role
-from app.domain.audit import CATALOG, FAILED_SIGN_IN, NOT_AUDITED, detail_from, sentence
+from app.domain.audit import CATALOG, NOT_AUDITED, detail_from, sentence
 
 log = logging.getLogger(__name__)
 
@@ -43,29 +44,32 @@ def person_label(user: models.User | None) -> str | None:
 
 @dataclass
 class Before:
-    """What only the request's start can tell: who is acting (a sign-out ends the session),
-    and the subtask a Logout is about to close."""
+    """What only the request's start can tell: who is acting, and the subtask a Logout is
+    about to close."""
 
     actor: models.User | None = None
     open_subtask: models.WbsNode | None = None
 
 
-def before_request(db: Session, method: str, path: str, token: str | None) -> Before:
-    actor = None
-    if token:
-        session = db.query(models.LoginSession).filter_by(token=token).first()
-        actor = db.get(models.User, session.user_id) if session else None
+def actor_of(db: Session, maec: dict | None) -> models.User | None:
+    """The person MAEC One vouched for (the gate's answer), as this app's users row: the same
+    mapping every endpoint uses (app/core/identity.py). None when they have no usable profile:
+    such a request is refused, and nothing is logged for it."""
+    if not maec:
+        return None
+    try:
+        return local_user(db, CoreIdentity.from_gate(maec))
+    except ForbiddenError:
+        return None
+
+
+def before_request(db: Session, method: str, path: str, maec: dict | None) -> Before:
+    actor = actor_of(db, maec)
     before = Before(actor=actor)
     if method == "POST" and path == "/api/subtask-tracking/logout" and actor and actor.employee_id:
         running = db.query(models.TimeSession).filter_by(employee_id=actor.employee_id, status="active").first()
         before.open_subtask = db.get(models.WbsNode, running.subtask_id) if running else None
     return before
-
-
-def _user_by_username(db: Session, username) -> models.User | None:
-    if not isinstance(username, str) or not username.strip():
-        return None
-    return db.query(models.User).filter(models.User.username.ilike(username.strip())).first()
 
 
 def _target(db: Session, path_params: dict, body: dict, before: Before) -> tuple[str | None, int | None]:
@@ -107,8 +111,8 @@ def _target(db: Session, path_params: dict, body: dict, before: Before) -> tuple
     if (employee_id := number(body.get("employee_id"))) is not None:
         employee = db.get(models.Employee, employee_id)
         return (employee.name if employee else None), project_id
-    if "username" in body:
-        return person_label(_user_by_username(db, body.get("username"))), project_id
+    if isinstance(body.get("full_name"), str):  # a person added under People
+        return body["full_name"].strip()[:150] or None, project_id
     return None, project_id
 
 
@@ -130,18 +134,10 @@ def record(
     if template is None or key in NOT_AUDITED or key not in CATALOG:
         return None
     category, label = CATALOG[key]
-    actor, summary, action = before.actor, None, route_name or "unknown"
-    if template == "/api/auth/login":
-        actor = _user_by_username(db, body.get("username"))
-        if status == 401 and actor is not None:  # someone tried this account's password and failed
-            summary, action = FAILED_SIGN_IN, "failed_sign_in"
-        elif not 200 <= status < 300:
-            return None
-    elif not 200 <= status < 300:
+    actor, action = before.actor, route_name or "unknown"
+    if not 200 <= status < 300 or actor is None:
         return None
-    if actor is None:
-        return None
-    target, project_id = _target(db, path_params, body if template != "/api/auth/login" else {}, before)
+    target, project_id = _target(db, path_params, body, before)
     project = db.get(models.Project, project_id) if project_id is not None else None
     event = models.AuditEvent(
         at=now or datetime.now(UTC),
@@ -150,7 +146,7 @@ def record(
         user_role=actor.role,
         category=category,
         action=action[:60],
-        summary=(summary or sentence(label, target, detail_from(body)))[:500],
+        summary=sentence(label, target, detail_from(body))[:500],
         project_id=project.id if project else None,
         project_name=project.project_name if project else None,
         ip=(ip or None) and ip[:64],

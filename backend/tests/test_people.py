@@ -1,8 +1,10 @@
-"""Onboarding people and first-login passwords (app/services/provisioning.py, auth).
+"""People: profiles in this app (app/services/provisioning.py).
 
-The BU Head uploads an HR export; everyone without an account gets an engineer
-account named by their work email, with a temporary password that opens nothing
-but the change-password screen until it is replaced.
+The BU Head uploads an HR export, or adds one person; everyone without a profile gets an
+employee record and an engineer profile named by their work email. No passwords: people sign
+in at MAEC One, and their profile is linked to their MAEC One account by that email at their
+first visit (app/core/identity.py). Resetting passwords, deactivating and deleting moved to
+MAEC One.
 """
 
 import io
@@ -12,11 +14,10 @@ import pytest
 
 import models
 from app.core.errors import ConflictError
+from app.core.security import NO_PASSWORD
 from app.services.provisioning import Provisioning
-from factories import PASSWORD
 
-IMPORT, RESET = "/api/people/import", "/api/people/reset-password"
-LOGIN, ME, CHANGE = "/api/auth/login", "/api/auth/me", "/api/auth/change-password"
+IMPORT, PEOPLE, ME = "/api/people/import", "/api/people", "/api/auth/me"
 
 # Shaped like the real export: extra columns (phones), Windows encoding, non-breaking spaces.
 HR_EXPORT = (
@@ -30,76 +31,42 @@ def _upload(client, headers, content=HR_EXPORT, name="people.csv"):
     return client.post(IMPORT, files={"file": (name, io.BytesIO(content), "text/csv")}, headers=headers)
 
 
-def _login(client, username, password):
-    return client.post(LOGIN, json={"username": username, "password": password})
-
-
-def _bearer(response):
-    return {"Authorization": f"Bearer {response.json()['token']}"}
-
-
-def test_the_bu_head_imports_engineers_with_their_own_temporary_passwords(client, db, world):
+def test_the_bu_head_imports_engineers_without_passwords(client, db, world):
     response = _upload(client, world.bu_h)
 
     assert response.status_code == 200, response.text
     created = response.json()["created"]
-    assert [(c["username"], c["full_name"], c["employee_code"]) for c in created] == [
-        ("kavya.raman@mirageaec.com", "Kavya Raman", "M0101"),
-        ("suresh.babu@mirageaec.com", "Suresh Babu", "M0102"),  # spaces cleaned
-    ]
-    passwords = [c["temporary_password"] for c in created]
-    assert len(set(passwords)) == 2 and all(len(p) == 12 for p in passwords)
+    assert created == [
+        {"username": "kavya.raman@mirageaec.com", "full_name": "Kavya Raman", "employee_code": "M0101"},
+        {"username": "suresh.babu@mirageaec.com", "full_name": "Suresh Babu", "employee_code": "M0102"},  # cleaned
+    ]  # no temporary password, nor anything else to hand over
     assert response.json()["skipped"] == []
 
     kavya = db.query(models.User).filter_by(username="kavya.raman@mirageaec.com").one()
     employee = db.get(models.Employee, kavya.employee_id)
-    assert (kavya.role, kavya.full_name, kavya.must_change_password) == ("engineer", "Kavya Raman", True)
+    assert (kavya.role, kavya.full_name, kavya.must_change_password) == ("engineer", "Kavya Raman", False)
+    assert kavya.password_hash == NO_PASSWORD and kavya.core_user_id is None
     assert (employee.employee_code, employee.name, employee.role_title) == (
         "M0101",
         "Kavya Raman",
         "Senior Electrical Engineer",
     )
-    assert passwords[0] not in kavya.password_hash  # stored only as a hash
     assert not hasattr(employee, "phone") and "98400" not in str(vars(employee))  # phones are never read
 
 
-def test_a_temporary_password_opens_nothing_but_the_change_password_screen(client, world):
-    created = _upload(client, world.bu_h).json()["created"][0]
+def test_an_imported_person_signs_in_at_maec_one_and_is_linked_by_email(client, db, core, world):
+    _upload(client, world.bu_h)
+    kavya = core.headers(core.sign_in("Kavya.Raman@MirageAEC.com", "Kavya R", core_id="core-kavya"))  # any case
 
-    signed_in = _login(client, "KAVYA.RAMAN@mirageaec.com", created["temporary_password"])  # any case
-    assert signed_in.status_code == 200 and signed_in.json()["must_change_password"] is True
-    headers = _bearer(signed_in)
-    assert client.get(ME, headers=headers).json()["must_change_password"] is True
-    blocked = client.get("/api/projects", headers=headers)
-    assert blocked.status_code == 403 and blocked.headers["X-Error-Code"] == "PASSWORD_CHANGE_REQUIRED"
-    assert client.post("/api/subtask-tracking/heartbeat", headers=headers).status_code == 403
+    me = client.get(ME, headers=kavya)
 
-    changed = client.post(
-        CHANGE,
-        json={"current_password": created["temporary_password"], "new_password": "my own secret"},
-        headers=headers,
+    assert me.status_code == 200, me.text
+    assert (me.json()["username"], me.json()["full_name"], me.json()["role"]) == (
+        "kavya.raman@mirageaec.com",
+        "Kavya Raman",  # this app's name, not Core's
+        "engineer",
     )
-
-    assert changed.status_code == 200, changed.text
-    assert client.get("/api/projects", headers=headers).status_code == 200  # this session carries on
-    assert client.get(ME, headers=headers).json()["must_change_password"] is False
-    assert _login(client, "kavya.raman@mirageaec.com", created["temporary_password"]).status_code == 401
-    assert _login(client, "kavya.raman@mirageaec.com", "my own secret").json()["must_change_password"] is False
-
-
-def test_changing_a_password_checks_the_current_one_and_ends_other_sessions(client, world):
-    first, second = (_bearer(_login(client, world.engineer.username, PASSWORD)) for _ in range(2))
-
-    def change(current, new):
-        return client.post(CHANGE, json={"current_password": current, "new_password": new}, headers=first)
-
-    assert change("wrong", "long enough").status_code == 400
-    assert change(PASSWORD, "short").status_code == 400
-    assert change(PASSWORD, PASSWORD).status_code == 400
-    assert change(PASSWORD, "a brand new one").status_code == 200
-
-    assert client.get(ME, headers=first).status_code == 200
-    assert client.get(ME, headers=second).status_code == 401  # e.g. a browser left signed in elsewhere
+    assert db.query(models.User).filter_by(username="kavya.raman@mirageaec.com").one().core_user_id == "core-kavya"
 
 
 def test_people_already_known_or_repeated_are_skipped_with_the_reason(client, db, make, world):
@@ -125,8 +92,8 @@ def test_people_already_known_or_repeated_are_skipped_with_the_reason(client, db
     assert response.status_code == 200, response.text
     assert [c["username"] for c in response.json()["created"]] == ["lakshmi@mirageaec.com"]
     assert [(s["row"], s["reason"]) for s in response.json()["skipped"]] == [
-        (3, "Employee M0202 already has an account."),
-        (4, "Already has an account."),
+        (3, "Already a profile for employee M0202."),
+        (4, "Already has a profile."),
         (5, "Appears earlier in the file."),
         (6, "Employee Id, Full Name and Work Email are all needed."),
         (7, "The work email is not a valid address."),
@@ -142,56 +109,70 @@ def test_a_file_without_the_needed_columns_is_refused_and_names_them(client, wor
     assert '"Employee Id", "Full Name", "Work Email", "Job Role"' in response.json()["detail"]
 
 
-def test_only_the_bu_head_imports_or_resets(client, world):
+def test_only_the_bu_head_imports_or_adds_people(client, world):
+    one = {"employee_code": "M0301", "full_name": "Neha Rao", "email": "neha@mirageaec.com", "job_role": "Intern"}
     assert _upload(client, world.eng_h).status_code == 403
-    assert _upload(client, world.lead_h).status_code == 403  # a project lead is still an engineer account
-    assert client.post(RESET, json={"username": world.engineer.username}, headers=world.lead_h).status_code == 403
+    assert _upload(client, world.lead_h).status_code == 403  # a project lead is still an engineer
+    assert client.post(PEOPLE, json=one, headers=world.lead_h).status_code == 403
 
 
-def test_the_bu_head_resets_a_forgotten_password(client, db, world):
-    old_session = _bearer(_login(client, world.engineer.username, PASSWORD))
+def test_the_bu_head_adds_one_person_who_has_a_seat_but_no_profile(client, db, core, world):
+    """Someone given a seat in MAEC One after go-live: told to ask a Business Head, who adds them."""
+    neha = core.headers(core.sign_in("Neha.Rao@mirageaec.com", "Neha Rao", core_id="core-neha"))
+    refused = client.get(ME, headers=neha)
+    assert refused.status_code == 403 and refused.headers["X-Error-Code"] == "PROFILE_NOT_SET_UP"
+    assert refused.json()["detail"] == "Your Project Management profile hasn't been set up yet. Ask a Business Head."
+    one = {"employee_code": "M0301", "full_name": " Neha  Rao", "email": "Neha.Rao@mirageaec.com", "job_role": "Intern"}
 
-    response = client.post(RESET, json={"username": world.engineer.username.upper()}, headers=world.bu_h)
+    added = client.post(PEOPLE, json=one, headers=world.bu_h)
 
-    assert response.status_code == 200, response.text
-    temporary = response.json()["temporary_password"]
-    assert client.get(ME, headers=old_session).status_code == 401  # whoever had the old one is out
-    assert _login(client, world.engineer.username, PASSWORD).status_code == 401
-    again = _login(client, world.engineer.username, temporary)
-    assert again.json()["must_change_password"] is True
-    assert client.post(RESET, json={"username": world.bu.username}, headers=world.bu_h).status_code == 403
-    assert client.post(RESET, json={"username": "nobody@mirageaec.com"}, headers=world.bu_h).status_code == 404
+    assert added.status_code == 201, added.text
+    assert added.json() == {"username": "neha.rao@mirageaec.com", "full_name": "Neha Rao", "employee_code": "M0301"}
+    me = client.get(ME, headers=neha)
+    assert me.status_code == 200 and me.json()["role"] == "engineer"
+    user = db.query(models.User).filter_by(username="neha.rao@mirageaec.com").one()
+    assert (user.core_user_id, user.password_hash) == ("core-neha", NO_PASSWORD)
+    assert db.get(models.Employee, user.employee_id).employee_code == "M0301"
+    assert client.post(PEOPLE, json=one, headers=world.bu_h).status_code == 409  # already has one
+    bad = {**one, "employee_code": "M0302", "email": "not-an-email"}
+    assert client.post(PEOPLE, json=bad, headers=world.bu_h).status_code == 400
 
 
-PEOPLE = "/api/people"
+def test_passwords_deactivation_and_deleting_are_managed_in_maec_one(client, world):
+    arjun = world.engineer.id
+    assert client.post(f"{PEOPLE}/reset-password", json={"username": "x"}, headers=world.bu_h).status_code in (404, 405)
+    assert client.post(f"{PEOPLE}/{arjun}/deactivate", headers=world.bu_h).status_code == 404
+    assert client.post(f"{PEOPLE}/{arjun}/reactivate", headers=world.bu_h).status_code == 404
+    assert client.delete(f"{PEOPLE}/{arjun}", headers=world.bu_h).status_code == 405
+    for gone in ("/api/auth/login", "/api/auth/logout", "/api/auth/change-password"):
+        assert client.post(gone, json={}, headers=world.bu_h).status_code in (404, 405), gone
 
 
 def _person(client, world, username):
     return next(p for p in client.get(PEOPLE, headers=world.bu_h).json() if p["username"] == username)
 
 
-def test_the_bu_head_sees_everyone_with_an_account_but_never_a_password(client, world):
+def test_the_bu_head_sees_everyone_with_a_profile(client, world):
     _upload(client, world.bu_h)
 
     people = client.get(PEOPLE, headers=world.bu_h)
 
     assert people.status_code == 200, people.text
     kavya = next(p for p in people.json() if p["username"] == "kavya.raman@mirageaec.com")
-    assert {k: kavya[k] for k in ("full_name", "employee_code", "job_role", "is_active", "must_change_password")} == {
+    assert {k: kavya[k] for k in ("full_name", "employee_code", "job_role", "is_active", "can_edit")} == {
         "full_name": "Kavya Raman",
         "employee_code": "M0101",
         "job_role": "Senior Electrical Engineer",
         "is_active": True,
-        "must_change_password": True,  # hasn't signed in yet
+        "can_edit": True,
     }
-    assert (kavya["can_edit"], kavya["can_delete"]) == (True, True)  # nothing on record yet
-    assert not any("password_hash" in p or "temporary_password" in p for p in people.json())
+    assert not any({"password_hash", "must_change_password", "can_delete"} & set(p) for p in people.json())
     bu_head = next(p for p in people.json() if p["role"] == "bu_head")
-    assert (bu_head["can_edit"], bu_head["can_delete"]) == (False, False)
+    assert bu_head["can_edit"] is False
     assert client.get(PEOPLE, headers=world.lead_h).status_code == 403
 
 
-def test_correcting_a_name_email_or_job_role(client, db, world, governed):
+def test_correcting_a_name_or_job_role_but_never_the_email(client, db, world, governed):
     project_id, node_a, *_ = governed
     lead = _person(client, world, world.lead_e.username)  # leads the project, so her name is copied there
 
@@ -204,68 +185,36 @@ def test_correcting_a_name_email_or_job_role(client, db, world, governed):
     assert renamed.status_code == 200, renamed.text
     assert (renamed.json()["full_name"], renamed.json()["username"], renamed.json()["job_role"]) == (
         "Anita K.",
-        "anita.k@mirageaec.com",
+        world.lead_e.username,  # the email is who she is in MAEC One: not edited here
         "Electrical Lead",
     )
     db.expire_all()
     assert db.get(models.Project, project_id).project_lead_electrical == "Anita K."  # the copies follow
     assert db.get(models.WbsNode, node_a.id).assigned_lead == "Anita K."
     assert db.get(models.Employee, world.lead_e.employee_id).name == "Anita K."
-    assert _login(client, "anita.k@mirageaec.com", PASSWORD).status_code == 200  # she signs in with the new email
+    assert client.get(ME, headers=world.lead_h).json()["full_name"] == "Anita K."  # still her, still signed in
 
-    taken = client.patch(f"{PEOPLE}/{lead['id']}", json={"username": world.engineer.username}, headers=world.bu_h)
-    assert taken.status_code == 409
     assert client.patch(f"{PEOPLE}/{lead['id']}", json={"full_name": "  "}, headers=world.bu_h).status_code == 400
-    assert client.patch(f"{PEOPLE}/{lead['id']}", json={"username": "two words"}, headers=world.bu_h).status_code == 400
     bu_head = _person(client, world, world.bu.username)
     assert client.patch(f"{PEOPLE}/{bu_head['id']}", json={"full_name": "X"}, headers=world.bu_h).status_code == 403
 
 
-def test_a_deactivated_person_is_signed_out_and_kept_on_record(client, db, world):
-    session = _bearer(_login(client, world.engineer.username, PASSWORD))
-    arjun = _person(client, world, world.engineer.username)
-
-    off = client.post(f"{PEOPLE}/{arjun['id']}/deactivate", headers=world.bu_h)
-
-    assert off.status_code == 200 and off.json()["is_active"] is False
-    assert client.get(ME, headers=session).status_code == 401
-    assert _login(client, world.engineer.username, PASSWORD).status_code == 401
-    assert db.get(models.Employee, world.emp1.id) is not None
-    on = client.post(f"{PEOPLE}/{arjun['id']}/reactivate", headers=world.bu_h)
-    assert on.json()["is_active"] is True
-    assert _login(client, world.engineer.username, PASSWORD).status_code == 200
+def _make_bu_head(client, world, person_id, confirm=True, headers=None):
+    return client.post(f"{PEOPLE}/{person_id}/make-bu-head", json={"confirm": confirm}, headers=headers or world.bu_h)
 
 
-def test_only_an_account_with_no_work_on_record_is_deleted(client, db, world, governed):
-    created = _upload(client, world.bu_h).json()["created"][0]
-    mistake = _person(client, world, created["username"])
-    arjun = _person(client, world, world.engineer.username)  # booked, with hours: governed
-
-    assert arjun["can_delete"] is False
-    refused = client.delete(f"{PEOPLE}/{arjun['id']}", headers=world.bu_h)
-    assert refused.status_code == 409 and "Deactivate the account instead" in refused.json()["detail"]
-
-    assert client.delete(f"{PEOPLE}/{mistake['id']}", headers=world.bu_h).status_code == 200
-    assert db.query(models.User).filter_by(username=created["username"]).count() == 0
-    assert db.query(models.Employee).filter_by(employee_code="M0101").count() == 0
-    assert _upload(client, world.bu_h).json()["created"][0]["username"] == created["username"]  # can come back
-
-
-def _make_bu_head(client, world, person_id, password=PASSWORD, headers=None):
-    return client.post(f"{PEOPLE}/{person_id}/make-bu-head", json={"password": password}, headers=headers or world.bu_h)
-
-
-def test_an_engineer_on_no_live_project_is_made_a_bu_head(client, db, world):
+def test_an_engineer_on_no_live_project_is_made_a_bu_head(client, db, core, world):
     created = _upload(client, world.bu_h).json()["created"][0]
     kavya = _person(client, world, created["username"])
-    session = _bearer(_login(client, created["username"], created["temporary_password"]))
+    session = core.headers(core.sign_in(created["username"], "Kavya Raman"))
+    assert client.get(ME, headers=session).json()["role"] == "engineer"
 
-    assert _make_bu_head(client, world, kavya["id"], password="wrong").status_code == 403  # your own password
+    assert _make_bu_head(client, world, kavya["id"], confirm=False).status_code == 400  # say yes in the dialog first
     promoted = _make_bu_head(client, world, kavya["id"])
 
     assert promoted.status_code == 200, promoted.text
     assert promoted.json()["role"] == "bu_head"
-    assert client.get(ME, headers=session).status_code == 401  # signed out: they come back as BU Head
+    assert client.get(ME, headers=session).json()["role"] == "bu_head"  # from her next click
     note = db.query(models.Notification).filter_by(notification_type="bu_head_appointed").one()
     assert (note.recipient_role, note.message) == ("bu_head", "Test BU Head made Kavya Raman a BU Head.")
     assert _person(client, world, world.bu.username)["can_remove_bu_head"] is False  # created as BU Head
@@ -298,7 +247,7 @@ def test_the_bu_head_role_is_taken_back_from_a_promoted_bu_head_only(client, db,
 
     def remove(person_id, headers=None):
         return client.post(
-            f"{PEOPLE}/{person_id}/remove-bu-head", json={"password": PASSWORD}, headers=headers or world.bu_h
+            f"{PEOPLE}/{person_id}/remove-bu-head", json={"confirm": True}, headers=headers or world.bu_h
         )
 
     assert remove(world.bu.id).status_code == 403  # never your own role
@@ -307,7 +256,7 @@ def test_the_bu_head_role_is_taken_back_from_a_promoted_bu_head_only(client, db,
     assert back.status_code == 200 and back.json()["role"] == "engineer"
     assert db.query(models.Notification).filter_by(notification_type="bu_head_removed").count() == 1
 
-    # A BU Head created as one has no employee record to go back to: deactivate instead.
+    # A BU Head created as one has no employee record to go back to.
     second = make_bu_head_account(db, "second.head")
     assert remove(second.id).status_code == 409
 
@@ -320,12 +269,10 @@ def test_the_last_bu_head_keeps_the_role(db):
     db.commit()
 
     with pytest.raises(ConflictError, match="at least one BU Head"):
-        Provisioning(db).remove_bu_head(actor, target.id, PASSWORD)
+        Provisioning(db).remove_bu_head(actor, target.id, True)
 
 
 def make_bu_head_account(db, username, employee=False):
-    from factories import _PASSWORD_HASH
-
     employee_id = None
     if employee:
         record = models.Employee(employee_code=username.upper(), name=username, role_title="Director")
@@ -333,7 +280,7 @@ def make_bu_head_account(db, username, employee=False):
         db.flush()
         employee_id = record.id
     user = models.User(
-        username=username, password_hash=_PASSWORD_HASH, full_name=username, role="bu_head", employee_id=employee_id
+        username=username, password_hash=NO_PASSWORD, full_name=username, role="bu_head", employee_id=employee_id
     )
     db.add(user)
     db.commit()

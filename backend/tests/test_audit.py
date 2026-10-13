@@ -1,16 +1,15 @@
 """The audit log (app/services/audit.py, app/api/middleware.py).
 
-Every change request is one entry; each person reads their own, the BU Head everyone's;
-passwords are never stored; entries older than the retention window are deleted.
+Every change request is one entry, naming the person MAEC One vouched for; each person reads
+their own, the BU Head everyone's; entries older than the retention window are deleted.
 """
 
 from datetime import UTC, datetime, timedelta
 
 import main
 import models
-from app.domain.audit import CATALOG, FAILED_SIGN_IN, NOT_AUDITED
+from app.domain.audit import CATALOG, NOT_AUDITED
 from app.services.audit import purge_old
-from tests.factories import PASSWORD
 
 MINE, EVERYONE = "/api/audit/mine", "/api/audit"
 CHANGES = ("post", "put", "patch", "delete")
@@ -28,27 +27,29 @@ def test_every_change_endpoint_is_in_the_log_or_deliberately_not():
     assert not missing, f"Add these to app/domain/audit.CATALOG (or NOT_AUDITED): {sorted(missing)}"
 
 
-def test_sign_ins_are_logged_and_a_failed_one_too(client, world):
-    client.post("/api/auth/login", json={"username": world.engineer.username, "password": "wrong"})
+def test_the_actor_is_the_person_maec_one_vouched_for(client, db, world):
+    """The gate's identity, mapped to the users row (app/core/identity.py), is who the entry
+    names, even on the person's very first request, the one that links their profile."""
+    assert world.bu.core_user_id is None  # not linked yet: this is their first request
 
-    mine = _summaries(client, world.eng_h)
+    response = client.post("/api/projects", json=world.project_payload(), headers=world.bu_h)
 
-    assert mine[0] == FAILED_SIGN_IN
-    assert "Signed in" in mine
-
-
-def test_a_password_is_never_written_to_the_log(client, db, world):
-    new = "N3w-password-123"
-    response = client.post(
-        "/api/auth/change-password",
-        json={"current_password": PASSWORD, "new_password": new},
-        headers=world.eng_h,
-    )
-    assert response.status_code == 200, response.text
-
+    assert response.status_code == 201, response.text
     rows = db.query(models.AuditEvent).all()
-    assert "Changed their password" in [r.summary for r in rows]
-    assert not any(PASSWORD in (r.summary or "") or new in (r.summary or "") for r in rows)
+    assert [(row.user_id, row.user_name, row.user_role, row.category) for row in rows] == [
+        (world.bu.id, "Test BU Head", "bu_head", "project")
+    ]
+    db.refresh(world.bu)
+    assert world.bu.core_user_id == f"core-user-{world.bu.id}"
+
+
+def test_a_request_from_someone_without_a_profile_is_refused_and_not_logged(client, db, core):
+    stranger = core.headers(core.sign_in("new.joiner@mirageaec.com", "New Joiner"))
+
+    response = client.post("/api/projects", json={}, headers=stranger)
+
+    assert response.status_code == 403 and response.headers["X-Error-Code"] == "PROFILE_NOT_SET_UP"
+    assert db.query(models.AuditEvent).count() == 0
 
 
 def test_work_is_described_in_words_with_its_project(client, make, world, governed):
@@ -85,7 +86,9 @@ def test_reviewing_hours_names_the_engineer_and_the_day(client, make, world, gov
 
 
 def test_each_person_sees_only_their_own_and_only_the_bu_head_sees_everyone(client, world, governed):
-    project_id, *_ = governed
+    project_id, node_a, *_ = governed
+    comment = {"comment": "Started the riser layout"}
+    assert client.post(f"/api/wbs-nodes/{node_a.id}/comments", json=comment, headers=world.eng_h).status_code == 200
 
     engineer = client.get(MINE, headers=world.eng_h).json()["events"]
     assert {e["user_id"] for e in engineer} == {world.engineer.id}

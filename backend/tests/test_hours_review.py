@@ -13,7 +13,7 @@ from test_project_roles import _approve_booking
 import models
 from app.domain.timesheets import today_utc
 from app.repositories.work import WorkRepository
-from factories import PASSWORD, WEEK
+from factories import WEEK
 
 DAY = WEEK  # a Monday in the past
 WEEK_BODY = {"week_start_date": WEEK.isoformat()}
@@ -30,9 +30,9 @@ def split(client, db, make, world):
     return project_id, row_e, row_m
 
 
-def _headers(client, username):
-    token = client.post("/api/auth/login", json={"username": username, "password": PASSWORD}).json()["token"]
-    return {"Authorization": f"Bearer {token}"}
+def _headers(make, username):
+    """Signs the person with this profile in at (fake) MAEC One."""
+    return make.headers(make.db.query(models.User).filter_by(username=username).one())
 
 
 def _bulk(client, headers, project_id, action="approved", employee_id=None):
@@ -53,7 +53,7 @@ def _timesheet(client, headers, project_id):
     return client.get(f"/api/projects/{project_id}/timesheet?week_start={WEEK}", headers=headers).json()
 
 
-def test_each_lead_approves_the_days_on_their_own_tasks(client, db, world, split):
+def test_each_lead_approves_the_days_on_their_own_tasks(client, db, make, world, split):
     project_id, row_e, row_m = split
     mine = {row["task_id"]: row["can_review"] for row in _timesheet(client, world.lead_h, project_id)}
     assert mine == {row_e.task_id: True}  # Anita sees only her task's rows, and may review them
@@ -67,7 +67,7 @@ def test_each_lead_approves_the_days_on_their_own_tasks(client, db, world, split
     assert _bulk(client, world.lead_h, project_id).status_code == 409  # nothing of hers left
     assert _bulk(client, world.other_lead_h, project_id).status_code == 403  # not a lead of it
 
-    assert _bulk(client, _headers(client, "lead.m"), project_id).status_code == 200  # all pending on my tasks
+    assert _bulk(client, _headers(make, "lead.m"), project_id).status_code == 200  # all pending on my tasks
     assert WorkRepository(db).approved_hours(project_id) == 16.0
 
 
@@ -169,7 +169,7 @@ def _session(make, row, *, login, logout=None, last_visit=None, ended_by=None):
 def test_a_day_is_not_reviewed_while_a_session_started_on_it_is_open(client, db, make, world, split):
     project_id, row_e, _ = split
     running = _session(make, row_e, login=20)  # still running overnight
-    anita = _headers(client, "lead.e")
+    anita = _headers(make, "lead.e")
 
     refused = _row(client, anita, row_e.id)
     assert refused.status_code == 409 and "still logged in" in refused.json()["detail"]
@@ -201,7 +201,7 @@ def test_the_row_shows_its_sessions_and_flags_an_unattended_one(client, db, make
 def test_approve_up_to_the_last_visit_keeps_the_rest_as_trimmed_hours(client, db, make, world, split):
     project_id, row_e, row_m = split
     _session(make, row_m, login=9, logout=17, last_visit=11, ended_by="laptop_off")
-    priya = _headers(client, "lead.m")
+    priya = _headers(make, "lead.m")
 
     assert client.post(f"/api/time-log-entries/{row_m.id}/approve-attended", headers=world.lead_h).status_code == 403
     response = client.post(f"/api/time-log-entries/{row_m.id}/approve-attended", headers=priya)
@@ -216,7 +216,7 @@ def test_approve_up_to_the_last_visit_keeps_the_rest_as_trimmed_hours(client, db
     assert "6 h unattended not approved" in audit.comments and audit.created_by == "Priya Nair"
 
     # A day with nothing unattended is approved or rejected as a whole.
-    whole = client.post(f"/api/time-log-entries/{row_e.id}/approve-attended", headers=_headers(client, "lead.e"))
+    whole = client.post(f"/api/time-log-entries/{row_e.id}/approve-attended", headers=_headers(make, "lead.e"))
     assert whole.status_code == 400 and "as a whole" in whole.json()["detail"]
 
 
@@ -224,7 +224,7 @@ def test_a_day_with_no_attended_time_is_rejected_not_partly_approved(client, db,
     _, _, row_m = split
     _session(make, row_m, login=9, logout=17, last_visit=9, ended_by="laptop_off")
 
-    response = client.post(f"/api/time-log-entries/{row_m.id}/approve-attended", headers=_headers(client, "lead.m"))
+    response = client.post(f"/api/time-log-entries/{row_m.id}/approve-attended", headers=_headers(make, "lead.m"))
 
     assert response.status_code == 400 and "reject it instead" in response.json()["detail"]
     assert _status(db, row_m) == "pending_review"
@@ -253,7 +253,7 @@ def test_bulk_approval_skips_days_over_eight_hours(client, db, make, world, spli
     project_id, row_e, _ = split
     row_e.hours = 9.5  # overtime: pay-relevant, decided one day at a time
     db.commit()
-    anita = _headers(client, "lead.e")
+    anita = _headers(make, "lead.e")
 
     response = _bulk(client, anita, project_id)
 
@@ -270,7 +270,7 @@ def test_bulk_approval_reports_the_over_eight_days_it_left_alone(client, db, mak
     row_e.hours = 9.5
     db.commit()
 
-    response = _bulk(client, _headers(client, "lead.e"), project_id)
+    response = _bulk(client, _headers(make, "lead.e"), project_id)
 
     assert response.status_code == 200, response.text
     assert response.json() == {"reviewed": 1, "skipped_over_mark": 1, "skipped_unattended": 0, "action": "approved"}
@@ -284,7 +284,7 @@ def test_bulk_approval_skips_unattended_days_and_reports_them(client, db, make, 
     task = db.get(models.WbsNode, row_e.task_id)
     normal = make.time_entry(project_id, task, world.emp1, 6, day=DAY + timedelta(days=1))
     _session(make, row_e, login=9, logout=17, last_visit=11, ended_by="laptop_off")  # flagged: someone must look
-    anita = _headers(client, "lead.e")
+    anita = _headers(make, "lead.e")
 
     response = _bulk(client, anita, project_id)
 
@@ -295,9 +295,9 @@ def test_bulk_approval_skips_unattended_days_and_reports_them(client, db, make, 
     assert again.status_code == 409 and "day by day" in again.json()["detail"]
 
 
-def test_every_rejection_needs_a_reason(client, db, world, split):
+def test_every_rejection_needs_a_reason(client, db, make, world, split):
     project_id, row_e, _ = split
-    anita = _headers(client, "lead.e")
+    anita = _headers(make, "lead.e")
 
     assert _row(client, anita, row_e.id, "reject").status_code == 400  # a pending day too
     assert _row(client, anita, row_e.id, "reject", reason="   ").status_code == 400

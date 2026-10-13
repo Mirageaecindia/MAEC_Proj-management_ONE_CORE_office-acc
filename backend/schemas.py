@@ -25,22 +25,6 @@ WBS_STATUS_FLOWS = {
 }
 
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-class LoginResponse(BaseModel):
-    token: str
-    id: int
-    role: str
-    username: str
-    full_name: Optional[str] = None
-    engineer_id: Optional[int] = None
-    leads_projects: bool = False  # leads at least one project: the lead pages are shown
-    must_change_password: bool = False  # a temporary password: set a new one before anything else
-
-
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -50,12 +34,7 @@ class UserOut(BaseModel):
     role: str
     employee_id: Optional[int] = None
     leads_projects: bool = False
-    must_change_password: bool = False
-
-
-class ChangePasswordIn(BaseModel):
-    current_password: str
-    new_password: str
+    core_url: str = ""  # MAEC One as a browser reaches it: "Sign out" and "Change password" link there
 
 
 class EngineerPerformanceOut(BaseModel):

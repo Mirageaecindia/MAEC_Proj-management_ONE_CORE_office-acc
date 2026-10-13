@@ -125,9 +125,9 @@ def test_subtask_done_actual_end_datetime_is_utc(client, make, world):
     )
 
 
-def test_server_date_reports_utc(client):
+def test_server_date_reports_utc(client, world):
     t0 = _utc_now()
-    body = client.get("/api/server-date").json()
+    body = client.get("/api/server-date", headers=world.eng_h).json()
     t1 = _utc_now()
 
     reported = _as_utc_clock(body["datetime"])

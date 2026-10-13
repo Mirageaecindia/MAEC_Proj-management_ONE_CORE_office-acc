@@ -1,7 +1,7 @@
 """HTTP middleware: the audit log entry for every change request (app/services/audit.py).
 
-One place logs every create, edit, delete, approval, Login/Logout and sign-in, so no
-endpoint has to remember to. Reading pages is not logged. Only the request fields named
+One place logs every create, edit, delete, approval and Login/Logout, so no endpoint has
+to remember to. Reading pages is not logged. Only the request fields named
 in app/domain/audit.DETAIL_FIELDS are ever read into the log, never a password, and a
 failure to write an entry never fails the request itself.
 """
@@ -14,7 +14,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from app.core.database import SessionLocal
-from app.core.security import bearer_token
 from app.services import audit
 
 log = logging.getLogger(__name__)
@@ -43,9 +42,9 @@ async def _json_body(request: Request) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _before(method: str, path: str, token: str | None) -> audit.Before:
+def _before(method: str, path: str, maec: dict | None) -> audit.Before:
     with SessionLocal() as db:
-        before = audit.before_request(db, method, path, token)
+        before = audit.before_request(db, method, path, maec)
         db.expunge_all()  # used after this session closes
         return before
 
@@ -70,8 +69,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         try:
             body = await _json_body(request)
-            token = bearer_token(request.headers.get("authorization"))
-            before = await run_in_threadpool(_before, request.method, request.url.path, token)
+            # Who is acting: the gate (app/api/gate.py, the layer outside this one) has put MAEC
+            # One's answer on the request; app/core/identity.py maps it to the users row.
+            maec = getattr(request.state, "maec", None)
+            before = await run_in_threadpool(_before, request.method, request.url.path, maec)
         except Exception:
             log.exception("Audit log: could not read the request")
             return await call_next(request)
