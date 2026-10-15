@@ -98,7 +98,8 @@ def _target(db: Session, path_params: dict, body: dict, before: Before) -> tuple
     if phase := path_params.get("phase"):  # a phase blueprint, by its phase's name
         from app.services.wbs_blueprints import BLUEPRINTS
 
-        return BLUEPRINTS.get(str(phase), (str(phase).replace("-", " "),))[0], project_id
+        node = BLUEPRINTS.get(str(phase))
+        return (node.phase if node else str(phase).replace("-", " ")), project_id
     if (booking_id := number(path_params.get("booking_id"))) is not None:
         booking = db.get(models.ResourceBooking, booking_id)
         employee = db.get(models.Employee, booking.employee_id) if booking else None

@@ -95,7 +95,7 @@ Step by step:
    - An engineer's bookings across **all** projects may not exceed 100%.
    - The Lead submits the whole project's bookings. They become `pending_approval` and the BU Head gets a notification. The BU Head approves them, making them `approved`.
 3. **WBS planning (Lead).**
-   - The Lead creates tasks inside the five fixed phases, by hand or by uploading a CSV/XLSX.
+   - The Lead adds tasks to WBS nodes: a node card's **+** adds its standard tasks and subtasks, or one task by hand.
    - Only engineers booked on the project can be assigned.
    - A task's estimated hours are weekdays between its start and end dates × 8.
    - Subtasks are single-day units of 1–8 hours. Leads can create them, and engineers can create them under their own tasks.
@@ -317,7 +317,7 @@ Shared helpers that the Lead/Engineer code in `main.py` needs (access rules, das
 ## 7. Business rules
 
 ### 7.1 WBS structure
-- **Five fixed phases** (removed as phases to add on 2026-10-15: the app ships no blueprint until the CD/SD/DD nodes in `backend/data/WBS_Node_level_BREAKDOWN/` are added; tasks already under them stay and keep working, and a phase row shows only once it holds something), in order: Space Planning, STR Coordination, ID - RCP Coordination, BoH Area RCP Coordination, Submission. Every task belongs to one; subtasks inherit their parent's phase, and changing a task's phase cascades to its subtasks.
+- **WBS nodes** (since 2026-10-15): one per sheet of the stage workbooks in `backend/app/blueprints/` (`wbs_cd.xlsx`, `wbs_sd.xlsx`, `wbs_dd.xlsx`), named exactly as the sheet and loaded as they are (`app/domain/wbs_nodes.py`, `wbs_outline.parse_node_sheet`): a bold row is a task, a normal row a subtask under it; rows marked *NOT INCLUDED* and notes outside the item column are left out; subtasks before a sheet's first task go under a task named after the node. A node is stored as its tasks' `phase`. Replace a workbook to change the nodes. The **five original phases** (Space Planning, STR Coordination, ID - RCP Coordination, BoH Area RCP Coordination, Submission) are no longer offered; their tasks stay valid. Every task belongs to a node or one of the five; subtasks inherit their parent's phase, and changing a task's phase cascades to its subtasks.
 - **Two levels only:** a main task and its subtasks. A subtask cannot have subtasks.
 - **Deleting** (`app/services/wbs_delete.py`, decided 2026-09-29): the project's lead deletes any task or subtask; an engineer only subtasks **they created themselves** (`wbs_nodes.created_by_user_id`, migration 0016), never one the lead planned for them; nodes created before that migration have no creator and are the lead's to delete. Deleting a task deletes its subtasks. A selection is deleted as a whole or not at all (one refused item → 403 naming it, nothing changes). **Hours are never deleted:** an open Login session is logged out and banked first, and the day rows keep the subtask's name and its lead (`time_log_entries.task_name`, `task_lead_user_id`; migrations 0009, 0017), still count toward usage and the engineer's dashboards, and are still reviewed by that lead (the usual fallback to the BU Head applies when their period is over); the former lead's sheet still lists them.
 - **WBS codes** are unique per project. Subtask codes are generated as `<parent code>.<n>`. Rows uploaded without a code get the next free numeric root (`7.`, `8.` …).
@@ -470,7 +470,6 @@ Signing in and out, passwords, deactivating and deleting people are MAEC One's.
 | PUT | `/api/wbs-nodes/{id}` | Lead | Update a node (phase cascades to subtasks) |
 | DELETE | `/api/wbs-nodes/{id}` | Lead; Engineer (subtask under own task) | Delete a node and its subtasks; worked hours are kept (`app/services/wbs_delete.py`) |
 | POST | `/api/projects/{id}/wbs-nodes/delete` | Lead; Engineer (own subtasks) | Delete many at once, all or none; body `{node_ids}` |
-| POST | `/api/projects/{id}/wbs-upload` (multipart `file`, optional `phase`) | Lead | Import the outline workbook (`app/services/wbs_outline.py`: column A phase, column B bold task / normal subtask; the template is `frontend/public/wbs-upload-template.xlsx`, written by `make_wbs_template.py`) or the header-based CSV/XLSX |
 | GET | `/api/wbs-nodes/{id}` | all (scoped) | Task details, children, history |
 | POST | `/api/wbs-nodes/{id}/advance-status` | Engineer (assigned), Lead (subtasks) | Move to the next status |
 | POST | `/api/wbs-nodes/{id}/approve` | Lead (assigned) | Approve a submitted task |
@@ -563,7 +562,7 @@ Signing in and out, passwords, deactivating and deleting people are MAEC One's.
 | `/executive-dashboard` | `pages/lead/ExecutiveDashboardPage.jsx` | Lead | Same KPIs, plus the extension request form and request status | `executive-dashboard`, `POST extension-requests` |
 | `/project-work-summary` | `features/bu-head/ProjectWorkSummaryPage.jsx` | BU Head | Lead oversight table, engineer contribution per task | `work-summary` |
 | `/resource-booking` | `pages/shared/ResourceBookingPage.jsx` | Lead, BU Head | Booking table, assign/edit/delete (Lead), Submit (Lead), Approve (BU Head), notification banner, engineer assignment timeline; refreshes every 5 s for the BU Head | `resource-bookings*`, `resource-summary`, `resource-bookings/gantt`, `employees`, `notifications` |
-| `/wbs-structure` | `pages/shared/WbsStructurePage.jsx` | all | Phase-grouped WBS table. Lead: add/edit/delete nodes, subtasks, upload, template download. BU Head: read-only. Engineer: own nodes, add subtask. Refreshes every 5 s. | `wbs-structure`, `wbs-nodes*`, `wbs-upload`, `booked-engineers` |
+| `/wbs-structure` | `pages/shared/WbsStructurePage.jsx` | all | Phase-grouped WBS table. Lead: node cards (add a node's tasks, or one by hand), edit/delete, subtasks. BU Head: read-only. Engineer: own nodes, add subtask. Refreshes every 5 s. | `wbs-structure`, `wbs-nodes*`, `wbs-blueprints*`, `booked-engineers` |
 | `/task-details?nodeId=&projectId=` | `pages/shared/TaskDetailsPage.jsx` | all | Status stepper, details, history and comments, role-specific actions (advance / approve), **automatic time tracking Login/Logout** for engineers on subtasks | `wbs-nodes/{id}`, `advance-status`, `approve`, `comments`, `subtask-tracking/*` |
 | `/timeline-logs` | `pages/shared/TimelineLogsPage.jsx` | all | Phase Gantt with completion % (Lead/Engineer), week navigator, weekly hours sheet (tracked subtask rows), Lead approve/reject | `wbs-structure`, `timesheet?source=tracking`, `timeline-logs`, `time-log-entries/*` |
 | `/engineer-performance-dashboard` | `pages/engineer/EngineerPerformanceDashboardPage.jsx` | Engineer | Personal consumption, threshold, SPI, monthly chart; refreshes every 15 s | `engineer-performance-dashboard` |

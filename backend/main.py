@@ -3,19 +3,15 @@ import logging
 from contextlib import asynccontextmanager
 import os
 import csv
-import io
 import re
 import shutil
 import uuid
-import zipfile
-import xml.etree.ElementTree as ElementTree
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import ValidationError
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
@@ -38,7 +34,6 @@ from app.domain.wbs import (
     TO_DO,
     by_code,
     child_prefix,
-    current_phase,
     is_finished,
     is_sub_subtask,
     next_code,
@@ -71,7 +66,6 @@ from app.services.hours_review import (
 )
 from app.services.tracking import TrackingService, end_sessions_if_done, last_visit, unattended_seconds
 from app.repositories.tracking import TrackingRepository
-from app.services.wbs_outline import import_outline, looks_like_outline
 from app.services.wbs_delete import delete_nodes
 from app.services.wbs_duplicate import duplicate_node
 from app.services.tracking import sweep_forever
@@ -1647,7 +1641,7 @@ def create_wbs_node(
         parent = db.query(models.WbsNode).filter_by(id=payload.parent_id, project_id=project_id).first()
         phase = parent.phase if parent and parent.phase else phase
     if not phase:
-        raise HTTPException(status_code=422, detail="Phase is required. Choose one of the five fixed phases.")
+        raise HTTPException(status_code=422, detail="Phase is required. Choose one of the WBS nodes.")
     node_data = payload.model_dump(exclude={"subtask"})
     derived = estimated_hours_from_dates(node_data.get("start_date"), node_data.get("end_date"))
     if derived is not None:
@@ -1878,250 +1872,6 @@ def duplicate_wbs_node(
         raise HTTPException(status_code=404, detail="WBS node not found.")
     _, role = project_and_role(db, node.project_id, user)
     return node_output(db, duplicate_node(db, node, role, user))
-
-
-_FIELD_ALIASES = {
-    "wbs_code": {"wbs_code", "code", "wbs", "wbs_no", "task_code", "task_no"},
-    "task_name": {"task_name", "task", "name", "taskname", "activity", "description", "deliverable"},
-    "parent_wbs_code": {"parent_wbs_code", "parent_code", "parent", "parent_wbs"},
-    "assigned_lead": {"assigned_lead", "lead", "lead_name", "leadname", "lead_wbs"},
-    "assigned_engineer": {"assigned_engineer", "engineer", "engineer_name", "assigned_engineer_name", "responsible_engineer"},
-    "assigned_engineer_id": {"assigned_engineer_id", "engineer_id", "engineer_no"},
-    "estimated_hours": {"estimated_hours", "hours", "planned_hours", "hours_planned", "duration"},
-    "deliverable_status": {"deliverable_status", "status", "deliverable", "wbs_status", "task_status"},
-    "target_due_date": {"target_due_date", "due_date", "target", "due", "target_date"},
-    "phase": {"phase", "wbs_phase", "phase_name", "wbs_phase_category"},
-}
-
-
-def _header_field(value):
-    token = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
-    if not token:
-        return None
-    for field, aliases in _FIELD_ALIASES.items():
-        if token in aliases or token.startswith(field + "_") or token == field:
-            return field
-    return None
-
-
-def _parse_xlsx_rows(content):
-    namespace = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-    with zipfile.ZipFile(io.BytesIO(content)) as workbook:
-        shared = []
-        if "xl/sharedStrings.xml" in workbook.namelist():
-            shared_root = ElementTree.fromstring(workbook.read("xl/sharedStrings.xml"))
-            shared = ["".join(node.itertext()) for node in shared_root.findall("main:si", namespace)]
-        sheet_name = "xl/worksheets/sheet1.xml"
-        sheet_root = ElementTree.fromstring(workbook.read(sheet_name))
-        raw = []
-        for row in sheet_root.findall(".//main:row", namespace):
-            row_num = int(row.get("r") or 0)
-            cells = {}
-            for cell in row.findall("main:c", namespace):
-                ref = cell.get("r") or ""
-                letter = "".join(ch for ch in ref if ch.isalpha()).upper()
-                value_el = cell.find("main:v", namespace)
-                text = value_el.text if value_el is not None else ""
-                if cell.get("t") == "s" and text:
-                    text = shared[int(text)]
-                cells[letter] = text
-            raw.append((row_num, cells))
-    return raw
-
-
-def parse_wbs_upload(upload: UploadFile, content: bytes):
-    filename = (upload.filename or "").lower()
-    if filename.endswith(".xlsx") or filename.endswith(".xls"):
-        if filename.endswith(".xls"):
-            raise HTTPException(status_code=415, detail="Use .xlsx or .csv format for WBS upload.")
-        raw_rows = _parse_xlsx_rows(content)
-        keyed = True
-    else:
-        reader = csv.reader(io.StringIO(content.decode("utf-8-sig")))
-        raw_rows = [(reader.line_num, row) for row in reader]
-        keyed = False
-
-    if not raw_rows:
-        return []
-
-    def cell_item(entry, key):
-        cells = entry[1]
-        if keyed:
-            return cells.get(key, "")
-        return cells[key] if key < len(cells) else ""
-
-    def row_nz(entry):
-        vals = list(entry[1].values()) if keyed else entry[1]
-        return any(str(v).strip() for v in vals)
-
-    # Locate the header row: the first row containing a recognised
-    # "WBS Code" / "Task Name" column. Rows above it (title rows, notes)
-    # are ignored instead of being misread as the column headers.
-    header_index = None
-    for i, entry in enumerate(raw_rows):
-        fields = {_header_field(v) for v in entry[1].values()} if keyed else {_header_field(v) for v in entry[1]}
-        if "wbs_code" in fields or "task_name" in fields:
-            header_index = i
-            break
-    if header_index is None:
-        for i, entry in enumerate(raw_rows):
-            if row_nz(entry):
-                header_index = i
-                break
-        if header_index is None:
-            return []
-
-    header_entry = raw_rows[header_index]
-    header_keys = sorted(header_entry[1].keys()) if keyed else list(range(len(header_entry[1])))
-    header_map = {key: field for key in header_keys if (field := _header_field(cell_item(header_entry, key)))}
-    header_sig = frozenset((field, str(cell_item(header_entry, key)).strip()) for key, field in sorted(header_map.items()))
-
-    parsed = []
-    for i, entry in enumerate(raw_rows):
-        if i <= header_index:
-            continue
-        if not row_nz(entry):
-            continue  # blank / spacer row
-        row_sig = frozenset((field, str(cell_item(entry, key)).strip()) for key, field in sorted(header_map.items()))
-        if row_sig == header_sig:
-            continue  # repeated header row
-        row_dict = {field: cell_item(entry, key) for key, field in header_map.items()}
-        # Summary rows (e.g. "Total" in the WBS Code column) are noise, not data
-        # errors - skip them instead of failing with "missing Task Name".
-        code_val = str(row_dict.get("wbs_code") or "").strip().lower()
-        if code_val in {"total", "totals", "subtotal", "grand total", "grand subtotal", "total hours"}:
-            continue
-        row_num = entry[0] or (i + 1)
-        parsed.append((row_num, row_dict))
-    return parsed
-
-
-_UPLOAD_FIELDS = (
-    "wbs_code", "task_name", "parent_wbs_code", "assigned_lead", "assigned_engineer",
-    "estimated_hours", "deliverable_status", "target_due_date", "phase",
-)  # fmt: skip
-
-
-@app.post("/api/projects/{project_id}/wbs-upload")
-async def upload_wbs(
-    project_id: int,
-    file: UploadFile = File(...),
-    phase: Optional[str] = Form(None),
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    project, _ = project_and_role(db, project_id, user, allowed={"lead"})
-    requested_phase = phase.strip() if phase and phase.strip() else None
-    if requested_phase and requested_phase not in schemas.WBS_PHASES:
-        raise HTTPException(status_code=422, detail=f"Phase '{requested_phase}' is not one of the five fixed phases.")
-    content = await file.read()
-    if (file.filename or "").lower().endswith(".xlsx") and looks_like_outline(content):
-        # The outline workbook (the template): column A phase, column B bold task / normal subtask.
-        result = import_outline(db, project, user, content, requested_phase)
-        db.commit()
-        return result
-    rows = parse_wbs_upload(file, content)
-    if not rows:
-        raise HTTPException(status_code=400, detail="The WBS file contains no rows.")
-    created = updated = 0
-    code_to_id = {node.wbs_code: node.id for node in db.query(models.WbsNode).filter_by(project_id=project_id).all()}
-    employees = db.query(models.Employee).all()
-    engineer_by_name = {e.name.strip().lower(): e.id for e in employees}
-    # Highest numeric root currently in use (e.g. "100." / "1") so we can mint
-    # unique codes for rows uploaded without a WBS Code.
-    used_roots = set()
-    for c in code_to_id:
-        m = re.match(r"(\d+)", str(c))
-        if m:
-            used_roots.add(int(m.group(1)))
-    next_root = (max(used_roots) + 1) if used_roots else 1
-    invalid = []
-    for row_num, row in rows:
-        normalized = {str(key).strip().lower().replace(" ", "_"): value for key, value in row.items()}
-        task_name = str(normalized.get("task_name") or normalized.get("task") or normalized.get("name") or "").strip()
-        if not task_name:
-            invalid.append((row_num, "Task Name", {k: v for k, v in normalized.items() if k in _UPLOAD_FIELDS}))
-            continue
-        raw_code = str(normalized.get("wbs_code") or normalized.get("code") or "").strip()
-        if raw_code:
-            code = raw_code
-        else:
-            while f"{next_root}." in code_to_id:
-                next_root += 1
-            code = f"{next_root}."
-            next_root += 1
-        due = normalized.get("target_due_date") or normalized.get("due_date") or None
-        parent_code = str(normalized.get("parent_wbs_code") or normalized.get("parent_code") or "").strip()
-        parsed = {k: v for k, v in normalized.items() if k in _UPLOAD_FIELDS}
-        try:
-            parent_id = int(normalized["parent_id"]) if normalized.get("parent_id") else code_to_id.get(parent_code)
-            engineer_id_raw = int(normalized["assigned_engineer_id"]) if normalized.get("assigned_engineer_id") else None
-            hours_raw = normalized.get("estimated_hours") or normalized.get("planned_hours") or 0
-            estimated_hours = int(float(hours_raw))
-        except (TypeError, ValueError):
-            invalid.append((row_num, "Parent Id, Assigned Engineer Id and Estimated Hours must be numbers", parsed))
-            continue
-        phase_raw = str(normalized.get("phase") or "").strip()
-        if requested_phase:
-            phase = requested_phase
-        else:
-            phase = current_phase(phase_raw) or "Space Planning"
-            if phase_raw and current_phase(phase_raw) is None:
-                raise HTTPException(status_code=422, detail=f"Phase '{phase_raw}' is not one of the five fixed phases.")
-        engineer_id = engineer_id_raw
-        if engineer_id is None and normalized.get("assigned_engineer"):
-            name = str(normalized["assigned_engineer"]).strip()
-            engineer_id = engineer_by_name.get(name.lower())
-            if engineer_id is None:
-                invalid.append((row_num, f"Assigned Engineer '{name}' not found", parsed))
-                continue
-        try:
-            payload = schemas.WbsNodeUpdate(
-                wbs_code=code,
-                task_name=task_name,
-                parent_id=parent_id,
-                assigned_lead=normalized.get("assigned_lead") or user.full_name,
-                assigned_lead_user_id=user.id,
-                assigned_engineer_id=engineer_id,
-                estimated_hours=estimated_hours,
-                deliverable_status=normalized.get("deliverable_status") or normalized.get("status") or TO_DO,
-                target_due_date=due,
-                phase=phase,
-            )
-        except ValidationError as exc:
-            invalid.append((row_num, "; ".join(e["msg"] for e in exc.errors()), parsed))
-            continue
-        validate_node_payload(db, project_id, payload)
-        node = db.query(models.WbsNode).filter_by(project_id=project_id, wbs_code=code).first()
-        if node:
-            updated_phase = node.phase != phase
-            for field, value in payload.model_dump(exclude={"subtask"}).items():
-                setattr(node, field, value)
-            end_sessions_if_done(db, node)
-            db.commit()
-            if updated_phase:
-                cascade_phase(db, node.id, phase)
-                db.commit()
-            updated += 1
-        else:
-            db.add(
-                models.WbsNode(
-                    project_id=project_id, created_by_user_id=user.id, **payload.model_dump(exclude={"subtask"})
-                )
-            )
-            db.commit()
-            created += 1
-        saved_node = db.query(models.WbsNode).filter_by(project_id=project_id, wbs_code=code).first()
-        code_to_id[code] = saved_node.id
-    if invalid:
-        print(f"[wbs-upload] REJECTED {len(invalid)} of {len(rows)} rows (project {project_id}):", flush=True)
-        for row_num, reason, parsed in invalid:
-            print(f"  - Excel row {row_num}: {reason}; parsed values: {parsed}", flush=True)
-        detail = "Upload rejected. " + "; ".join(
-            f"Row {row_num}: {reason} (parsed: {parsed})" for row_num, reason, parsed in invalid
-        )
-        raise HTTPException(status_code=422, detail=detail)
-    return {"created": created, "updated": updated, "phase": requested_phase or None}
 
 
 def map_status_for_display(status: str) -> str:

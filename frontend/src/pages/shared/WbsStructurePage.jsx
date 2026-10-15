@@ -14,9 +14,9 @@ import { canDelete, describeCount, impliedSelection, summarizeSelection } from '
 import { formatDayIST } from '../../utils/displayTime';
 
 
-// The phases work is filed under, in display order. The five were removed as phases to add on
-// 2026-10-15 (the server lists none now); tasks already filed under them still show here.
-const PHASES = ['Space Planning', 'STR Coordination', 'ID - RCP Coordination', 'BoH Area RCP Coordination', 'Submission'];
+// The five original phases: no longer offered (2026-10-15), shown after the WBS nodes for the work
+// already filed under them.
+const LEGACY_PHASES = ['Space Planning', 'STR Coordination', 'ID - RCP Coordination', 'BoH Area RCP Coordination', 'Submission'];
 
 const EMPTY_NODE = {
   wbs_code: '',
@@ -75,13 +75,11 @@ export function WbsStructurePage() {
   const [nodeMode, setNodeMode] = useState('node');
   const [editNodeId, setEditNodeId] = useState(null);
   const [showNodeForm, setShowNodeForm] = useState(false);
-  const [showUpload, setShowUpload] = useState(false);
   const [toast, setToast] = useState(null);
   const [selected, setSelected] = useState([]); // ids ticked for deletion
   const [pendingDelete, setPendingDelete] = useState(null); // what the confirm dialog is about
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
-  const fileInputRef = useRef(null);
   // Lead and engineer are roles on the selected project, not on the account.
   const project = projects.find((p) => String(p.id) === String(selectedId));
   const isLead = project?.my_role === 'lead';
@@ -441,12 +439,24 @@ export function WbsStructurePage() {
     />
   );
 
-  // Phase blueprints: "+" on a phase card adds that phase's standard tasks (what is already
-  // there is skipped); the whole WBS workbook upload adds all five phases at once.
-  const { data: blueprints = [] } = useQuery({ queryKey: ['wbs-blueprints'], queryFn: wbsBlueprintsApi.list, enabled: isLead, staleTime: Infinity });
+  // WBS node blueprints: "+" on a node card adds that node's standard tasks (what is already
+  // there is skipped). The node cards are how a WBS is added: the Excel upload was removed (2026-10-15).
+  const { data: blueprints = [] } = useQuery({ queryKey: ['wbs-blueprints'], queryFn: wbsBlueprintsApi.list, staleTime: Infinity });
   const blueprintFor = (phase) => blueprints.find((blueprint) => blueprint.phase === phase);
-  // The phases a lead adds to: the server's blueprints (none until the CD/SD/DD nodes are added).
-  const addablePhases = blueprints.map((blueprint) => blueprint.phase);
+  // The WBS nodes (the sheets of the CD/SD/DD workbooks), in order: what a lead adds to.
+  const addablePhases = useMemo(() => blueprints.map((blueprint) => blueprint.phase), [blueprints]);
+  // The node cards, stage by stage (CD, SD, DD).
+  const stages = useMemo(() => blueprints.reduce((list, blueprint) => {
+    const last = list[list.length - 1];
+    if (last && last.stage === blueprint.stage) last.nodes.push(blueprint);
+    else list.push({ stage: blueprint.stage, nodes: [blueprint] });
+    return list;
+  }, []), [blueprints]);
+  // Sections in the table: the nodes in order, then the original phases, then anything else found.
+  const phaseOrder = useMemo(
+    () => [...new Set([...addablePhases, ...LEGACY_PHASES, ...tasks.map((task) => task.phase).filter(Boolean)])],
+    [addablePhases, tasks],
+  );
   const [pendingPhase, setPendingPhase] = useState(null); // the phase whose "+" was clicked
   // Rows a blueprint just added: highlighted, each with the line it repeats, until Keep or Undo.
   const [recent, setRecent] = useState(null); // { phase, ids: Set, sameAs: { id: code } }
@@ -530,32 +540,6 @@ export function WbsStructurePage() {
     }
   }
 
-  async function handleUpload(event) {
-    const file = event.target.files?.[0];
-    if (file && selectedId) {
-      setShowUpload(true);
-      setError('');
-      try {
-        const form = new FormData();
-        form.append('file', file);
-        const resp = await apiFetch(`/api/projects/${selectedId}/wbs-upload`, {
-          method: 'POST',
-          body: form,
-        });
-        if (!resp.ok) throw new Error((await resp.json()).detail || 'Could not upload WBS file.');
-        const result = await resp.json();
-        setToast({ type: 'success', message: `Uploaded: ${result.created} created, ${result.updated} updated.` });
-        await loadTasks();
-      } catch (err) {
-        setError(err.message);
-        setToast({ type: 'error', message: `Upload failed: ${err.message}` });
-      } finally {
-        setShowUpload(false);
-        event.target.value = '';
-      }
-    }
-  }
-
   /** The Add WBS Node dialog, with the phase already chosen when it is opened from a phase card. */
   function openNodeForm(phase = '') {
     setError('');
@@ -569,7 +553,7 @@ export function WbsStructurePage() {
     setError('');
     setNodeMode('subtask');
     setEditNodeId(null);
-    const phase = task.phase || PHASES[0];
+    const phase = task.phase || '';
     setNodeForm({ ...EMPTY_NODE, parent_id: task.id, wbs_code: '', phase, assigned_engineer_id: task.assigned_engineer_id ?? null });
     setShowNodeForm(true);
   }
@@ -579,7 +563,7 @@ export function WbsStructurePage() {
     return map;
   }, {}), [tasks]);
 
-  const phaseAggregates = useMemo(() => PHASES.map((phase) => {
+  const phaseAggregates = useMemo(() => phaseOrder.map((phase) => {
     const phaseTasks = tasks.filter((task) => task.phase === phase);
     const assignedLead = [...new Set(phaseTasks.map((task) => task.assigned_lead).filter(Boolean))];
     const assignedEngineers = [...new Set(phaseTasks.map((task) => task.assigned_engineer_name).filter(Boolean))];
@@ -603,11 +587,11 @@ export function WbsStructurePage() {
       actualStartDate: actualStarts[0] || '', // when its first item really started
       actualEndDate: finished ? actualEnds[actualEnds.length - 1] : '', // once every task in it is finished
     };
-  }), [tasks]);
+  }), [tasks, phaseOrder]);
 
   const visibleSections = useMemo(() => {
     const sections = [];
-    PHASES.forEach((phase) => {
+    phaseOrder.forEach((phase) => {
       const agg = phaseAggregates.find((item) => item.phase === phase);
       const rows = [];
       const walk = (nodes, depth) => {
@@ -620,15 +604,15 @@ export function WbsStructurePage() {
       sections.push({ agg, rows });
     });
     return loaded ? sections : [];
-  }, [children, expanded, phaseFilters, phaseAggregates, loaded]);
+  }, [children, expanded, phaseFilters, phaseAggregates, loaded, phaseOrder]);
 
   const expandAll = () => {
-    setPhaseFilters(Object.fromEntries(PHASES.map((phase) => [phase, true])));
+    setPhaseFilters(Object.fromEntries(phaseOrder.map((phase) => [phase, true])));
     setExpanded(Object.fromEntries(tasks.map((task) => [task.id, true])));
   };
 
   const collapseAll = () => {
-    setPhaseFilters(Object.fromEntries(PHASES.map((phase) => [phase, false])));
+    setPhaseFilters(Object.fromEntries(phaseOrder.map((phase) => [phase, false])));
     setExpanded(Object.fromEntries(tasks.map((task) => [task.id, false])));
   };
 
@@ -903,18 +887,20 @@ export function WbsStructurePage() {
         <>
           {addablePhases.length > 0 && (
           <div className="wbs-phase-toolbar">
-            <div className="wbs-phase-cards">
-              {addablePhases.map((phase) => (
-                <div className="wbs-phase-card" key={phase}>
-                  <button type="button" className="wbs-phase-card-node" onClick={() => openNodeForm(phase)}>{phase}</button>
-                  <button type="button" className="wbs-phase-card-plus" aria-label={`Add the ${phase} blueprint`} title={`Add the standard ${phase} tasks`} onClick={() => setPendingPhase(phase)}>+</button>
+            <div className="wbs-phase-stages">
+              {stages.map(({ stage, nodes }) => (
+                <div className="wbs-phase-stage" key={stage}>
+                  <span className="wbs-phase-stage-name">{stage}</span>
+                  <div className="wbs-phase-cards">
+                    {nodes.map(({ phase }) => (
+                      <div className="wbs-phase-card" key={phase}>
+                        <button type="button" className="wbs-phase-card-node" onClick={() => openNodeForm(phase)}>{phase}</button>
+                        <button type="button" className="wbs-phase-card-plus" aria-label={`Add the ${phase} blueprint`} title={`Add the standard ${phase} tasks`} onClick={() => setPendingPhase(phase)}>+</button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
-            </div>
-            <div className="wbs-upload-tools">
-              <button className="button button-secondary" type="button" onClick={() => fileInputRef.current?.click()} disabled={showUpload}>{showUpload ? 'Uploading...' : 'Upload WBS (Excel)'}</button>
-              <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" hidden onChange={handleUpload} />
-              <a href="/wbs-upload-template.xlsx" download title="Column A: the phase. Column B: tasks in bold, subtasks in normal text.">Download the Excel template</a>
             </div>
           </div>
           )}
@@ -988,7 +974,7 @@ export function WbsStructurePage() {
               <h2>Project Scope Breakdown</h2>
               <p>Lead updates and Engineer assignments are visible here.</p>
             </div>
-            <button className="button button-secondary" type="button" onClick={() => { setPhaseFilters(Object.fromEntries(PHASES.map((phase) => [phase, true]))); loadTasks().catch((err) => setError(err.message)); }}>Expand All</button>
+            <button className="button button-secondary" type="button" onClick={() => { setPhaseFilters(Object.fromEntries(phaseOrder.map((phase) => [phase, true]))); loadTasks().catch((err) => setError(err.message)); }}>Expand All</button>
             <button className="button button-secondary" type="button" onClick={collapseAll}>Collapse All</button>
             <button className="button button-secondary" type="button" onClick={() => loadTasks().catch((err) => setError(err.message))}>Refresh</button>
           </div>

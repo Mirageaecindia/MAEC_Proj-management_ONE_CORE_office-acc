@@ -322,7 +322,7 @@ class WbsNodeBase(BaseModel):
             return None
         phase = current_phase(value)  # an old phase name is taken under its new one
         if phase is None:
-            raise ValueError("Phase must be one of the five fixed phases.")
+            raise ValueError("Phase must be one of the WBS nodes.")
         return phase
 
     @field_validator("end_date")

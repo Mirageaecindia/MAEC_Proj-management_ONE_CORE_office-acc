@@ -11,17 +11,21 @@ Older code and the Excel upload used other names ("Not Started",
 import re
 from collections.abc import Iterable
 
-# The five fixed phases, in order (WBS_PHASES in schemas, the outline workbook, the blueprints).
+from app.domain.wbs_nodes import node_phases
+
+# The five original phases, in order (WBS_PHASES in schemas, the outline workbook). No longer offered
+# since 2026-10-15 (the WBS nodes of app/domain/wbs_nodes.py took their place); their tasks stay valid.
 PHASES = ("Space Planning", "STR Coordination", "ID - RCP Coordination", "BoH Area RCP Coordination", "Submission")
 # A renamed phase keeps its old name as an alias: old workbooks and old API calls still work.
 RENAMED_PHASES = {"ID Coordination": "ID - RCP Coordination"}  # 2026-10-09
 
 
 def current_phase(name) -> str | None:
-    """The phase by its current name (an old name is taken too), or None when it is not a phase."""
+    """The phase by its current name (an old name is taken too), or None when it is not a phase:
+    a WBS node (a sheet of the stage workbooks) or one of the five original phases."""
     text = str(name or "").strip()
     text = RENAMED_PHASES.get(text, text)
-    return text if text in PHASES else None
+    return text if text in PHASES or text in node_phases() else None
 
 
 TO_DO = "To Do"

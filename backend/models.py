@@ -205,7 +205,7 @@ class WbsNode(Base):
     project_id = Column(Integer, nullable=False, index=True)
     parent_id = Column(Integer, nullable=True, index=True)
     wbs_code = Column(String(80), nullable=True, index=True)
-    task_name = Column(String(240), nullable=False)
+    task_name = Column(String(500), nullable=False)  # the WBS node sheets' longest step is 249 characters
     assigned_lead = Column(String(150), nullable=True)
     assigned_lead_user_id = Column(Integer, nullable=True)
     assigned_engineer_id = Column(Integer, nullable=True, index=True)
@@ -305,7 +305,7 @@ class TimeLogEntry(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, nullable=False, index=True)
     task_id = Column(Integer, nullable=False, index=True)
-    task_name = Column(String(255), nullable=True)  # set when the subtask is deleted: the hours stay
+    task_name = Column(String(500), nullable=True)  # set when the subtask is deleted: the hours stay
     task_lead_user_id = Column(Integer, nullable=True)  # ... and so does the lead who reviews them
     employee_id = Column(Integer, nullable=False, index=True)
     work_date = Column(Date, nullable=False, index=True)

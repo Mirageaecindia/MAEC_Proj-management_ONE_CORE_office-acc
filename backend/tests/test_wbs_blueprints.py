@@ -1,8 +1,7 @@
 """Phase blueprints: "+" on a phase card adds that phase's standard tasks (app/services/wbs_blueprints.py).
 
-The app ships no blueprint since the five original phases were removed (2026-10-15,
-test_wbs_phases_removed.py); their workbooks, kept in tests/fixtures/blueprints/, exercise the
-mechanism here until the CD/SD/DD nodes take their place.
+The app's blueprints are the CD/SD/DD WBS nodes (test_wbs_nodes.py); the five original phases'
+workbooks, kept in tests/fixtures/blueprints/, exercise the mechanism here on small, stable data.
 """
 
 from pathlib import Path
@@ -10,17 +9,21 @@ from pathlib import Path
 import pytest
 
 import models
+from app.domain.wbs_nodes import NodeSheet
 from app.services import wbs_blueprints
 from app.services.wbs_blueprints import blueprint_rows
 
 ADD = "/api/projects/{}/wbs-blueprints/{}"
 FIXTURES = Path(__file__).parent / "fixtures" / "blueprints"
 OLD_FIVE = {
-    "space-planning": ("Space Planning", "space_planning.xlsx"),
-    "str-coordination": ("STR Coordination", "str_coordination.xlsx"),
-    "id-rcp-coordination": ("ID - RCP Coordination", "id_coordination.xlsx"),
-    "boh-area-rcp-coordination": ("BoH Area RCP Coordination", "boh_area_rcp_coordination.xlsx"),
-    "submission": ("Submission", "submission.xlsx"),
+    key: NodeSheet(key, phase, "OLD", workbook, "xl/worksheets/sheet1.xml")
+    for key, phase, workbook in (
+        ("space-planning", "Space Planning", "space_planning.xlsx"),
+        ("str-coordination", "STR Coordination", "str_coordination.xlsx"),
+        ("id-rcp-coordination", "ID - RCP Coordination", "id_coordination.xlsx"),
+        ("boh-area-rcp-coordination", "BoH Area RCP Coordination", "boh_area_rcp_coordination.xlsx"),
+        ("submission", "Submission", "submission.xlsx"),
+    )
 }
 
 
@@ -42,7 +45,7 @@ def _nodes(db, project_id):
 def test_each_blueprint_is_listed_and_reads_cleanly(client, world):
     listed = client.get("/api/wbs-blueprints", headers=world.lead_h).json()
 
-    assert [b["phase"] for b in listed] == [phase for phase, _ in OLD_FIVE.values()]
+    assert [b["phase"] for b in listed] == [node.phase for node in OLD_FIVE.values()]
     for blueprint in listed:
         rows = blueprint_rows(blueprint["key"])
         assert rows[0].is_task, blueprint  # each starts with a task

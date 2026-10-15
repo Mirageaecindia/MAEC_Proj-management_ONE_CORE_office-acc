@@ -48,7 +48,6 @@ CATALOG: dict[tuple[str, str], tuple[str, str]] = {
     ("PUT", "/api/projects/{project_id}/team-members"): (BOOKING, "Changed their team"),
     ("POST", "/api/projects/{project_id}/wbs-nodes"): (WBS, "Added a WBS item"),
     ("POST", "/api/projects/{project_id}/wbs-nodes/delete"): (WBS, "Deleted WBS items"),
-    ("POST", "/api/projects/{project_id}/wbs-upload"): (WBS, "Uploaded a WBS workbook"),
     ("POST", "/api/projects/{project_id}/wbs-blueprints/{phase}"): (WBS, "Added the {} blueprint"),
     ("PUT", "/api/wbs-nodes/{node_id}"): (WBS, "Edited {}"),
     ("DELETE", "/api/wbs-nodes/{node_id}"): (WBS, "Deleted {}"),

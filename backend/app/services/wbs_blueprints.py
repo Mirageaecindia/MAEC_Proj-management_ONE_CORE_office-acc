@@ -1,49 +1,48 @@
-"""Phase blueprints (decided 2026-10-07): the company's standard tasks for each phase.
+"""WBS node blueprints: each node's standard tasks, added to a project with its "+" (decided 2026-10-07).
 
-Each phase has one workbook in app/blueprints/ (one column: a bold row is a task, the rows
-under it its subtasks). On WBS Structure the "+" of a phase card adds that phase's
-blueprint to the project; a task or subtask that is already there is skipped, so a
-blueprint can be added again after more were created by hand. The page shows a phase card,
-and lets a lead add tasks, only for the phases listed here.
+The nodes are the sheets of the stage workbooks in app/blueprints/ (CD, SD, DD; since
+2026-10-15, app/domain/wbs_nodes.py), each sheet taken as it is (wbs_outline.parse_node_sheet).
+On WBS Structure the "+" of a node card adds that node's tasks to the project; a task or
+subtask that is already there is skipped, so a blueprint can be added again after more were
+created by hand. The page shows a card, and lets a lead add tasks, only for the nodes listed here.
 
-The five original phases (Space Planning ... Submission) were removed on 2026-10-15: the app
-ships no blueprint until the CD/SD/DD nodes (backend/data/WBS_Node_level_BREAKDOWN/) are added.
-Tasks already filed under the five stay on their projects and keep working.
+The five original phases (Space Planning ... Submission) are no longer offered; tasks already
+filed under them stay on their projects and keep working.
 """
 
 from functools import cache
-from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 import models
 from app.core.errors import NotFoundError
+from app.domain.wbs_nodes import BLUEPRINT_DIR, NodeSheet, node_sheets
 from app.services.access import require_project_lead
-from app.services.wbs_outline import OutlineRow, add_rows, match_rows, parse_blueprint
+from app.services.wbs_outline import OutlineRow, add_rows, match_rows, parse_node_sheet
 
-BLUEPRINT_DIR = Path(__file__).resolve().parents[1] / "blueprints"
-
-# URL key -> (phase, workbook). Empty until the CD/SD/DD nodes are added (see above).
-BLUEPRINTS: dict[str, tuple[str, str]] = {}
-UNKNOWN = "There is no blueprint for that phase."
+# URL key -> the node's sheet, stage by stage in sheet order.
+BLUEPRINTS: dict[str, NodeSheet] = {node.key: node for node in node_sheets()}
+UNKNOWN = "There is no blueprint for that node."
 
 
 @cache
 def blueprint_rows(key: str) -> tuple[OutlineRow, ...]:
-    """The blueprint's tasks and subtasks, read once per process (the files ship with the app)."""
+    """The node's tasks and subtasks, read once per process (the files ship with the app)."""
     if key not in BLUEPRINTS:
         raise NotFoundError(UNKNOWN)
-    phase, filename = BLUEPRINTS[key]
-    return tuple(parse_blueprint((BLUEPRINT_DIR / filename).read_bytes(), phase))
+    node = BLUEPRINTS[key]
+    return tuple(parse_node_sheet((BLUEPRINT_DIR / node.workbook).read_bytes(), node.phase, node.sheet))
 
 
 def catalog() -> list[dict]:
-    """Each phase's blueprint and its size, for the confirmation before adding it."""
+    """Each node's blueprint and its size, for the cards and the confirmation before adding it."""
     out = []
-    for key, (phase, _) in BLUEPRINTS.items():
+    for key, node in BLUEPRINTS.items():
         rows = blueprint_rows(key)
         tasks = sum(1 for row in rows if row.is_task)
-        out.append({"key": key, "phase": phase, "tasks": tasks, "subtasks": len(rows) - tasks})
+        out.append(
+            {"key": key, "phase": node.phase, "stage": node.stage, "tasks": tasks, "subtasks": len(rows) - tasks}
+        )
     return out
 
 
@@ -65,7 +64,7 @@ def preview(db: Session, user: models.User, project_id: int, key: str) -> dict:
     present_tasks = sum(1 for row in present if row.is_task)
     return {
         "key": key,
-        "phase": BLUEPRINTS[key][0],
+        "phase": BLUEPRINTS[key].phase,
         "tasks": tasks,
         "subtasks": len(rows) - tasks,
         "present_tasks": present_tasks,
@@ -82,7 +81,7 @@ def add_blueprint(db: Session, user: models.User, project_id: int, key: str, aga
     result = add_rows(db, project, user, list(rows), again=again)
     db.commit()
     return {
-        "phase": BLUEPRINTS[key][0],
+        "phase": BLUEPRINTS[key].phase,
         "created": result["created"],
         "skipped": result["updated"],
         "created_ids": result["created_ids"],

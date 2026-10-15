@@ -9,7 +9,6 @@ import { RejectedHoursPanel } from '../../features/hours/RejectedHours';
 import { DAY_KEYS, DAY_LEGEND, HOURS_STATUS_LABELS, HOURS_STATUS_PILL, bulkNotice, describeTotals, groupByEngineer, isOverMark, summarizeWeek } from '../../utils/hours';
 import { formatDateStr, getMonday, getWeekInfo } from '../../utils/weeks';
 
-const WBS_PHASES = ['Space Planning', 'STR Coordination', 'ID - RCP Coordination', 'BoH Area RCP Coordination'];
 const INITIAL_VIEWPORT_START = new Date(2026, 8, 1);
 const INITIAL_VIEWPORT_END = new Date(2026, 11, 31, 23, 59, 59);
 const INITIAL_VIEWPORT_MONTH_COUNT =
@@ -157,10 +156,7 @@ export function TimelineLogsPage() {
   }, [projectId, loadProjectData]);
 
   const phaseRows = useMemo(() => {
-    const phaseMap = {};
-    WBS_PHASES.forEach((phase) => {
-      phaseMap[phase] = { phase, count: 0 };
-    });
+    const phaseMap = {}; // a row per WBS node (or original phase) that holds tasks, none when empty
     const source = isEngineer
       ? (timelineTasks.length > 0 ? timelineTasks : nodes)
       : (isLead ? timelineTasks : nodes);

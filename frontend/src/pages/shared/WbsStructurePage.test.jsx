@@ -40,6 +40,7 @@ let myRole = 'lead'; // the viewer's role on the project
 const BLUEPRINTS = PHASES.map((phase, index) => ({
   key: phase.toLowerCase().replace(/ /g, '-'),
   phase,
+  stage: index < 2 ? 'CD' : 'SD', // the workbook the node's sheet is in
   tasks: 2,
   subtasks: 5 + index,
 }));
@@ -211,6 +212,21 @@ describe('WBS phase cards (lead)', () => {
       expect(await screen.findByText('Blueprint task', {}, WAIT)).toBeTruthy(); // the WBS is reloaded
     },
   );
+
+  it('shows the node cards stage by stage', async () => {
+    renderPage();
+    await screen.findByRole('button', { name: 'Add the Submission blueprint' }, WAIT);
+
+    const stages = [...document.querySelectorAll('.wbs-phase-stage')].map((stage) => [
+      stage.querySelector('.wbs-phase-stage-name').textContent,
+      [...stage.querySelectorAll('.wbs-phase-card-node')].map((card) => card.textContent),
+    ]);
+    expect(stages).toEqual([
+      ['CD', PHASES.slice(0, 2)],
+      ['SD', PHASES.slice(2)],
+    ]);
+    expect(screen.queryByRole('button', { name: 'Upload WBS (Excel)' })).toBeNull(); // the five-phase workbook is gone
+  });
 
   it('the phase name still adds a single task by hand, with the phase chosen', async () => {
     const phase = 'ID - RCP Coordination';
