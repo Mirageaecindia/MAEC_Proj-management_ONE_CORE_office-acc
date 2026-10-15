@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_COLUMNS,
   columnDates,
+  columnLimits,
   columnLabel,
   columnTotals,
   hoursOutsideGrid,
@@ -70,4 +71,28 @@ describe('totals', () => {
 
 it('labels a column like the resourcing sheet', () => {
   expect(columnLabel('2027-01-08')).toBe('08 Jan 27');
+});
+
+describe('columnLimits', () => {
+  it('allows 9 hours for each working day a column covers, weekends left out', () => {
+    // Every 2 days from Friday 1 Jan 2027: Fri+Sat, Sun+Mon, then Tue alone (the end date).
+    const fromFriday = columnDates('2027-01-01', '2027-01-05', 2).dates;
+    expect(columnLimits(fromFriday, '2027-01-05', 2)).toEqual({
+      '2027-01-01': 9,
+      '2027-01-03': 9,
+      '2027-01-05': 9,
+    });
+    expect(columnLimits(['2027-01-04'], '2027-01-10', 2)).toEqual({ '2027-01-04': 18 }); // Mon+Tue
+    expect(columnLimits(JAN, '2027-02-01', 7)).toEqual({
+      '2027-01-01': 45,
+      '2027-01-08': 45,
+      '2027-01-15': 45,
+      '2027-01-22': 45,
+      '2027-01-29': 18, // Fri 29 Jan and Mon 1 Feb, the end date
+    });
+    expect(columnLimits(['2027-01-02', '2027-01-03'], '2027-01-04', 1)).toEqual({
+      '2027-01-02': 0,
+      '2027-01-03': 0,
+    });
+  });
 });

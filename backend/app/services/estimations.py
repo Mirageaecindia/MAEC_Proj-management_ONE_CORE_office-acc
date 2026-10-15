@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 import models
 from app.core.errors import BadRequestError, NotFoundError
-from app.domain.estimation import STAFF_CODES, check_row, check_stages, column_dates, row_total
+from app.domain.estimation import STAFF_CODES, check_row, check_stages, column_dates, column_limits, row_total
 from app.repositories.estimations import EstimationRepository
 
 NOT_FOUND = "That estimation no longer exists. Refresh the page."
@@ -81,10 +81,10 @@ def _fill(estimation: models.ProjectEstimation, data: EstimationData) -> None:
     if not name:
         raise BadRequestError("Give the estimation a name.")
     try:
-        columns = set(column_dates(data.start_date, data.end_date, data.interval_days))
+        limits = column_limits(data.start_date, data.end_date, data.interval_days)
         for row in data.rows:
-            check_row(row.code, row.role, row.hours, columns, data.interval_days)
-        check_stages(data.stages, columns)
+            check_row(row.code, row.role, row.hours, limits)
+        check_stages(data.stages, set(limits))
     except ValueError as error:
         raise BadRequestError(str(error)) from None
     estimation.name = name
@@ -95,7 +95,7 @@ def _fill(estimation: models.ProjectEstimation, data: EstimationData) -> None:
         {
             "code": row.code,
             "role": row.role,
-            "hours": {day.isoformat(): float(value) for day, value in sorted(row.hours.items()) if value},
+            "hours": {day.isoformat(): int(value) for day, value in sorted(row.hours.items()) if value},
         }
         for row in data.rows
     ]

@@ -127,6 +127,10 @@ Estimate a project's resourcing in the layout of the company's resourcing sheet,
 2. Each row is one person: choose their **Code** (the **Staff Role** fills in), then type the hours on each date.
    **Total Hours** adds up the row; the **Total** line at the bottom adds up each date and the whole estimation.
    **Add row** for another person; the same code can be on several rows.
+   Hours are **whole hours**, and a cell allows at most **9 hours for each working day** (Monday to Friday) its
+   column covers, from its date to the day before the next column: every 2 days from a Monday allows 18, from a
+   Friday 9 (Saturday doesn't count). Each date heading shows its limit (*max 18 h*); a column with no working
+   day is greyed out. The total of all rows also shows in the Total Hours column of the stage row.
 3. **Save estimation**. Saved estimations are listed at the top: **Open** one to change it, or delete it.
    Changing the dates or the spacing later keeps the hours and stages that still fall on a column; the others are
    pointed out and left out when you save.

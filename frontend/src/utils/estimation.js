@@ -5,6 +5,7 @@
  */
 
 export const MAX_COLUMNS = 400; // the server's limit too
+export const HOURS_PER_DAY = 9; // one person's working day (Monday to Friday); the server's rule too
 /** The design stage a date column falls in (the sheet's stage row), chosen per column or left empty. */
 export const STAGES = ['CD', 'SD', 'DD', 'TD', 'IFC'];
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -40,6 +41,28 @@ export function columnDates(start, end, intervalDays) {
     };
   }
   return { dates: Array.from({ length: count }, (_, n) => isoDay(first + n * step * DAY_MS)), error: '' };
+}
+
+/**
+ * The most hours one person can have in each date column: HOURS_PER_DAY for each working day
+ * (Monday to Friday) the column covers, from its date to the day before the next column (the
+ * last column: to the end date). Every 2 days from a Monday: 18; from a Friday: 9.
+ */
+export function columnLimits(dates, endDate, intervalDays) {
+  const end = utcDay(endDate);
+  const span = Number(intervalDays) - 1;
+  return Object.fromEntries(
+    dates.map((day) => {
+      const first = utcDay(day);
+      const last = Math.min(first + span * DAY_MS, end);
+      let working = 0;
+      for (let ms = first; ms <= last; ms += DAY_MS) {
+        const weekday = new Date(ms).getUTCDay();
+        if (weekday !== 0 && weekday !== 6) working += 1;
+      }
+      return [day, working * HOURS_PER_DAY];
+    }),
+  );
 }
 
 /** A cell's hours as a number; empty or not a number is 0. */

@@ -13,6 +13,8 @@ import {
 import {
   columnDates,
   columnLabel,
+  columnLimits,
+  HOURS_PER_DAY,
   columnTotals,
   hoursOf,
   hoursOutsideGrid,
@@ -79,7 +81,18 @@ export function ProjectEstimationPage() {
   const grandTotal = totals.reduce((sum, value) => sum + value, 0);
   const leftOut = useMemo(() => hoursOutsideGrid(draft.rows, dates), [draft.rows, dates]);
   const stagesLeftOut = useMemo(() => stagesOutsideGrid(draft.stages, dates), [draft.stages, dates]);
-  const mostPerCell = Number(draft.intervalDays) * 24;
+  const limits = useMemo(
+    () => columnLimits(dates, draft.endDate, draft.intervalDays),
+    [dates, draft.endDate, draft.intervalDays],
+  );
+  // Whole hours, up to the column's limit: 9 for each working day it covers.
+  const cellProblem = (value, day) => {
+    if (value === '' || value === undefined) return '';
+    const hours = hoursOf(value);
+    if (!Number.isInteger(hours)) return 'enter whole hours';
+    if (hours > limits[day]) return limits[day] ? `at most ${limits[day]} h` : 'no working day (weekend)';
+    return '';
+  };
 
   const change = (patch) => {
     setDraft((current) => ({ ...current, ...patch }));
@@ -95,6 +108,7 @@ export function ProjectEstimationPage() {
     change({ stages });
   };
   const setHours = (key, day, value) => {
+    if (!/^\d{0,4}$/.test(value)) return; // whole hours only: no decimals, no minus
     const row = draft.rows.find((item) => item.key === key);
     changeRow(key, { hours: { ...row.hours, [day]: value } });
   };
@@ -119,10 +133,14 @@ export function ProjectEstimationPage() {
     if (!draft.name.trim()) return 'Give the estimation a name.';
     if (datesError) return datesError;
     if (draft.rows.some((row) => !row.code)) return 'Choose a code for every row, or remove the empty rows.';
-    const wrong = draft.rows.some((row) =>
-      dates.some((day) => hoursOf(row.hours[day]) < 0 || hoursOf(row.hours[day]) > mostPerCell),
-    );
-    if (wrong) return `Hours must be between 0 and ${mostPerCell} in each date column.`;
+    for (const [index, row] of draft.rows.entries()) {
+      for (const day of dates) {
+        const found = cellProblem(row.hours[day], day);
+        if (found) {
+          return `Row ${index + 1}, ${columnLabel(day)}: ${row.hours[day]} hours; ${found}. A column allows ${HOURS_PER_DAY} h for each working day (Monday to Friday) it covers.`;
+        }
+      }
+    }
     return '';
   }
 
@@ -299,16 +317,22 @@ export function ProjectEstimationPage() {
                     <th className="est-fixed est-role">STAFF ROLE</th>
                     <th className="est-fixed est-total">TOTAL HOURS</th>
                     {dates.map((day) => (
-                      <th key={day} className="est-day">
+                      <th
+                        key={day}
+                        className="est-day"
+                        title={`Up to ${limits[day]} h per person: ${limits[day] / HOURS_PER_DAY} working day(s) x ${HOURS_PER_DAY} h`}
+                      >
                         {columnLabel(day)}
+                        <span className="est-limit">max {limits[day]} h</span>
                       </th>
                     ))}
                     <th className="est-remove" aria-label="Remove" />
                   </tr>
                   {/* The stage of each date column (the resourcing sheet's stage row): chosen, or empty. */}
                   <tr className="est-stage-row">
-                    <th colSpan={4} className="est-fixed est-stage-label">
-                      STAGE
+                    <th colSpan={3} className="est-fixed est-stage-label" />
+                    <th className="est-fixed est-total est-stage-total" title="Total hours of all rows">
+                      {formatHours(grandTotal)}
                     </th>
                     {dates.map((day) => (
                       <th key={day} className="est-day">
@@ -356,16 +380,23 @@ export function ProjectEstimationPage() {
                       <td className="est-fixed est-total">{formatHours(rowTotal(row.hours, dates))}</td>
                       {dates.map((day) => {
                         const value = row.hours[day] ?? '';
-                        const wrong = value !== '' && (hoursOf(value) < 0 || hoursOf(value) > mostPerCell);
+                        const wrong = cellProblem(value, day);
+                        const weekend = limits[day] === 0;
                         return (
                           <td key={day} className="est-day">
                             <input
-                              type="number"
-                              min="0"
-                              step="0.5"
-                              inputMode="decimal"
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
                               aria-label={`Hours of row ${index + 1} on ${columnLabel(day)}`}
-                              aria-invalid={wrong || undefined}
+                              aria-invalid={Boolean(wrong) || undefined}
+                              title={
+                                wrong ||
+                                (weekend
+                                  ? 'No working day in this column (weekend)'
+                                  : `Up to ${limits[day]} h`)
+                              }
+                              disabled={weekend && value === ''}
                               value={value}
                               onChange={(event) => setHours(row.key, day, event.target.value)}
                             />

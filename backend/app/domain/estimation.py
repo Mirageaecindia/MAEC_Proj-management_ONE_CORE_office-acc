@@ -45,6 +45,7 @@ STAFF_CODES: tuple[tuple[str, str], ...] = (
 # The design stage a date column falls in, chosen per column (or left empty).
 STAGES = ("CD", "SD", "DD", "TD", "IFC")
 
+HOURS_PER_DAY = 9  # what one person works on a working day (Monday to Friday)
 MAX_COLUMNS = 400  # e.g. eight years week by week: more is a typo in a date
 MAX_ROWS = 300
 
@@ -65,17 +66,41 @@ def column_dates(start: date, end: date, interval_days: int) -> list[date]:
     return [start + timedelta(days=interval_days * n) for n in range(count)]
 
 
-def check_row(code: str, role: str, hours: dict[date, float], columns: set[date], interval_days: int) -> None:
-    """A row is a known code and role, and hours only on column dates, none negative, none more
-    than the hours there are between two columns."""
+def working_days(first: date, last: date) -> int:
+    """Monday to Friday from `first` to `last`, both included (the app's weekend is Saturday and Sunday)."""
+    return sum(1 for offset in range((last - first).days + 1) if (first + timedelta(days=offset)).weekday() < 5)
+
+
+def column_limits(start: date, end: date, interval_days: int) -> dict[date, int]:
+    """The most hours one person can have in each date column: HOURS_PER_DAY for each working
+    day the column covers, from its date to the day before the next column (the last column:
+    to the end date). Every 2 days from a Monday: 18; from a Friday: 9 (Saturday doesn't count)."""
+    limits = {}
+    for day in column_dates(start, end, interval_days):
+        last = min(day + timedelta(days=interval_days - 1), end)
+        limits[day] = HOURS_PER_DAY * working_days(day, last)
+    return limits
+
+
+def check_row(code: str, role: str, hours: dict[date, float], limits: dict[date, int]) -> None:
+    """A row is a known code and role, and whole hours only on column dates, from 0 up to the
+    column's limit (column_limits)."""
     if (code, role) not in STAFF_CODES:
         raise ValueError(f"'{code} - {role}' is not one of the staff codes.")
-    most = interval_days * 24
     for day, value in hours.items():
-        if day not in columns:
+        if day not in limits:
             raise ValueError(f"{code}: {day.isoformat()} is not one of the date columns.")
+        if value != int(value):
+            raise ValueError(f"{code}: {value} hours on {day.isoformat()}; enter whole hours.")
+        most = limits[day]
         if value < 0 or value > most:
-            raise ValueError(f"{code}: {value} hours on {day.isoformat()}; it must be between 0 and {most}.")
+            days = most // HOURS_PER_DAY
+            reason = (
+                "it has no working day (weekend)"
+                if days == 0
+                else f"at most {most} ({days} working day{'s' if days > 1 else ''} x {HOURS_PER_DAY} h)"
+            )
+            raise ValueError(f"{code}: {value:g} hours on {day.isoformat()}; {reason}.")
 
 
 def check_stages(stages: dict[date, str], columns: set[date]) -> None:

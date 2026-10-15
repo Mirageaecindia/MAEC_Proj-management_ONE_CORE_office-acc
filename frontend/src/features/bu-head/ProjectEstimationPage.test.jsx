@@ -49,7 +49,10 @@ const renderPage = () =>
 
 const field = (label) => screen.getByLabelText(label, { selector: 'input' });
 const headings = () =>
-  [...document.querySelectorAll('.estimation-grid thead tr:first-child th')].map((th) => th.textContent);
+  // each heading's own text, without its 'max N h' line
+  [...document.querySelectorAll('.estimation-grid thead tr:first-child th')].map(
+    (th) => th.childNodes[0]?.textContent ?? '',
+  );
 
 describe('Project Estimation', () => {
   beforeEach(() => {
@@ -90,14 +93,14 @@ describe('Project Estimation', () => {
     expect(within(row).getByText('Senior Mechanical Engineer', { selector: 'td' })).toBeTruthy(); // the role follows
     fireEvent.change(field('Hours of row 1 on 01 Jan 27'), { target: { value: '9' } });
     fireEvent.change(field('Hours of row 1 on 08 Jan 27'), { target: { value: '5' } });
-    fireEvent.change(field('Hours of row 1 on 15 Jan 27'), { target: { value: '22.5' } });
-    expect(row.querySelector('.est-total').textContent).toBe('36.5');
+    fireEvent.change(field('Hours of row 1 on 15 Jan 27'), { target: { value: '22' } });
+    expect(row.querySelector('.est-total').textContent).toBe('36');
 
     fireEvent.click(screen.getByRole('button', { name: /Add row/ }));
     fireEvent.change(screen.getByLabelText('Code of row 2'), { target: { value: 'BL|BIM Coordinator' } });
     fireEvent.change(field('Hours of row 2 on 01 Jan 27'), { target: { value: '4' } });
     const footer = [...document.querySelectorAll('.estimation-grid tfoot td')].map((td) => td.textContent);
-    expect(footer.slice(1, 6)).toEqual(['Total', '', '40.5', '13', '5']); // grand total, then 01 and 08 Jan
+    expect(footer.slice(1, 6)).toEqual(['Total', '', '40', '13', '5']); // grand total, then 01 and 08 Jan
 
     const stage = (day) => screen.getByLabelText(`Stage on ${day}`);
     expect([...stage('01 Jan 27').options].map((option) => option.value)).toEqual([
@@ -124,7 +127,7 @@ describe('Project Estimation', () => {
       end_date: '2027-02-01',
       interval_days: 14,
       rows: [
-        { code: 'SME', role: 'Senior Mechanical Engineer', hours: { '2027-01-01': 9, '2027-01-15': 22.5 } },
+        { code: 'SME', role: 'Senior Mechanical Engineer', hours: { '2027-01-01': 9, '2027-01-15': 22 } },
         { code: 'BL', role: 'BIM Coordinator', hours: { '2027-01-01': 4 } },
       ],
       stages: { '2027-01-01': 'CD' }, // 08 Jan's SD went with its column
@@ -143,6 +146,37 @@ describe('Project Estimation', () => {
     expect(screen.getByLabelText('Stage on 08 Jan 27').value).toBe('DD');
     expect(screen.getByLabelText('Stage on 01 Jan 27').value).toBe(''); // none chosen
     expect(headings().slice(4, -1)).toEqual(['01 Jan 27', '08 Jan 27', '15 Jan 27']);
+  });
+
+  it('allows whole hours only, up to 9 a working day in each column, and shows the grand total', async () => {
+    renderPage();
+    await screen.findByText(/No estimations saved yet/, {}, WAIT);
+    fireEvent.change(field(/Estimation name/), { target: { value: 'Tower B' } });
+    fireEvent.change(field('Start date'), { target: { value: '2027-01-01' } }); // a Friday
+    fireEvent.change(field('End date'), { target: { value: '2027-01-05' } });
+    fireEvent.change(field('Days between columns'), { target: { value: '2' } });
+    const limits = [...document.querySelectorAll('.estimation-grid .est-limit')].map((el) => el.textContent);
+    expect(limits).toEqual(['max 9 h', 'max 9 h', 'max 9 h']); // Fri+Sat, Sun+Mon, Tue: one working day each
+
+    const code = screen.getByLabelText('Code of row 1');
+    await within(code).findByText('SME — Senior Mechanical Engineer', {}, WAIT);
+    fireEvent.change(code, { target: { value: 'SME|Senior Mechanical Engineer' } });
+    const friday = field('Hours of row 1 on 01 Jan 27');
+    fireEvent.change(friday, { target: { value: '2.5' } });
+    expect(friday.value).toBe(''); // no decimals
+    fireEvent.change(friday, { target: { value: '10' } });
+    expect(friday.getAttribute('aria-invalid')).toBe('true');
+    fireEvent.change(field('Hours of row 1 on 03 Jan 27'), { target: { value: '9' } });
+    expect(document.querySelector('.est-stage-total').textContent).toBe('19'); // all rows, in the stage row
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save estimation' }));
+    expect(await screen.findByText(/Row 1, 01 Jan 27: 10 hours; at most 9 h/, {}, WAIT)).toBeTruthy();
+    expect(posted).toBeNull();
+
+    fireEvent.change(field('Start date'), { target: { value: '2027-01-02' } }); // a Saturday, a column a day
+    fireEvent.change(field('Days between columns'), { target: { value: '1' } });
+    expect(field('Hours of row 1 on 02 Jan 27').disabled).toBe(true); // a weekend: no hours
+    expect(field('Hours of row 1 on 04 Jan 27').disabled).toBe(false);
   });
 
   it('asks for a code on every row before saving', async () => {
