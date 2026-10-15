@@ -8,7 +8,8 @@ from datetime import date
 
 import pytest
 
-from app.domain.estimation import MAX_COLUMNS, STAFF_CODES, column_dates
+import models
+from app.domain.estimation import MAX_COLUMNS, STAFF_CODES, STAGES, column_dates
 
 URL = "/api/estimations"
 
@@ -24,6 +25,7 @@ def grid(**overrides):
             {"code": "BE", "role": "BIM Modeller-E", "hours": {"2027-01-08": 27, "2027-01-29": 18}},
             {"code": "BE", "role": "BIM Modeller-E", "hours": {"2027-01-29": 9}},  # a second one
         ],
+        "stages": {"2027-01-01": "CD", "2027-01-08": "CD", "2027-01-22": "SD"},  # 15 and 29 Jan: none chosen
     }
     return payload | overrides
 
@@ -69,7 +71,9 @@ def test_editing_saves_the_whole_grid_again(client, world):
     rows = [{"code": "BL", "role": "BIM Coordinator", "hours": {"2027-01-01": 10, "2027-01-15": 0}}]
 
     edited = client.put(
-        f"{URL}/{estimation_id}", json=grid(name="DCH A9 R01", interval_days=14, rows=rows), headers=world.bu_h
+        f"{URL}/{estimation_id}",
+        json=grid(name="DCH A9 R01", interval_days=14, rows=rows, stages={"2027-01-15": "SD"}),
+        headers=world.bu_h,
     )
 
     assert edited.status_code == 200, edited.text
@@ -123,3 +127,34 @@ def test_saving_an_estimation_is_in_the_audit_log(client, world):
 
     latest = client.get("/api/audit/mine", headers=world.bu_h).json()["events"][0]
     assert latest["summary"] == "Created a project estimation"
+
+
+def test_each_date_column_takes_a_stage_or_none(client, world):
+    assert STAGES == ("CD", "SD", "DD", "TD", "IFC")
+    estimation_id = client.post(URL, json=grid(), headers=world.bu_h).json()["id"]
+
+    estimation = client.get(f"{URL}/{estimation_id}", headers=world.bu_h).json()
+    assert estimation["stages"] == {"2027-01-01": "CD", "2027-01-08": "CD", "2027-01-22": "SD"}
+
+    stages = {"2027-01-01": "TD", "2027-01-29": "IFC"}
+    edited = client.put(f"{URL}/{estimation_id}", json=grid(stages=stages), headers=world.bu_h).json()
+    assert edited["stages"] == stages
+
+
+@pytest.mark.parametrize(
+    ("stages", "message"),
+    [({"2027-01-08": "XD"}, "not a stage"), ({"2027-01-09": "CD"}, "date columns")],
+)
+def test_a_wrong_stage_is_refused(client, world, stages, message):
+    response = client.post(URL, json=grid(stages=stages), headers=world.bu_h)
+
+    assert response.status_code == 400, response.text
+    assert message in response.json()["detail"]
+
+
+def test_an_estimation_saved_before_stages_has_none(client, db, world):
+    estimation_id = client.post(URL, json=grid(stages={}), headers=world.bu_h).json()["id"]
+    db.get(models.ProjectEstimation, estimation_id).stages = None  # as migration 0026 leaves the older ones
+    db.commit()
+
+    assert client.get(f"{URL}/{estimation_id}", headers=world.bu_h).json()["stages"] == {}

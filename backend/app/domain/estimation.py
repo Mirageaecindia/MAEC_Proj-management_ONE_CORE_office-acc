@@ -1,9 +1,10 @@
 """Project estimation (decided 2026-10-15): the BU Head's resourcing estimate for a project, made
 before the project exists, in the layout of the company's resourcing sheet ("Mastersheet-Projects").
 
-The columns are dates: the start date, then every `interval_days` days, up to the end date. Each
-row is a staff code with its role, and the hours planned for it on each column date; its total is
-the sum of its hours. The same code can be on several rows (two BIM Modellers, say).
+The columns are dates: the start date, then every `interval_days` days, up to the end date. Under
+the dates, each column can name the design stage it falls in (the sheet's stage row). Each row is a
+staff code with its role, and the hours planned for it on each column date; its total is the sum of
+its hours. The same code can be on several rows (two BIM Modellers, say).
 """
 
 from datetime import date, timedelta
@@ -41,6 +42,9 @@ STAFF_CODES: tuple[tuple[str, str], ...] = (
     ("BJP", "Junior BIM Modeller-P"),
 )
 
+# The design stage a date column falls in, chosen per column (or left empty).
+STAGES = ("CD", "SD", "DD", "TD", "IFC")
+
 MAX_COLUMNS = 400  # e.g. eight years week by week: more is a typo in a date
 MAX_ROWS = 300
 
@@ -72,6 +76,15 @@ def check_row(code: str, role: str, hours: dict[date, float], columns: set[date]
             raise ValueError(f"{code}: {day.isoformat()} is not one of the date columns.")
         if value < 0 or value > most:
             raise ValueError(f"{code}: {value} hours on {day.isoformat()}; it must be between 0 and {most}.")
+
+
+def check_stages(stages: dict[date, str], columns: set[date]) -> None:
+    """Each stage is one of STAGES, on a column date."""
+    for day, stage in stages.items():
+        if day not in columns:
+            raise ValueError(f"The stage on {day.isoformat()} is not on one of the date columns.")
+        if stage not in STAGES:
+            raise ValueError(f"'{stage}' is not a stage; choose one of {', '.join(STAGES)}.")
 
 
 def row_total(hours: dict) -> float:

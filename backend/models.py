@@ -403,6 +403,7 @@ class ProjectEstimation(Base):
     interval_days = Column(Integer, nullable=False, default=7)
     # [{"code": "SME", "role": "Senior Mechanical Engineer", "hours": {"2026-01-08": 9.0, ...}}, ...]
     rows = Column(JSON, nullable=False, default=list)
+    stages = Column(JSON, nullable=True, default=dict)  # {"2026-10-15": "CD", ...}: the stage of a date column
     created_by_user_id = Column(Integer, nullable=True)
     created_at = Column(UTCDateTime, server_default=func.now())
     updated_at = Column(UTCDateTime, server_default=func.now(), onupdate=func.now())

@@ -29,10 +29,11 @@ class EstimationIn(BaseModel):
     end_date: date
     interval_days: int = Field(ge=1, le=366)
     rows: list[EstimationRowIn] = Field(default=[], max_length=MAX_ROWS)
+    stages: dict[date, str] = {}  # the design stage of a date column (CD, SD, DD, TD or IFC)
 
     def data(self) -> EstimationData:
         rows = [EstimationRow(row.code, row.role, row.hours) for row in self.rows]
-        return EstimationData(self.name, self.start_date, self.end_date, self.interval_days, rows)
+        return EstimationData(self.name, self.start_date, self.end_date, self.interval_days, rows, self.stages)
 
 
 @router.get("/codes")

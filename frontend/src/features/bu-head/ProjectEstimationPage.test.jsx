@@ -20,6 +20,7 @@ const SAVED = {
   row_count: 1,
   total_hours: 12,
   rows: [{ code: 'BL', role: 'BIM Coordinator', hours: { '2027-01-08': 12 }, total: 12 }],
+  stages: { '2027-01-08': 'DD' },
 };
 
 let saved;
@@ -48,7 +49,7 @@ const renderPage = () =>
 
 const field = (label) => screen.getByLabelText(label, { selector: 'input' });
 const headings = () =>
-  [...document.querySelectorAll('.estimation-grid thead th')].map((th) => th.textContent);
+  [...document.querySelectorAll('.estimation-grid thead tr:first-child th')].map((th) => th.textContent);
 
 describe('Project Estimation', () => {
   beforeEach(() => {
@@ -98,8 +99,22 @@ describe('Project Estimation', () => {
     const footer = [...document.querySelectorAll('.estimation-grid tfoot td')].map((td) => td.textContent);
     expect(footer.slice(1, 6)).toEqual(['Total', '', '40.5', '13', '5']); // grand total, then 01 and 08 Jan
 
+    const stage = (day) => screen.getByLabelText(`Stage on ${day}`);
+    expect([...stage('01 Jan 27').options].map((option) => option.value)).toEqual([
+      '',
+      'CD',
+      'SD',
+      'DD',
+      'TD',
+      'IFC',
+    ]);
+    expect(stage('01 Jan 27').value).toBe(''); // empty until chosen
+    fireEvent.change(stage('01 Jan 27'), { target: { value: 'CD' } });
+    fireEvent.change(stage('08 Jan 27'), { target: { value: 'SD' } });
+
     fireEvent.change(field('Days between columns'), { target: { value: '14' } }); // 08 Jan is no column now
     expect(screen.getByText(/5 hours are on dates no longer in the grid/)).toBeTruthy();
+    expect(screen.getByText(/1 stage is on dates no longer in the grid/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save estimation' }));
 
     expect(await screen.findByText('Saved "Tower B".', {}, WAIT)).toBeTruthy();
@@ -112,6 +127,7 @@ describe('Project Estimation', () => {
         { code: 'SME', role: 'Senior Mechanical Engineer', hours: { '2027-01-01': 9, '2027-01-15': 22.5 } },
         { code: 'BL', role: 'BIM Coordinator', hours: { '2027-01-01': 4 } },
       ],
+      stages: { '2027-01-01': 'CD' }, // 08 Jan's SD went with its column
     });
   });
 
@@ -124,6 +140,8 @@ describe('Project Estimation', () => {
     expect(await screen.findByDisplayValue('DCH A9 tender', {}, WAIT)).toBeTruthy();
     expect(screen.getByLabelText('Code of row 1').value).toBe('BL|BIM Coordinator');
     expect(field('Hours of row 1 on 08 Jan 27').value).toBe('12');
+    expect(screen.getByLabelText('Stage on 08 Jan 27').value).toBe('DD');
+    expect(screen.getByLabelText('Stage on 01 Jan 27').value).toBe(''); // none chosen
     expect(headings().slice(4, -1)).toEqual(['01 Jan 27', '08 Jan 27', '15 Jan 27']);
   });
 

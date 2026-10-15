@@ -3,14 +3,14 @@ and reopened later. The grid's rules (date columns, staff codes, hours) are in
 app/domain/estimation.py.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 from sqlalchemy.orm import Session
 
 import models
 from app.core.errors import BadRequestError, NotFoundError
-from app.domain.estimation import STAFF_CODES, check_row, column_dates, row_total
+from app.domain.estimation import STAFF_CODES, check_row, check_stages, column_dates, row_total
 from app.repositories.estimations import EstimationRepository
 
 NOT_FOUND = "That estimation no longer exists. Refresh the page."
@@ -30,6 +30,7 @@ class EstimationData:
     end_date: date
     interval_days: int
     rows: list[EstimationRow]
+    stages: dict[date, str] = field(default_factory=dict)  # the stage of a date column
 
 
 class ProjectEstimations:
@@ -83,6 +84,7 @@ def _fill(estimation: models.ProjectEstimation, data: EstimationData) -> None:
         columns = set(column_dates(data.start_date, data.end_date, data.interval_days))
         for row in data.rows:
             check_row(row.code, row.role, row.hours, columns, data.interval_days)
+        check_stages(data.stages, columns)
     except ValueError as error:
         raise BadRequestError(str(error)) from None
     estimation.name = name
@@ -97,6 +99,7 @@ def _fill(estimation: models.ProjectEstimation, data: EstimationData) -> None:
         }
         for row in data.rows
     ]
+    estimation.stages = {day.isoformat(): stage for day, stage in sorted(data.stages.items())}
 
 
 def _summary(estimation: models.ProjectEstimation) -> dict:
@@ -122,6 +125,7 @@ def _detail(estimation: models.ProjectEstimation) -> dict:
         **_summary(estimation),
         "dates": dates,
         "rows": rows,
+        "stages": estimation.stages or {},
         "column_totals": [round(sum(row["hours"].get(day, 0) for row in rows), 2) for day in dates],
         "created_at": estimation.created_at,
     }

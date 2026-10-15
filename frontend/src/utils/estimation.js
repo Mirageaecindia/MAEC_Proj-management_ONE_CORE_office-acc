@@ -5,6 +5,8 @@
  */
 
 export const MAX_COLUMNS = 400; // the server's limit too
+/** The design stage a date column falls in (the sheet's stage row), chosen per column or left empty. */
+export const STAGES = ['CD', 'SD', 'DD', 'TD', 'IFC'];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function utcDay(iso) {
@@ -73,8 +75,14 @@ export function hoursOutsideGrid(rows, dates) {
   );
 }
 
-/** What the server stores: hours only on the grid's dates and only where there are some. */
-export function toPayload({ name, startDate, endDate, intervalDays, rows }, dates) {
+/** Stages chosen on dates no longer in the grid: left out when saved. */
+export function stagesOutsideGrid(stages, dates) {
+  const inGrid = new Set(dates);
+  return Object.entries(stages || {}).filter(([day, stage]) => stage && !inGrid.has(day)).length;
+}
+
+/** What the server stores: hours and stages only on the grid's dates, and only where there are some. */
+export function toPayload({ name, startDate, endDate, intervalDays, rows, stages = {} }, dates) {
   const inGrid = new Set(dates);
   return {
     name: name.trim(),
@@ -90,6 +98,7 @@ export function toPayload({ name, startDate, endDate, intervalDays, rows }, date
           .map(([day, value]) => [day, hoursOf(value)]),
       ),
     })),
+    stages: Object.fromEntries(Object.entries(stages).filter(([day, stage]) => inGrid.has(day) && stage)),
   };
 }
 

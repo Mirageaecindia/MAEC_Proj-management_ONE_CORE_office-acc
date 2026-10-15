@@ -1625,6 +1625,10 @@ a.review-btn:hover { background: #dcecf7; }
 .est-day input { width: 60px; height: 30px; padding: 0 5px; text-align: right; font-size: 11px; }
 .est-day input[aria-invalid='true'] { border-color: #bf4d4d; background: #fff6f4; }
 .est-remove { width: 38px; }
+/* The stage row: one dropdown per date column, empty until chosen (amber like the sheet's). */
+.estimation-grid .est-stage-row th { padding: 5px 6px; color: #6b4e00; background: #fff4d6; border-bottom: 1px solid #f0dca3; }
+.estimation-grid .est-stage-label { left: 0; text-align: right; letter-spacing: .06em; box-shadow: inset -1px 0 0 #d5e0e9; }
+.est-stage-row select { width: 60px; height: 28px; padding: 0 4px; color: #5a4100; font-size: 11px; font-weight: 700; border-color: #ead49a; }
 .estimation-footer { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 .estimation-footer .resource-error { margin: 0; }
 @media (max-width: 900px) {

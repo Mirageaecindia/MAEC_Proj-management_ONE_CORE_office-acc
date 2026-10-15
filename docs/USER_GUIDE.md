@@ -122,11 +122,13 @@ Estimate a project's resourcing in the layout of the company's resourcing sheet,
 1. **New estimation**: give it a name, a **Start date**, an **End date** and the **Days between columns**
    (7 for one column a week). The grid gets a column for the start date, then every that many days up to the
    end date: 1 Jan to 1 Feb every 7 days gives 1, 8, 15, 22 and 29 Jan.
+   Under the dates, the **Stage** row has a dropdown per date: choose the design stage that date falls in
+   (**CD**, **SD**, **DD**, **TD** or **IFC**), or leave it empty.
 2. Each row is one person: choose their **Code** (the **Staff Role** fills in), then type the hours on each date.
    **Total Hours** adds up the row; the **Total** line at the bottom adds up each date and the whole estimation.
    **Add row** for another person; the same code can be on several rows.
 3. **Save estimation**. Saved estimations are listed at the top: **Open** one to change it, or delete it.
-   Changing the dates or the spacing later keeps the hours that still fall on a column; the others are
+   Changing the dates or the spacing later keeps the hours and stages that still fall on a column; the others are
    pointed out and left out when you save.
 
 ### 3.1 Create a project (Project Kickoff tab)

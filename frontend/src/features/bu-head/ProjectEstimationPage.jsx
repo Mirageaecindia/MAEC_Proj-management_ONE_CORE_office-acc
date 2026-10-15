@@ -16,6 +16,8 @@ import {
   columnTotals,
   hoursOf,
   hoursOutsideGrid,
+  STAGES,
+  stagesOutsideGrid,
   rowTotal,
   toPayload,
 } from '../../utils/estimation';
@@ -29,7 +31,7 @@ import {
 
 let nextKey = 1;
 const newRow = (row = {}) => ({ key: nextKey++, code: '', role: '', hours: {}, ...row });
-const EMPTY = { name: '', startDate: '', endDate: '', intervalDays: '7', rows: [newRow()] };
+const EMPTY = { name: '', startDate: '', endDate: '', intervalDays: '7', rows: [newRow()], stages: {} };
 
 function draftFrom(saved) {
   return {
@@ -40,6 +42,7 @@ function draftFrom(saved) {
     rows: saved.rows.length
       ? saved.rows.map((row) => newRow({ code: row.code, role: row.role, hours: row.hours }))
       : [newRow()],
+    stages: saved.stages || {},
   };
 }
 
@@ -75,6 +78,7 @@ export function ProjectEstimationPage() {
   const totals = useMemo(() => columnTotals(draft.rows, dates), [draft.rows, dates]);
   const grandTotal = totals.reduce((sum, value) => sum + value, 0);
   const leftOut = useMemo(() => hoursOutsideGrid(draft.rows, dates), [draft.rows, dates]);
+  const stagesLeftOut = useMemo(() => stagesOutsideGrid(draft.stages, dates), [draft.stages, dates]);
   const mostPerCell = Number(draft.intervalDays) * 24;
 
   const change = (patch) => {
@@ -84,6 +88,12 @@ export function ProjectEstimationPage() {
   };
   const changeRow = (key, patch) =>
     change({ rows: draft.rows.map((row) => (row.key === key ? { ...row, ...patch } : row)) });
+  const setStage = (day, stage) => {
+    const stages = { ...draft.stages };
+    if (stage) stages[day] = stage;
+    else delete stages[day];
+    change({ stages });
+  };
   const setHours = (key, day, value) => {
     const row = draft.rows.find((item) => item.key === key);
     changeRow(key, { hours: { ...row.hours, [day]: value } });
@@ -275,6 +285,8 @@ export function ProjectEstimationPage() {
               `${dates.length} date column${dates.length === 1 ? '' : 's'}: ${columnLabel(dates[0])} to ${columnLabel(dates[dates.length - 1])}.`}
             {leftOut > 0 &&
               ` ${formatHours(leftOut)} hours are on dates no longer in the grid; they are left out when you save.`}
+            {stagesLeftOut > 0 &&
+              ` ${stagesLeftOut} stage${stagesLeftOut === 1 ? ' is' : 's are'} on dates no longer in the grid; left out when you save.`}
           </p>
 
           {!datesError && (
@@ -292,6 +304,29 @@ export function ProjectEstimationPage() {
                       </th>
                     ))}
                     <th className="est-remove" aria-label="Remove" />
+                  </tr>
+                  {/* The stage of each date column (the resourcing sheet's stage row): chosen, or empty. */}
+                  <tr className="est-stage-row">
+                    <th colSpan={4} className="est-fixed est-stage-label">
+                      STAGE
+                    </th>
+                    {dates.map((day) => (
+                      <th key={day} className="est-day">
+                        <select
+                          aria-label={`Stage on ${columnLabel(day)}`}
+                          value={draft.stages[day] ?? ''}
+                          onChange={(event) => setStage(day, event.target.value)}
+                        >
+                          <option value="" />
+                          {STAGES.map((stage) => (
+                            <option key={stage} value={stage}>
+                              {stage}
+                            </option>
+                          ))}
+                        </select>
+                      </th>
+                    ))}
+                    <th className="est-remove" />
                   </tr>
                 </thead>
                 <tbody>

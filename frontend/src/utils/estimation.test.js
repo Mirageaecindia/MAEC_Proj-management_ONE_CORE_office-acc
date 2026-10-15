@@ -6,6 +6,7 @@ import {
   columnTotals,
   hoursOutsideGrid,
   rowTotal,
+  stagesOutsideGrid,
   toPayload,
 } from './estimation';
 
@@ -51,6 +52,7 @@ describe('totals', () => {
         endDate: '2027-02-01',
         intervalDays: '7',
         rows: [{ code: 'BE', role: 'BIM Modeller-E', ...rows[1] }],
+        stages: { '2027-01-01': 'CD', '2027-01-08': '', '2027-02-05': 'SD' },
       },
       JAN,
     );
@@ -60,7 +62,9 @@ describe('totals', () => {
       end_date: '2027-02-01',
       interval_days: 7,
       rows: [{ code: 'BE', role: 'BIM Modeller-E', hours: { '2027-01-08': 27 } }],
+      stages: { '2027-01-01': 'CD' }, // empty and off-grid stages left out
     });
+    expect(stagesOutsideGrid({ '2027-01-01': 'CD', '2027-02-05': 'SD' }, JAN)).toBe(1);
   });
 });
 
