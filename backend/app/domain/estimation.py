@@ -1,0 +1,78 @@
+"""Project estimation (decided 2026-10-15): the BU Head's resourcing estimate for a project, made
+before the project exists, in the layout of the company's resourcing sheet ("Mastersheet-Projects").
+
+The columns are dates: the start date, then every `interval_days` days, up to the end date. Each
+row is a staff code with its role, and the hours planned for it on each column date; its total is
+the sum of its hours. The same code can be on several rows (two BIM Modellers, say).
+"""
+
+from datetime import date, timedelta
+
+# Staff codes and roles, as on the resourcing sheet (Mastersheet-Projects, B2:C35). One code can
+# name more than one role (BL: BIM Manager or BIM Coordinator), so a row picks the pair.
+STAFF_CODES: tuple[tuple[str, str], ...] = (
+    ("MEP", "MEP Director"),
+    ("LMEP", "MEP Lead (Dubai)"),
+    ("LME", "Lead Mech Engr (Dubai)"),
+    ("LPE", "Lead PHE Engr (Dubai)"),
+    ("LEE", "Lead Elect Engr (Dubai)"),
+    ("SMED", "Senior Mech Engr-Dubai"),
+    ("SPED", "Senior PHE Engr-Dubai"),
+    ("SEED", "Senior Elect Engr-Dubai"),
+    ("AME", "Principal Mech Engr"),
+    ("APE", "Principal PHE Engr"),
+    ("AEE", "Principal Elect Engr/Director"),
+    ("SPE", "Senior PHE Engr"),
+    ("SEE", "Senior Electrical Engineer"),
+    ("SME", "Senior Mechanical Engineer"),
+    ("JME", "Mechanical Engineer"),
+    ("JEE", "Electrical Engineer"),
+    ("JPE", "PHE Engineer"),
+    ("BL", "BIM Manager"),
+    ("BL", "BIM Coordinator"),
+    ("BPL", "BIM Lead-P"),
+    ("BEL", "BIM Lead-E"),
+    ("BML", "BIM Lead-M"),
+    ("BM", "BIM Modeller-M"),
+    ("BP", "BIM Modeller-P"),
+    ("BE", "BIM Modeller-E"),
+    ("BJM", "Junior BIM Modeller-M"),
+    ("BJE", "Junior BIM Modeller-E"),
+    ("BJP", "Junior BIM Modeller-P"),
+)
+
+MAX_COLUMNS = 400  # e.g. eight years week by week: more is a typo in a date
+MAX_ROWS = 300
+
+
+def column_dates(start: date, end: date, interval_days: int) -> list[date]:
+    """The grid's columns: the start date, then every `interval_days` days, up to the end date.
+    1 Jan to 1 Feb every 7 days: 1, 8, 15, 22 and 29 Jan."""
+    if interval_days < 1:
+        raise ValueError("The number of days between columns must be at least 1.")
+    if end < start:
+        raise ValueError("The end date must be on or after the start date.")
+    count = (end - start).days // interval_days + 1
+    if count > MAX_COLUMNS:
+        raise ValueError(
+            f"That makes {count} date columns; at most {MAX_COLUMNS}. "
+            "Check the dates or space the columns further apart."
+        )
+    return [start + timedelta(days=interval_days * n) for n in range(count)]
+
+
+def check_row(code: str, role: str, hours: dict[date, float], columns: set[date], interval_days: int) -> None:
+    """A row is a known code and role, and hours only on column dates, none negative, none more
+    than the hours there are between two columns."""
+    if (code, role) not in STAFF_CODES:
+        raise ValueError(f"'{code} - {role}' is not one of the staff codes.")
+    most = interval_days * 24
+    for day, value in hours.items():
+        if day not in columns:
+            raise ValueError(f"{code}: {day.isoformat()} is not one of the date columns.")
+        if value < 0 or value > most:
+            raise ValueError(f"{code}: {value} hours on {day.isoformat()}; it must be between 0 and {most}.")
+
+
+def row_total(hours: dict) -> float:
+    return round(sum(hours.values()), 2)

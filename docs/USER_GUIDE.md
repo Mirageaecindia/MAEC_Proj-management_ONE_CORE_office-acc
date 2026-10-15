@@ -67,7 +67,7 @@ MAEC One, and three browsers (or one normal and two private windows) to be signe
 ### 1.3 After login
 | Role | Lands on | Tabs |
 |---|---|---|
-| **BU Head** | Projects | Projects · Project Kickoff · Resource Booking · WBS Structure · Gantt Chart & Logs · Executive Dashboard · Work Summary · Audit Log · SharePoint Mirror |
+| **BU Head** | Projects | Projects · Project Estimation · Project Kickoff · Resource Booking · WBS Structure · Gantt Chart & Logs · Executive Dashboard · Work Summary · Audit Log · SharePoint Mirror |
 | **Engineer who leads a project** | Resource Booking | Resource Booking · WBS Structure · Gantt Chart & Logs · Performance Dashboard · SharePoint Mirror |
 | **Engineer** | WBS Structure | WBS Structure · Gantt Chart & Logs · Performance Dashboard · SharePoint Mirror |
 
@@ -114,6 +114,20 @@ BU Head sees everyone's. Entries are kept for 30 days.
 ---
 
 ## 3. BU Head features
+
+### 3.0 Project Estimation (before a project exists)
+
+Estimate a project's resourcing in the layout of the company's resourcing sheet, then save it by name.
+
+1. **New estimation**: give it a name, a **Start date**, an **End date** and the **Days between columns**
+   (7 for one column a week). The grid gets a column for the start date, then every that many days up to the
+   end date: 1 Jan to 1 Feb every 7 days gives 1, 8, 15, 22 and 29 Jan.
+2. Each row is one person: choose their **Code** (the **Staff Role** fills in), then type the hours on each date.
+   **Total Hours** adds up the row; the **Total** line at the bottom adds up each date and the whole estimation.
+   **Add row** for another person; the same code can be on several rows.
+3. **Save estimation**. Saved estimations are listed at the top: **Open** one to change it, or delete it.
+   Changing the dates or the spacing later keeps the hours that still fall on a column; the others are
+   pointed out and left out when you save.
 
 ### 3.1 Create a project (Project Kickoff tab)
 Fill in: project name, **unique** project code, client, target start date, a

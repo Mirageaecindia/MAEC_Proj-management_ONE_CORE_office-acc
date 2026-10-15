@@ -20,6 +20,7 @@ from app.services import archive_guard
 from app.services.audit import AuditLog
 from app.services.booking_approval import BookingApprovalService
 from app.services.documents import ProjectDocumentService
+from app.services.estimations import ProjectEstimations
 from app.services.governance import GovernanceService
 from app.services.governance_monitor import GovernanceMonitor
 from app.services.metrics import ProjectMetricsService
@@ -92,3 +93,7 @@ def get_team_members_service(db: Session = Depends(get_db)) -> TeamMembers:
 
 def get_audit_log(db: Session = Depends(get_db)) -> AuditLog:
     return AuditLog(db)
+
+
+def get_estimation_service(db: Session = Depends(get_db)) -> ProjectEstimations:
+    return ProjectEstimations(db)

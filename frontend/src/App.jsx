@@ -12,6 +12,7 @@ import { QueryProvider } from './providers/QueryProvider';
 // Pages are code-split: each role only downloads the screens it opens.
 const lazyPage = (load, name) => lazy(() => load().then((module) => ({ default: module[name] })));
 const CreateProjectPage = lazyPage(() => import('./features/bu-head/CreateProjectPage'), 'CreateProjectPage');
+const ProjectEstimationPage = lazyPage(() => import('./features/bu-head/ProjectEstimationPage'), 'ProjectEstimationPage');
 const EditProjectPage = lazyPage(() => import('./features/bu-head/CreateProjectPage'), 'EditProjectPage');
 const CreatedProjectsPage = lazyPage(
   () => import('./features/bu-head/CreatedProjectsPage'),
@@ -121,6 +122,14 @@ function AppRoutes() {
           element={
             <WorkspaceRoute roles={['bu_head']}>
               <CreatedProjectsPage />
+            </WorkspaceRoute>
+          }
+        />
+        <Route
+          path="/project-estimation"
+          element={
+            <WorkspaceRoute roles={['bu_head']}>
+              <ProjectEstimationPage />
             </WorkspaceRoute>
           }
         />

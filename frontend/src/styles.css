@@ -1598,3 +1598,35 @@ a.review-btn:hover { background: #dcecf7; }
 .sign-in-status-title { margin: 4px 0 8px; color: #14204d; font-size: 18px; }
 .sign-in-status-message { margin: 0 0 6px; color: #4a4f5e; font-size: 13px; line-height: 1.5; }
 .sign-in-status-link { display: inline-block; margin-top: 14px; text-decoration: none; }
+
+/* ── Project Estimation (BU Head): saved estimations and the resourcing grid ── */
+.estimation-page .allocation-card { margin-bottom: 18px; }
+.estimation-name { color: #173653; font-weight: 700; text-align: left !important; }
+.estimation-open td { background: #f1f7fc; }
+.estimation-actions { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.estimation-actions .button { height: 30px; padding: 0 10px; font-size: 11px; }
+.estimation-body { padding: 4px 18px 18px; }
+.estimation-settings { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(140px, 1fr)); gap: 0 14px; }
+.estimation-settings .field { margin-bottom: 6px; }
+/* The grid scrolls sideways; #, code, role and total stay in view on the left. */
+.estimation-grid-wrap { overflow-x: auto; margin-top: 12px; border: 1px solid #e0e7ed; border-radius: 7px; }
+.estimation-grid { min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 11px; }
+.estimation-grid th { position: sticky; top: 0; z-index: 1; padding: 9px 6px; color: #fff; background: #173653; font-size: 9px; font-weight: 700; letter-spacing: .04em; white-space: nowrap; text-align: center; }
+.estimation-grid td { padding: 4px; color: #40566b; background: #fff; border-bottom: 1px solid #edf1f4; text-align: center; white-space: nowrap; }
+.estimation-grid tfoot td { color: #0f4d78; background: #f1f7fc; font-weight: 700; }
+.estimation-grid .est-fixed { position: sticky; z-index: 2; }
+.estimation-grid th.est-fixed { z-index: 3; }
+.est-no { left: 0; width: 36px; min-width: 36px; }
+.est-code { left: 36px; width: 210px; min-width: 210px; }
+.est-role { left: 246px; width: 180px; min-width: 180px; text-align: left !important; white-space: normal !important; }
+.est-total { left: 426px; width: 84px; min-width: 84px; font-weight: 700; box-shadow: inset -1px 0 0 #d5e0e9; }
+.est-code select { height: 30px; padding: 0 6px; font-size: 11px; }
+.est-day { min-width: 66px; }
+.est-day input { width: 60px; height: 30px; padding: 0 5px; text-align: right; font-size: 11px; }
+.est-day input[aria-invalid='true'] { border-color: #bf4d4d; background: #fff6f4; }
+.est-remove { width: 38px; }
+.estimation-footer { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.estimation-footer .resource-error { margin: 0; }
+@media (max-width: 900px) {
+  .estimation-settings { grid-template-columns: 1fr; }
+}

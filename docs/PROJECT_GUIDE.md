@@ -43,7 +43,7 @@ There are two account roles, BU Head and engineer, and one role on a project: **
 
 | Role | Responsibilities | Pages (tabs) |
 |---|---|---|
-| **BU Head** (Business Unit Head) | Creates projects and their commercial baseline. Owns SharePoint provisioning. Approves resource bookings. Monitors hours, budget and schedule. Approves or rejects extension requests. Can stop execution (soft-lock timesheets). Read-only view of WBS, tasks and timesheets. | Projects (Created Projects), Project Kickoff, Resource Booking, WBS Structure, Gantt Chart & Logs, Executive Dashboard, Work Summary, SharePoint Mirror |
+| **BU Head** (Business Unit Head) | Creates projects and their commercial baseline. Owns SharePoint provisioning. Approves resource bookings. Monitors hours, budget and schedule. Approves or rejects extension requests. Can stop execution (soft-lock timesheets). Read-only view of WBS, tasks and timesheets. | Projects (Created Projects), Project Estimation, Project Kickoff, Resource Booking, WBS Structure, Gantt Chart & Logs, Executive Dashboard, Work Summary, SharePoint Mirror |
 | **Lead of a project** (an engineer chosen by the BU Head, with a period and a utilization %) | On that project: books engineers and submits bookings for approval. Builds the WBS (manually or by CSV/XLSX upload). Assigns engineers (and themselves) to subtasks. Approves submitted tasks. Approves or rejects engineers' hours (the BU Head approves the lead's own). Requests extra hours from the BU Head. | An engineer who leads any project also gets Resource Booking and Executive Dashboard; each page follows their role on the selected project |
 | **Engineer** | Works on assigned WBS tasks and subtasks. Plans own subtasks. Moves task status forward and submits tasks for approval. Adds comments. Working time on subtasks comes from Login/Logout. | WBS Structure, Gantt Chart & Logs, Performance Dashboard, SharePoint Mirror |
 
@@ -436,6 +436,9 @@ Signing in and out, passwords, deactivating and deleting people are MAEC One's.
 **Projects and SharePoint**
 | Method | Path | Roles | Purpose |
 |---|---|---|---|
+| GET | `/api/estimations/codes` | BU Head | Staff codes and roles for Project Estimation (the resourcing sheet's list) |
+| GET/POST | `/api/estimations` | BU Head | Saved estimations (name, period, rows, total hours); create one |
+| GET/PUT/DELETE | `/api/estimations/{id}` | BU Head | One estimation with its date columns, rows and totals; save the whole grid; delete |
 | GET | `/api/project-leads` | all | Everyone who can lead a project (active accounts with an employee record), for the Project Kickoff dropdowns |
 | POST | `/api/projects` | BU Head | Create a project and provision SharePoint (returns `sharepoint_status`: provisioned/failed/error/not_requested) |
 | GET | `/api/projects[?include_archived=true]` | all (scoped) | Project list; archived projects only for the BU Head, on request |

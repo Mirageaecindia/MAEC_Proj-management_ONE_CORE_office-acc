@@ -1,6 +1,6 @@
 from datetime import UTC
 
-from sqlalchemy import Boolean, Column, Integer, String, Date, DateTime, Text, Float, UniqueConstraint, true
+from sqlalchemy import JSON, Boolean, Column, Integer, String, Date, DateTime, Text, Float, UniqueConstraint, true
 from sqlalchemy.orm import validates
 from sqlalchemy.sql import func
 from sqlalchemy.types import TypeDecorator
@@ -387,3 +387,22 @@ class AuditEvent(Base):
     project_id = Column(Integer, nullable=True, index=True)
     project_name = Column(String(240), nullable=True)
     ip = Column(String(64), nullable=True)
+
+
+class ProjectEstimation(Base):
+    """A BU Head's resourcing estimate for a project before it exists (decided 2026-10-15),
+    in the layout of the company's resourcing sheet: date columns from `start_date` every
+    `interval_days` days to `end_date`, and rows of a staff code and role with hours per
+    column date. The rules are in app/domain/estimation.py."""
+    __tablename__ = "project_estimations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    interval_days = Column(Integer, nullable=False, default=7)
+    # [{"code": "SME", "role": "Senior Mechanical Engineer", "hours": {"2026-01-08": 9.0, ...}}, ...]
+    rows = Column(JSON, nullable=False, default=list)
+    created_by_user_id = Column(Integer, nullable=True)
+    created_at = Column(UTCDateTime, server_default=func.now())
+    updated_at = Column(UTCDateTime, server_default=func.now(), onupdate=func.now())

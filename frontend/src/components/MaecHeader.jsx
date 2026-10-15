@@ -9,6 +9,7 @@ import { NotificationBell } from './NotificationBell';
 
 const allTabs = [
   { label: 'Projects', path: '/created-projects', roles: ['bu_head'] },
+  { label: 'Project Estimation', path: '/project-estimation', roles: ['bu_head'] },
   { label: 'Project Kickoff', path: '/create-project', roles: ['bu_head'] },
   { label: 'Resource Booking', path: '/resource-booking', roles: ['lead', 'bu_head'] },
   { label: 'WBS Structure', path: '/wbs-structure', roles: ['lead', 'engineer', 'bu_head'] },

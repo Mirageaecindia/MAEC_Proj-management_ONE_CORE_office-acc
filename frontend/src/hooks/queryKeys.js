@@ -15,4 +15,8 @@ export const queryKeys = {
   rejectedHours: (projectId) => ['rejected-hours', String(projectId)],
   teamMembers: (projectId) => ['team-members', String(projectId)],
   sharepointMirror: (projectId) => ['sharepoint-mirror', projectId],
+  estimations: ['estimations'], // prefix: every estimation list and estimation
+  estimationList: ['estimations', 'list'],
+  estimation: (estimationId) => ['estimations', 'detail', String(estimationId)],
+  estimationCodes: ['estimation-codes'],
 };
