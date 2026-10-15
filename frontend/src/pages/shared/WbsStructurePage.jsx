@@ -14,6 +14,8 @@ import { canDelete, describeCount, impliedSelection, summarizeSelection } from '
 import { formatDayIST } from '../../utils/displayTime';
 
 
+// The phases work is filed under, in display order. The five were removed as phases to add on
+// 2026-10-15 (the server lists none now); tasks already filed under them still show here.
 const PHASES = ['Space Planning', 'STR Coordination', 'ID - RCP Coordination', 'BoH Area RCP Coordination', 'Submission'];
 
 const EMPTY_NODE = {
@@ -443,6 +445,8 @@ export function WbsStructurePage() {
   // there is skipped); the whole WBS workbook upload adds all five phases at once.
   const { data: blueprints = [] } = useQuery({ queryKey: ['wbs-blueprints'], queryFn: wbsBlueprintsApi.list, enabled: isLead, staleTime: Infinity });
   const blueprintFor = (phase) => blueprints.find((blueprint) => blueprint.phase === phase);
+  // The phases a lead adds to: the server's blueprints (none until the CD/SD/DD nodes are added).
+  const addablePhases = blueprints.map((blueprint) => blueprint.phase);
   const [pendingPhase, setPendingPhase] = useState(null); // the phase whose "+" was clicked
   // Rows a blueprint just added: highlighted, each with the line it repeats, until Keep or Undo.
   const [recent, setRecent] = useState(null); // { phase, ids: Set, sameAs: { id: code } }
@@ -808,7 +812,7 @@ export function WbsStructurePage() {
               <span>Phase <em className="req">*</em></span>
               <select value={nodeForm.phase || ''} onChange={(e) => setNodeForm({ ...nodeForm, phase: e.target.value })}>
                 <option value="">Select Phase</option>
-                {PHASES.map((phase) => <option key={phase} value={phase}>{phase}</option>)}
+                {[...new Set([...addablePhases, nodeForm.phase].filter(Boolean))].map((phase) => <option key={phase} value={phase}>{phase}</option>)}
               </select>
             </label>
             <label className="wbs-field-sm">
@@ -897,9 +901,10 @@ export function WbsStructurePage() {
 
       {isLead ? (
         <>
+          {addablePhases.length > 0 && (
           <div className="wbs-phase-toolbar">
             <div className="wbs-phase-cards">
-              {PHASES.map((phase) => (
+              {addablePhases.map((phase) => (
                 <div className="wbs-phase-card" key={phase}>
                   <button type="button" className="wbs-phase-card-node" onClick={() => openNodeForm(phase)}>{phase}</button>
                   <button type="button" className="wbs-phase-card-plus" aria-label={`Add the ${phase} blueprint`} title={`Add the standard ${phase} tasks`} onClick={() => setPendingPhase(phase)}>+</button>
@@ -912,6 +917,7 @@ export function WbsStructurePage() {
               <a href="/wbs-upload-template.xlsx" download title="Column A: the phase. Column B: tasks in bold, subtasks in normal text.">Download the Excel template</a>
             </div>
           </div>
+          )}
 
           <section className="allocation-card">
             <div className="allocation-header">
@@ -928,7 +934,9 @@ export function WbsStructurePage() {
                     <button className="button button-secondary" type="button" onClick={() => setSelected([])}>Clear selection</button>
                   </>
                 )}
-                <button className="button button-primary" type="button" onClick={() => openNodeForm()}>+ Add WBS Node</button>
+                {addablePhases.length > 0 && (
+                  <button className="button button-primary" type="button" onClick={() => openNodeForm()}>+ Add WBS Node</button>
+                )}
               </div>
             </div>
             {recent && (
@@ -960,7 +968,7 @@ export function WbsStructurePage() {
                 <tbody>
 {visibleSections.map(({ agg, rows }) => (
                       <Fragment key={agg.phase}>
-                        {phaseRow(agg)}
+                        {agg.count > 0 && phaseRow(agg)}
                         {rows.map((r) => rowTask(r, false))}
                       </Fragment>
                     ))}
@@ -1003,7 +1011,7 @@ export function WbsStructurePage() {
               <tbody>
                 {visibleSections.map(({ agg, rows }) => (
                   <Fragment key={agg.phase}>
-                    {phaseRow(agg, true)}
+                    {agg.count > 0 && phaseRow(agg, true)}
                     {rows.map((r) => rowTask(r, false, true))}
                   </Fragment>
                 ))}

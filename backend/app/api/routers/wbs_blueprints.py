@@ -13,7 +13,7 @@ router = APIRouter(tags=["wbs blueprints"])
 
 @router.get("/wbs-blueprints")
 def list_blueprints(_user: models.User = Depends(get_current_user)) -> list[dict]:
-    """The five phases' blueprints with their number of tasks and subtasks."""
+    """Each phase's blueprint with its number of tasks and subtasks (none until the CD/SD/DD nodes)."""
     return wbs_blueprints.catalog()
 
 

@@ -1,13 +1,17 @@
-"""Phase blueprints (decided 2026-10-07): the company's standard tasks for each of the five phases.
+"""Phase blueprints (decided 2026-10-07): the company's standard tasks for each phase.
 
 Each phase has one workbook in app/blueprints/ (one column: a bold row is a task, the rows
 under it its subtasks). On WBS Structure the "+" of a phase card adds that phase's
 blueprint to the project; a task or subtask that is already there is skipped, so a
-blueprint can be added again after more were created by hand. The whole WBS workbook
-upload stays for adding all five phases at once.
+blueprint can be added again after more were created by hand. The page shows a phase card,
+and lets a lead add tasks, only for the phases listed here.
+
+The five original phases (Space Planning ... Submission) were removed on 2026-10-15: the app
+ships no blueprint until the CD/SD/DD nodes (backend/data/WBS_Node_level_BREAKDOWN/) are added.
+Tasks already filed under the five stay on their projects and keep working.
 """
 
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -19,18 +23,12 @@ from app.services.wbs_outline import OutlineRow, add_rows, match_rows, parse_blu
 
 BLUEPRINT_DIR = Path(__file__).resolve().parents[1] / "blueprints"
 
-# URL key -> (phase, workbook)
-BLUEPRINTS: dict[str, tuple[str, str]] = {
-    "space-planning": ("Space Planning", "space_planning.xlsx"),
-    "str-coordination": ("STR Coordination", "str_coordination.xlsx"),
-    "id-rcp-coordination": ("ID - RCP Coordination", "id_coordination.xlsx"),
-    "boh-area-rcp-coordination": ("BoH Area RCP Coordination", "boh_area_rcp_coordination.xlsx"),
-    "submission": ("Submission", "submission.xlsx"),
-}
+# URL key -> (phase, workbook). Empty until the CD/SD/DD nodes are added (see above).
+BLUEPRINTS: dict[str, tuple[str, str]] = {}
 UNKNOWN = "There is no blueprint for that phase."
 
 
-@lru_cache(maxsize=len(BLUEPRINTS))
+@cache
 def blueprint_rows(key: str) -> tuple[OutlineRow, ...]:
     """The blueprint's tasks and subtasks, read once per process (the files ship with the app)."""
     if key not in BLUEPRINTS:

@@ -44,11 +44,12 @@ const BLUEPRINTS = PHASES.map((phase, index) => ({
   subtasks: 5 + index,
 }));
 let blueprintAdds = [];
+let catalog = BLUEPRINTS; // the phases the server offers to add
 let present = { tasks: 0, subtasks: 0 }; // how much of a blueprint the fake project already has
 let deleted = [];
 
 const ROUTES = [
-  [/\/api\/wbs-blueprints$/, () => BLUEPRINTS],
+  [/\/api\/wbs-blueprints$/, () => catalog],
   [
     /\/api\/projects\/1\/wbs-blueprints\/[a-z-]+(\?again=true)?$/,
     (url, options) => {
@@ -279,6 +280,47 @@ describe('WBS rows (lead)', () => {
     const phase = document.querySelector('tr.wbs-phase-row');
     expect(cell(phase, 'ACTUAL START DATE')).toBe('2026-10-05');
     expect(cell(phase, 'ACTUAL END DATE')).toBe(''); // its task is not finished yet
+  });
+
+  it('offers no phase to add while the server lists none, and still shows work under an old phase', async () => {
+    catalog = []; // the five phases removed, the CD/SD/DD nodes not added yet
+    nodes = [{ ...node(10, '1', 'Cable routing'), phase: 'Space Planning' }];
+    try {
+      renderPage();
+      await screen.findByText('Cable routing', {}, WAIT);
+      await vi.waitFor(
+        () => expect(fetch.mock.calls.some(([url]) => url.endsWith('/api/wbs-blueprints'))).toBe(true),
+        WAIT,
+      );
+
+      expect(document.querySelector('.wbs-phase-toolbar')).toBeNull(); // no phase cards, upload or template
+      expect(screen.queryByRole('button', { name: '+ Add WBS Node' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Upload WBS (Excel)' })).toBeNull();
+      expect(document.querySelector('tr.wbs-phase-row .wbs-phase-name').textContent).toBe('Space Planning');
+      expect(screen.getByRole('button', { name: 'Add a subtask to Cable routing' })).toBeTruthy(); // its work goes on
+    } finally {
+      catalog = BLUEPRINTS;
+    }
+  });
+
+  it('starts empty: no phase rows until something is added to a phase', async () => {
+    nodes = [];
+    renderPage();
+
+    expect(
+      await screen.findByText('No WBS nodes uploaded or created for this project.', {}, WAIT),
+    ).toBeTruthy();
+    expect(document.querySelectorAll('tr.wbs-phase-row')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Add the Space Planning blueprint' })).toBeTruthy(); // the way to add
+    cleanup();
+
+    nodes = [{ ...node(10, '1', 'Cable routing'), phase: 'Submission' }];
+    renderPage();
+    await screen.findByText('Cable routing', {}, WAIT);
+    const phases = [...document.querySelectorAll('tr.wbs-phase-row .wbs-phase-name')].map(
+      (el) => el.textContent,
+    );
+    expect(phases).toEqual(['Submission']);
   });
 
   it("opens another lead's task too, to view it", async () => {

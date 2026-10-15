@@ -1,9 +1,37 @@
-"""Phase blueprints: "+" on a phase card adds that phase's standard tasks (app/services/wbs_blueprints.py)."""
+"""Phase blueprints: "+" on a phase card adds that phase's standard tasks (app/services/wbs_blueprints.py).
+
+The app ships no blueprint since the five original phases were removed (2026-10-15,
+test_wbs_phases_removed.py); their workbooks, kept in tests/fixtures/blueprints/, exercise the
+mechanism here until the CD/SD/DD nodes take their place.
+"""
+
+from pathlib import Path
+
+import pytest
 
 import models
-from app.services.wbs_blueprints import BLUEPRINTS, blueprint_rows
+from app.services import wbs_blueprints
+from app.services.wbs_blueprints import blueprint_rows
 
 ADD = "/api/projects/{}/wbs-blueprints/{}"
+FIXTURES = Path(__file__).parent / "fixtures" / "blueprints"
+OLD_FIVE = {
+    "space-planning": ("Space Planning", "space_planning.xlsx"),
+    "str-coordination": ("STR Coordination", "str_coordination.xlsx"),
+    "id-rcp-coordination": ("ID - RCP Coordination", "id_coordination.xlsx"),
+    "boh-area-rcp-coordination": ("BoH Area RCP Coordination", "boh_area_rcp_coordination.xlsx"),
+    "submission": ("Submission", "submission.xlsx"),
+}
+
+
+@pytest.fixture(autouse=True)
+def old_blueprints(monkeypatch):
+    """The five old phases' workbooks, served as the app's blueprints for these tests only."""
+    monkeypatch.setattr(wbs_blueprints, "BLUEPRINT_DIR", FIXTURES)
+    monkeypatch.setattr(wbs_blueprints, "BLUEPRINTS", OLD_FIVE)
+    blueprint_rows.cache_clear()
+    yield
+    blueprint_rows.cache_clear()
 
 
 def _nodes(db, project_id):
@@ -11,10 +39,10 @@ def _nodes(db, project_id):
     return db.query(models.WbsNode).filter_by(project_id=project_id).all()
 
 
-def test_all_five_blueprints_ship_with_the_app_and_read_cleanly(client, world):
+def test_each_blueprint_is_listed_and_reads_cleanly(client, world):
     listed = client.get("/api/wbs-blueprints", headers=world.lead_h).json()
 
-    assert [b["phase"] for b in listed] == [phase for phase, _ in BLUEPRINTS.values()]
+    assert [b["phase"] for b in listed] == [phase for phase, _ in OLD_FIVE.values()]
     for blueprint in listed:
         rows = blueprint_rows(blueprint["key"])
         assert rows[0].is_task, blueprint  # each starts with a task
