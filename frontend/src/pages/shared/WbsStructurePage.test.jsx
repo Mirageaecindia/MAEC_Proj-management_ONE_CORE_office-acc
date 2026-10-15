@@ -140,8 +140,11 @@ const renderPage = () =>
     </QueryClientProvider>,
   );
 
+const NODES_OPEN = 'promanage.wbsNodesOpen'; // the node cards shown or folded, as the viewer left them
+
 describe('WBS phase cards (lead)', () => {
   beforeEach(() => {
+    localStorage.setItem(NODES_OPEN, 'true'); // the cards are open
     nodes = [];
     blueprintAdds = [];
     present = { tasks: 0, subtasks: 0 };
@@ -190,6 +193,7 @@ describe('WBS phase cards (lead)', () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    localStorage.removeItem(NODES_OPEN);
   });
 
   it.each(PHASES)(
@@ -319,15 +323,42 @@ describe('WBS rows (lead)', () => {
     }
   });
 
+  it('folds the node cards into one button that opens and closes them, and remembers it', async () => {
+    localStorage.removeItem(NODES_OPEN);
+    renderPage();
+
+    const toggle = await screen.findByRole('button', { name: 'WBS Nodes (5)' }, WAIT);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false'); // folded at first
+    expect(screen.queryByRole('button', { name: 'Add the Space Planning blueprint' })).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Add the Space Planning blueprint' })).toBeTruthy();
+    expect(localStorage.getItem(NODES_OPEN)).toBe('true');
+    cleanup();
+
+    renderPage(); // back on the page: still open
+    expect(
+      await screen.findByRole('button', { name: 'Add the Space Planning blueprint' }, WAIT),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'WBS Nodes (5)' }));
+    expect(screen.queryByRole('button', { name: 'Add the Space Planning blueprint' })).toBeNull();
+    expect(localStorage.getItem(NODES_OPEN)).toBe('false');
+    localStorage.removeItem(NODES_OPEN);
+  });
+
   it('starts empty: no phase rows until something is added to a phase', async () => {
     nodes = [];
     renderPage();
 
     expect(
-      await screen.findByText('No WBS nodes uploaded or created for this project.', {}, WAIT),
+      await screen.findByText(
+        'No WBS tasks yet. Open WBS Nodes above and press + on a node to add its tasks.',
+        {},
+        WAIT,
+      ),
     ).toBeTruthy();
     expect(document.querySelectorAll('tr.wbs-phase-row')).toHaveLength(0);
-    expect(screen.getByRole('button', { name: 'Add the Space Planning blueprint' })).toBeTruthy(); // the way to add
+    expect(await screen.findByRole('button', { name: 'WBS Nodes (5)' }, WAIT)).toBeTruthy(); // the way to add
     cleanup();
 
     nodes = [{ ...node(10, '1', 'Cable routing'), phase: 'Submission' }];

@@ -1,4 +1,4 @@
-import { Copy, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -16,6 +16,25 @@ import { formatDayIST } from '../../utils/displayTime';
 
 // The five original phases: no longer offered (2026-10-15), shown after the WBS nodes for the work
 // already filed under them.
+// The node cards are folded away unless the viewer opened them (remembered in this browser only).
+const NODES_OPEN_KEY = 'promanage.wbsNodesOpen';
+
+function nodesOpenAtFirst() {
+  try {
+    return localStorage.getItem(NODES_OPEN_KEY) === 'true';
+  } catch {
+    return false; // storage blocked: folded
+  }
+}
+
+function rememberNodesOpen(open) {
+  try {
+    localStorage.setItem(NODES_OPEN_KEY, String(open));
+  } catch {
+    /* storage blocked: nothing to remember */
+  }
+}
+
 const LEGACY_PHASES = ['Space Planning', 'STR Coordination', 'ID - RCP Coordination', 'BoH Area RCP Coordination', 'Submission'];
 
 const EMPTY_NODE = {
@@ -445,7 +464,12 @@ export function WbsStructurePage() {
   const blueprintFor = (phase) => blueprints.find((blueprint) => blueprint.phase === phase);
   // The WBS nodes (the sheets of the CD/SD/DD workbooks), in order: what a lead adds to.
   const addablePhases = useMemo(() => blueprints.map((blueprint) => blueprint.phase), [blueprints]);
-  // The node cards, stage by stage (CD, SD, DD).
+  // The node cards, stage by stage (CD, SD, DD), folded into one bar until the lead opens them.
+  const [nodesOpen, setNodesOpen] = useState(nodesOpenAtFirst);
+  const toggleNodes = () => {
+    setNodesOpen(!nodesOpen);
+    rememberNodesOpen(!nodesOpen);
+  };
   const stages = useMemo(() => blueprints.reduce((list, blueprint) => {
     const last = list[list.length - 1];
     if (last && last.stage === blueprint.stage) last.nodes.push(blueprint);
@@ -886,8 +910,20 @@ export function WbsStructurePage() {
       {isLead ? (
         <>
           {addablePhases.length > 0 && (
-          <div className="wbs-phase-toolbar">
-            <div className="wbs-phase-stages">
+          <div className={`wbs-phase-toolbar${nodesOpen ? '' : ' wbs-phase-toolbar-folded'}`}>
+            <button
+              type="button"
+              className="wbs-nodes-toggle"
+              aria-expanded={nodesOpen}
+              aria-controls="wbs-node-cards"
+              title={nodesOpen ? 'Hide the WBS nodes' : 'Show the WBS nodes to add one'}
+              onClick={toggleNodes}
+            >
+              {nodesOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              <span>WBS Nodes ({addablePhases.length})</span>
+            </button>
+            {nodesOpen && (
+            <div className="wbs-phase-stages" id="wbs-node-cards">
               {stages.map(({ stage, nodes }) => (
                 <div className="wbs-phase-stage" key={stage}>
                   <span className="wbs-phase-stage-name">{stage}</span>
@@ -902,6 +938,7 @@ export function WbsStructurePage() {
                 </div>
               ))}
             </div>
+            )}
           </div>
           )}
 
@@ -960,7 +997,7 @@ export function WbsStructurePage() {
                     ))}
                   {!loaded && <tr><td colSpan={10} className="timesheet-empty-cell">Loading…</td></tr>}
                   {loaded && tasks.length === 0 && (
-                    <tr><td colSpan={10}>No WBS nodes uploaded or created for this project.</td></tr>
+                    <tr><td colSpan={10}>No WBS tasks yet. Open WBS Nodes above and press + on a node to add its tasks.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -1055,7 +1092,7 @@ export function WbsStructurePage() {
                     ))}
                     {!loaded && <tr><td colSpan={10} className="timesheet-empty-cell">Loading…</td></tr>}
                     {loaded && tasks.length === 0 && (
-                      <tr><td colSpan={10}>No WBS nodes uploaded or created for this project.</td></tr>
+                      <tr><td colSpan={10}>No WBS tasks in this project yet.</td></tr>
                     )}
                   </tbody>
                 </table>
