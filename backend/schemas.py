@@ -341,6 +341,10 @@ class WbsNodeOut(WbsNodeBase):
     project_id: int
     assigned_engineer_name: Optional[str] = None
     created_by_user_id: Optional[int] = None  # an engineer deletes only subtasks they created
+    # When work really started and finished (UTC): a subtask at its first Login and at Done,
+    # a task when it moved to In-Progress and when it was approved.
+    actual_start_datetime: Optional[datetime] = None
+    actual_end_datetime: Optional[datetime] = None
     level: int = 1
 
 
@@ -523,6 +527,7 @@ class WbsNodeDetailOut(WbsNodeOut):
     linked_task_name: Optional[str] = None
     history: List["WbsNodeHistoryOut"] = []
     children: List[dict] = []
+    leads_this: bool = False  # the viewer is this node's lead: the lead's actions are theirs
 
 
 class WbsNodeHistoryOut(BaseModel):

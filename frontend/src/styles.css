@@ -1030,6 +1030,9 @@ table.wbs-table td:not(:first-child) .wbs-readonly { justify-content: center; mi
    fixed, so expanding or collapsing rows never moves a column. */
 table.wbs-table th:first-child { width: 28%; min-width: 260px; }
 table.wbs-table th.wbs-col-actions { width: 160px; }
+/* Ten columns since the reporter and the actual dates: each keeps about 100px (room for a date
+   picker); on a narrower screen the table scrolls sideways in its wrap instead of squeezing. */
+table.wbs-table { min-width: 1360px; }
 .wbs-expand { width: 22px; height: 22px; margin-right: 7px; padding: 0; color: #1671ad; background: #eef7fd; border: 1px solid #c5d9ea; border-radius: 4px; font-weight: 700; }
 .wbs-expand:hover { background: #dceefa; }
 .wbs-connector { display: inline-block; width: 22px; margin-right: 4px; color: #94a3b8; font-family: "Segoe UI Symbol", "Courier New", monospace; font-size: 14px; line-height: 1; white-space: pre; text-align: left; }
@@ -1123,6 +1126,8 @@ button.td-pill:active { transform: translateY(1px); }
 .td-actions select { height: 39px; }
 .td-actions textarea { min-height: 60px; }
 .td-actions-note { font-size: 12px; color: #6d7e91; }
+/* Someone else's task, opened to view: what it is and who works on it, no actions. */
+.td-view-only { margin-bottom: 12px; padding: 9px 12px; color: #24415d; background: #f4f9fd; border: 1px solid #c5d9ea; border-radius: 6px; font-size: 11px; }
 @media (max-width: 640px) {
   .td-columns { grid-template-columns: 1fr; }
   .td-field > span { min-width: 0; flex-basis: auto; }

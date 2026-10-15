@@ -42,7 +42,6 @@ from app.domain.wbs import (
     is_finished,
     is_sub_subtask,
     next_code,
-    whole_tasks,
 )
 from app.domain.allocation import peak_allocation, planned_hours
 from app.repositories.bookings import BookingRepository
@@ -703,6 +702,8 @@ def nodes_output(db: Session, nodes: list) -> list:
             start_date=node.start_date,
             target_due_date=node.target_due_date,
             end_date=node.end_date,
+            actual_start_datetime=node.actual_start_datetime,
+            actual_end_datetime=node.actual_end_datetime,
             phase=node.phase,
             created_by_user_id=node.created_by_user_id,
             level=level(node),
@@ -771,15 +772,9 @@ def list_wbs_structure(
             raise HTTPException(status_code=403, detail="Engineer account is not linked to an employee.")
         if not include_ancestors:
             return nodes_output(db, query.filter(engineer_wbs_condition(user.employee_id)).all())
-        # The WBS page: each task the engineer works on, whole (every subtask and who has it),
-        # so they see which subtasks are still open before the task can close. One query.
-        scoped_nodes = whole_tasks(
-            by_code(query),
-            lambda node: node.assigned_engineer_id == user.employee_id,
-        )
-    else:
-        scoped_nodes = by_code(query)
-    return nodes_output(db, scoped_nodes)
+    # The WBS page (include_ancestors): every engineer on the project sees the whole WBS, every task
+    # and subtask and who has it (decided 2026-10-14). They open and work on only their own.
+    return nodes_output(db, by_code(query))
 
 
 def time_entries_output(db: Session, entries: list, project: models.Project, user: models.User) -> list[dict]:
@@ -2143,23 +2138,11 @@ def get_node_detail(db: Session, node_id: int, user: models.User):
     node = db.query(models.WbsNode).filter_by(id=node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="WBS node not found.")
+    # Everyone on the project views every node (decided 2026-10-14). Working on it stays theirs
+    # alone: status, approval, comments and Login/Logout each check who may, on their own endpoint.
     role = project_role(db, user, node.project_id)
     if role is None and user.role != "bu_head":
         raise HTTPException(status_code=403, detail="You do not have access to this project.")
-    if role == "engineer" or (role == "lead" and node_assigned_to_engineer(node, user)):
-        if not node_assigned_to_engineer(node, user):
-            raise HTTPException(status_code=403, detail="You can only view tasks assigned to you.")
-    elif role == "lead":
-        if node.assigned_lead and node.assigned_lead != user.full_name:
-            has_scope = False
-            if node.assigned_engineer_id:
-                eng = db.query(models.Employee).filter_by(id=node.assigned_engineer_id).first()
-                if eng and eng.name == user.full_name:
-                    has_scope = True
-            if not has_scope:
-                raise HTTPException(status_code=403, detail="You can only view tasks assigned under your scope.")
-    elif role != "bu_head":
-        raise HTTPException(status_code=403, detail="Insufficient permissions.")
 
     history = (
         db.query(models.WbsNodeHistory)
@@ -2214,6 +2197,7 @@ def get_node_detail(db: Session, node_id: int, user: models.User):
         linked_task_name=linked_task_name,
         history=[schemas.WbsNodeHistoryOut.model_validate(h) for h in history],
         children=children_out,
+        leads_this=role == "lead" and node_assigned_to_lead(node, user),
     )
 
 

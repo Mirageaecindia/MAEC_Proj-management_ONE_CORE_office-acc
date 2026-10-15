@@ -48,3 +48,15 @@ export function formatDateIST(value, options = {}) {
     day: 'numeric',
   }).format(date);
 }
+
+/** A backend timestamp's calendar day in IST, as "YYYY-MM-DD" (the WBS's date format). */
+export function formatDayIST(value) {
+  const date = parseApiTimestamp(value);
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: IST_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}

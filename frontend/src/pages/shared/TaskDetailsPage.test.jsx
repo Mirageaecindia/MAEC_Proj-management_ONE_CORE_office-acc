@@ -30,6 +30,8 @@ let heartbeatExtra = {};
 let subtaskStatus = 'In-Progress';
 let referenceOnly = false; // a sub-subtask
 let activeSession;
+let nodeExtra = {}; // someone else's node: who has it, whether the viewer leads it
+let myRole = 'engineer'; // the viewer's role on the project
 const session = (subtaskId) => ({
   id: 7,
   project_id: 1,
@@ -42,7 +44,7 @@ const session = (subtaskId) => ({
 function fakeApi(url, options = {}) {
   let body;
   if (/\/api\/wbs-nodes\/5$/.test(url))
-    body = { ...SUBTASK, deliverable_status: subtaskStatus, reference_only: referenceOnly };
+    body = { ...SUBTASK, deliverable_status: subtaskStatus, reference_only: referenceOnly, ...nodeExtra };
   else if (/\/api\/wbs-nodes\/5\/advance-status$/.test(url)) {
     const from = subtaskStatus;
     subtaskStatus = JSON.parse(options.body).new_status;
@@ -50,8 +52,7 @@ function fakeApi(url, options = {}) {
     if (from === 'To Do' && subtaskStatus === 'In-Progress' && !activeSession) activeSession = session(5);
     if (subtaskStatus === 'Done' && activeSession?.subtask_id === 5) activeSession = null; // the server logs out
     body = { ok: true };
-  } else if (/\/api\/projects\/1$/.test(url))
-    body = { id: 1, project_name: 'Hotel Tower', my_role: 'engineer' };
+  } else if (/\/api\/projects\/1$/.test(url)) body = { id: 1, project_name: 'Hotel Tower', my_role: myRole };
   else if (/\/subtask-tracking\/start$/.test(url)) {
     activeSession = session(JSON.parse(options.body).subtask_id);
     if (activeSession.subtask_id === 5 && subtaskStatus === 'To Do') subtaskStatus = 'In-Progress'; // Login starts it
@@ -216,5 +217,58 @@ describe('Task Details: subtask Login/Logout', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 
     expect(await screen.findByRole('button', { name: 'Logout' }, WAIT)).toBeTruthy();
+  });
+});
+
+describe("Task Details: someone else's node opens to view", () => {
+  const COLLEAGUES = {
+    assigned_engineer_id: 4,
+    assigned_engineer_name: 'Ravi Kumar',
+    assigned_lead: 'Priya Nair',
+  };
+  beforeEach(() => {
+    activeSession = null;
+    subtaskStatus = 'In-Progress';
+    referenceOnly = false;
+    heartbeatExtra = {};
+    vi.stubGlobal('fetch', vi.fn(fakeApi));
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    nodeExtra = {};
+    myRole = 'engineer';
+  });
+
+  it("shows a colleague's subtask to an engineer, with no Login, status change or comment", async () => {
+    nodeExtra = COLLEAGUES;
+    renderPage();
+
+    const note = await screen.findByRole('note', {}, WAIT);
+    expect(note.textContent).toBe(
+      'View only. Assigned to Ravi Kumar, led by Priya Nair: only they update its status and log in to it.',
+    );
+    expect(screen.getByText('Cable schedule — Detail view')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Login' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Change status to/ })).toBeNull();
+    expect(screen.queryByPlaceholderText(/comment/i)).toBeNull();
+  });
+
+  it("shows another lead's subtask to a lead without the lead's actions", async () => {
+    myRole = 'lead';
+    nodeExtra = { ...COLLEAGUES, leads_this: false };
+    renderPage();
+
+    expect(await screen.findByRole('note', {}, WAIT)).toBeTruthy();
+    expect(screen.queryByText('Your Actions')).toBeNull();
+  });
+
+  it("keeps the lead's actions on a subtask they lead", async () => {
+    myRole = 'lead';
+    nodeExtra = { ...COLLEAGUES, leads_this: true };
+    renderPage();
+
+    expect(await screen.findByText('Your Actions', {}, WAIT)).toBeTruthy();
+    expect(screen.queryByRole('note')).toBeNull();
   });
 });

@@ -40,6 +40,9 @@ export function TaskDetailsPage() {
     // belongs to whoever it is assigned to: an engineer, or a lead doing their own subtask.
     const isLead = project?.my_role === 'lead';
     const isEngineer = Boolean(user?.employee_id) && node?.assigned_engineer_id === user?.employee_id;
+    // Everyone on the project opens every node; a lead acts only on the nodes they lead (the server says which).
+    const leadsThis = isLead && Boolean(node?.leads_this);
+    const viewOnly = Boolean(node) && !isEngineer && !leadsThis && !isBuHead;
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [commentText, setCommentText] = useState('');
@@ -310,6 +313,15 @@ export function TaskDetailsPage() {
 
             {error && <div className="resource-error">{error}</div>}
 
+            {viewOnly && (
+                <div className="td-view-only" role="note">
+                    <strong>View only.</strong>{' '}
+                    {node.assigned_engineer_name ? `Assigned to ${node.assigned_engineer_name}` : 'Not assigned to you'}
+                    {node.assigned_lead ? `, led by ${node.assigned_lead}` : ''}: only they update its status
+                    {node.node_type === 'subtask' && !node.reference_only ? ' and log in to it' : ''}.
+                </div>
+            )}
+
             {loading && !node && <div className="page-loading">Loading task details…</div>}
 
             {node && (
@@ -485,7 +497,7 @@ export function TaskDetailsPage() {
                         </div>
 
                         {/* Your Actions: the lead's; the BU Head approves a task its lead worked on themselves */}
-                        {node && (isLead || (isBuHead && node.node_type === 'task' && node.deliverable_status === 'Submitted for Approval')) && (
+                        {node && (leadsThis || (isBuHead && node.node_type === 'task' && node.deliverable_status === 'Submitted for Approval')) && (
                             <div className="td-actions">
                                 <h3>Your Actions</h3>
                                 {node.node_type === 'subtask' ? (

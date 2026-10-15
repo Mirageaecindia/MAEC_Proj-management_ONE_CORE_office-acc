@@ -11,6 +11,7 @@ import { InlineEditCell } from '../../components/InlineEditCell';
 import { BlueprintDialog } from '../lead/BlueprintDialog';
 import { countWorkingDays, plannedHoursForRange } from '../../lib/hours';
 import { canDelete, describeCount, impliedSelection, summarizeSelection } from '../../utils/wbsSelection';
+import { formatDayIST } from '../../utils/displayTime';
 
 
 const PHASES = ['Space Planning', 'STR Coordination', 'ID - RCP Coordination', 'BoH Area RCP Coordination', 'Submission'];
@@ -582,6 +583,10 @@ export function WbsStructurePage() {
     const statuses = [...new Set(phaseTasks.map((task) => task.deliverable_status).filter(Boolean))];
     const dueDates = phaseTasks.map((task) => task.target_due_date || task.end_date).filter(Boolean).sort();
     const startDates = phaseTasks.map((task) => task.start_date).filter(Boolean).sort();
+    const actualStarts = phaseTasks.map((task) => formatDayIST(task.actual_start_datetime)).filter(Boolean).sort();
+    const actualEnds = phaseTasks.map((task) => formatDayIST(task.actual_end_datetime)).filter(Boolean).sort();
+    const phaseTaskRoots = phaseTasks.filter((task) => task.parent_id == null);
+    const finished = phaseTaskRoots.length > 0 && phaseTaskRoots.every((task) => task.actual_end_datetime);
     return {
       phase,
       count: phaseTasks.length,
@@ -591,6 +596,8 @@ export function WbsStructurePage() {
       status: statuses.length === 1 ? statuses[0] : phaseTasks.length === 0 ? '' : 'Mixed',
       targetStartDate: startDates[0] || '', // the phase starts with its earliest item
       targetDueDate: dueDates.length ? dueDates[dueDates.length - 1] : '',
+      actualStartDate: actualStarts[0] || '', // when its first item really started
+      actualEndDate: finished ? actualEnds[actualEnds.length - 1] : '', // once every task in it is finished
     };
   }), [tasks]);
 
@@ -658,11 +665,10 @@ export function WbsStructurePage() {
   const hours = (task) => (task.estimated_hours === null || task.estimated_hours === '' ? '' : `${task.estimated_hours} hrs`);
 
   const rowTask = (task, engineerView = false, buHeadView = false) => {
-    // An engineer opens only what is theirs; a colleague's subtask is shown for who has it and its status.
-    const opens = !engineerView || task.assigned_engineer_id === employeeId;
     const editable = isLead && !engineerView && !buHeadView; // the lead's own table
     return (
-    <tr key={task.id} className={[opens && 'wbs-row-clickable', recent?.ids.has(task.id) && 'wbs-row-new'].filter(Boolean).join(' ') || undefined} onClick={opens ? () => navigate(`/task-details?nodeId=${task.id}&projectId=${selectedId}`) : undefined}>
+    // Everyone opens every row to view it; working on it (status, Login/Logout) stays its owner's.
+    <tr key={task.id} className={['wbs-row-clickable', recent?.ids.has(task.id) && 'wbs-row-new'].filter(Boolean).join(' ')} onClick={() => navigate(`/task-details?nodeId=${task.id}&projectId=${selectedId}`)}>
       <td>
         <span style={{ paddingLeft: `${(task.depth - 1) * 24}px` }}>
           {!buHeadView && deletable(task) && (
@@ -687,11 +693,13 @@ export function WbsStructurePage() {
         </span>
       </td>
       <td>{editable ? engineerCell(task) : <div className="wbs-readonly">{task.assigned_engineer_name || ''}</div>}</td>
-      {(engineerView || buHeadView) && <td><div className="wbs-readonly">{task.assigned_lead || '—'}</div></td>}
+      <td><div className="wbs-readonly">{task.assigned_lead || '—'}</div></td>
       <td>{editable ? hoursCell(task) : <div className="wbs-readonly">{hours(task)}</div>}</td>
       <td><div className="wbs-readonly">{task.deliverable_status || ''}</div></td>
       <td>{editable ? dateCell(task, 'start') : <div className="wbs-readonly">{task.start_date || ''}</div>}</td>
       <td>{editable ? dateCell(task, 'end') : <div className="wbs-readonly">{task.target_due_date || task.end_date || ''}</div>}</td>
+      <td><div className="wbs-readonly">{formatDayIST(task.actual_start_datetime)}</div></td>
+      <td><div className="wbs-readonly">{formatDayIST(task.actual_end_datetime)}</div></td>
       <td>{buHeadView ? <div className="wbs-readonly">{'—'}</div> : rowActions(task)}</td>
     </tr>
     );
@@ -699,7 +707,7 @@ export function WbsStructurePage() {
 
   const phaseDeletableIds = (phase) => deletableIds.filter((id) => byId[id]?.phase === phase);
 
-  const phaseRow = (agg, engineerView = false, buHeadView = false) => (
+  const phaseRow = (agg, buHeadView = false) => (
     <tr className="wbs-phase-row" key={agg.phase}>
       <td>
         {!buHeadView && phaseDeletableIds(agg.phase).length > 0 && (
@@ -716,11 +724,13 @@ export function WbsStructurePage() {
         <strong className="wbs-phase-name">{agg.phase}</strong>
       </td>
       <td><div className="wbs-readonly">{agg.assignedEngineers}</div></td>
-      {(engineerView || buHeadView) && <td><div className="wbs-readonly">{agg.assignedLead}</div></td>}
+      <td><div className="wbs-readonly">{agg.assignedLead}</div></td>
       <td><div className="wbs-readonly">{agg.totalHours ? `${agg.totalHours} hrs` : ''}</div></td>
       <td><div className="wbs-readonly">{agg.status}</div></td>
       <td><div className="wbs-readonly">{agg.targetStartDate}</div></td>
       <td><div className="wbs-readonly">{agg.targetDueDate}</div></td>
+      <td><div className="wbs-readonly">{agg.actualStartDate}</div></td>
+      <td><div className="wbs-readonly">{agg.actualEndDate}</div></td>
       <td><div className="wbs-readonly">{buHeadView ? '—' : ''}</div></td>
     </tr>
   );
@@ -765,7 +775,7 @@ export function WbsStructurePage() {
             <span>Project Controls</span><i>/</i><strong>WBS Structure</strong>
           </div>
           <h1>WBS Structure</h1>
-          <p>{isLead ? 'Decompose MEP scope into disciplined phases, assign engineers, and set milestone budget allocations.' : isBuHead ? 'Read-only visibility of WBS nodes and Engineer assignments.' : 'Your tasks, each with all its subtasks and who has them.'}</p>
+          <p>{isLead ? 'Decompose MEP scope into disciplined phases, assign engineers, and set milestone budget allocations.' : isBuHead ? 'Read-only visibility of WBS nodes and Engineer assignments.' : 'The whole WBS of the project and who has each item: open any to view it; you work on your own.'}</p>
         </div>
         <label className="project-switcher">
           <span>Project Name</span>
@@ -937,23 +947,26 @@ export function WbsStructurePage() {
                   <tr>
                     <th>{selectAllBox('Select all tasks and subtasks')} WBS CODE & TASK NAME</th>
                     <th>ASSIGNED ENGINEER</th>
+                    <th>REPORTER</th>
                     <th>ESTIMATED HOURS</th>
                     <th>DELIVERABLE STATUS</th>
                     <th>TARGET START DATE</th>
                     <th>TARGET END DATE</th>
+                    <th>ACTUAL START DATE</th>
+                    <th>ACTUAL END DATE</th>
                     <th className="wbs-col-actions" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
 {visibleSections.map(({ agg, rows }) => (
                       <Fragment key={agg.phase}>
-                        {phaseRow(agg, false)}
+                        {phaseRow(agg)}
                         {rows.map((r) => rowTask(r, false))}
                       </Fragment>
                     ))}
-                  {!loaded && <tr><td colSpan={7} className="timesheet-empty-cell">Loading…</td></tr>}
+                  {!loaded && <tr><td colSpan={10} className="timesheet-empty-cell">Loading…</td></tr>}
                   {loaded && tasks.length === 0 && (
-                    <tr><td colSpan={7}>No WBS nodes uploaded or created for this project.</td></tr>
+                    <tr><td colSpan={10}>No WBS nodes uploaded or created for this project.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -982,19 +995,21 @@ export function WbsStructurePage() {
                   <th>DELIVERABLE STATUS</th>
                   <th>TARGET START DATE</th>
                   <th>TARGET END DATE</th>
+                  <th>ACTUAL START DATE</th>
+                  <th>ACTUAL END DATE</th>
                   <th className="wbs-col-actions" aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
                 {visibleSections.map(({ agg, rows }) => (
                   <Fragment key={agg.phase}>
-                    {phaseRow(agg, false, true)}
+                    {phaseRow(agg, true)}
                     {rows.map((r) => rowTask(r, false, true))}
                   </Fragment>
                 ))}
-                {!loaded && <tr><td colSpan={8} className="timesheet-empty-cell">Loading…</td></tr>}
+                {!loaded && <tr><td colSpan={10} className="timesheet-empty-cell">Loading…</td></tr>}
                 {loaded && tasks.length === 0 && (
-                  <tr><td colSpan={8}>No WBS nodes available for this project.</td></tr>
+                  <tr><td colSpan={10}>No WBS nodes available for this project.</td></tr>
                 )}
               </tbody>
             </table>
@@ -1031,20 +1046,22 @@ export function WbsStructurePage() {
                         <th>DELIVERABLE STATUS</th>
                         <th>TARGET START DATE</th>
                         <th>TARGET END DATE</th>
+                        <th>ACTUAL START DATE</th>
+                        <th>ACTUAL END DATE</th>
                         <th className="wbs-col-actions" aria-label="Actions" />
                       </tr>
                     </thead>
                   <tbody>
                     {visibleSections.map(({ agg, rows }) => (
                       <Fragment key={agg.phase}>
-                        {agg.count > 0 && phaseRow(agg, true)}
-                        {/* The server sends each of the engineer's tasks whole: colleagues' subtasks too. */}
+                        {agg.count > 0 && phaseRow(agg)}
+                        {/* The server sends the whole WBS: colleagues' rows open to view; only the engineer's own take work. */}
                         {rows.map((r) => rowTask(r, true))}
                       </Fragment>
                     ))}
-                    {!loaded && <tr><td colSpan={8} className="timesheet-empty-cell">Loading…</td></tr>}
+                    {!loaded && <tr><td colSpan={10} className="timesheet-empty-cell">Loading…</td></tr>}
                     {loaded && tasks.length === 0 && (
-                      <tr><td colSpan={8}>No WBS nodes assigned to you in this project.</td></tr>
+                      <tr><td colSpan={10}>No WBS nodes uploaded or created for this project.</td></tr>
                     )}
                   </tbody>
                 </table>

@@ -244,6 +244,55 @@ describe('WBS rows (lead)', () => {
     expect(cell('TARGET END DATE')).toBe('2026-10-09');
   });
 
+  it('shows the reporter, and the actual dates after the target dates, as the day in India', async () => {
+    nodes = [
+      {
+        ...node(10, '1', 'Cable routing'),
+        assigned_lead: 'Lead A',
+        actual_start_datetime: '2026-10-05T03:00:00Z',
+      },
+      {
+        ...node(11, '1.1', 'Risers', 10),
+        assigned_lead: 'Lead A',
+        actual_start_datetime: '2026-10-05T03:00:00Z',
+        actual_end_datetime: '2026-10-05T20:00:00Z', // 01:30 on the 6th in India
+      },
+    ];
+    renderPage();
+
+    const row = (await screen.findByText('Risers', {}, WAIT)).closest('tr');
+    const headers = [...document.querySelectorAll('table.wbs-table thead th')].map((th) =>
+      th.textContent.trim(),
+    );
+    expect(headers.slice(1, 3)).toEqual(['ASSIGNED ENGINEER', 'REPORTER']);
+    expect(headers.slice(5, 9)).toEqual([
+      'TARGET START DATE',
+      'TARGET END DATE',
+      'ACTUAL START DATE',
+      'ACTUAL END DATE',
+    ]);
+    const cell = (tr, header) => tr.children[headers.indexOf(header)].textContent;
+    expect(cell(row, 'REPORTER')).toBe('Lead A');
+    expect(cell(row, 'ACTUAL START DATE')).toBe('2026-10-05');
+    expect(cell(row, 'ACTUAL END DATE')).toBe('2026-10-06');
+
+    const phase = document.querySelector('tr.wbs-phase-row');
+    expect(cell(phase, 'ACTUAL START DATE')).toBe('2026-10-05');
+    expect(cell(phase, 'ACTUAL END DATE')).toBe(''); // its task is not finished yet
+  });
+
+  it("opens another lead's task too, to view it", async () => {
+    nodes = [
+      { ...node(10, '1', 'Cable routing'), assigned_lead: 'Lead A', assigned_engineer_id: 4 },
+      node(20, '2', 'Fire alarm'),
+    ];
+    renderPage();
+
+    const others = (await screen.findByText('Cable routing', {}, WAIT)).closest('tr');
+    expect(others.className).toContain('wbs-row-clickable');
+    expect(screen.getByText('Fire alarm').closest('tr').className).toContain('wbs-row-clickable');
+  });
+
   beforeEach(() => {
     nodes = [node(10, '1', 'Cable routing'), node(11, '1.1', 'Risers', 10)];
     vi.stubGlobal('fetch', vi.fn(fakeApi));
@@ -394,7 +443,7 @@ describe('WBS rows (engineer)', () => {
     );
     expect(headers.slice(1, 3)).toEqual(['ASSIGNED ENGINEER', 'REPORTER']);
     expect(colleague.textContent).toContain('Ravi Kumar');
-    expect(colleague.className).not.toContain('wbs-row-clickable'); // a colleague's subtask doesn't open
+    expect(colleague.className).toContain('wbs-row-clickable'); // a colleague's subtask opens, to view it
 
     for (const row of document.querySelectorAll('tbody tr')) {
       const actions = row.querySelector('.wbs-cell-actions');
