@@ -139,7 +139,7 @@ export function CreatedProjectsPage() {
   const [showPeople, setShowPeople] = useState(false); // onboarding, until the global admin app
   const [search, setSearch] = useState('');
   const [pending, setPending] = useState(null); // { type, project }
-  // A notice handed over by Create Project (e.g. the SharePoint outcome).
+  // A notice handed over by Project Kickoff (e.g. the SharePoint outcome).
   const [notice, setNotice] = useState(() => location.state?.notice ?? null);
 
   useEffect(() => {
@@ -181,7 +181,7 @@ export function CreatedProjectsPage() {
           <Users size={16} /> {showPeople ? 'Hide people' : 'People'}
         </button>
         <button type="button" className="button button-primary" onClick={() => navigate('/create-project')}>
-          <PlusCircle size={16} /> Create Project
+          <PlusCircle size={16} /> Project Kickoff
         </button>
       </PageHeader>
 
@@ -215,7 +215,7 @@ export function CreatedProjectsPage() {
 
       {!error && isLoading && <EmptyState>Loading projects…</EmptyState>}
       {!error && !isLoading && projects.length === 0 && (
-        <EmptyState>No projects created yet — use Create Project to add one.</EmptyState>
+        <EmptyState>No projects created yet — use Project Kickoff to add one.</EmptyState>
       )}
       {!error &&
         projects.length > 0 &&

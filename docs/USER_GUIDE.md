@@ -67,9 +67,9 @@ MAEC One, and three browsers (or one normal and two private windows) to be signe
 ### 1.3 After login
 | Role | Lands on | Tabs |
 |---|---|---|
-| **BU Head** | Projects | Projects · Create Project · Resource Booking · WBS Structure · Timeline & Logs · Executive Dashboard · Work Summary · Audit Log · SharePoint Mirror |
-| **Engineer who leads a project** | Resource Booking | Resource Booking · WBS Structure · Timeline & Logs · Performance Dashboard · SharePoint Mirror |
-| **Engineer** | WBS Structure | WBS Structure · Timeline & Logs · Performance Dashboard · SharePoint Mirror |
+| **BU Head** | Projects | Projects · Project Kickoff · Resource Booking · WBS Structure · Gantt Chart & Logs · Executive Dashboard · Work Summary · Audit Log · SharePoint Mirror |
+| **Engineer who leads a project** | Resource Booking | Resource Booking · WBS Structure · Gantt Chart & Logs · Performance Dashboard · SharePoint Mirror |
+| **Engineer** | WBS Structure | WBS Structure · Gantt Chart & Logs · Performance Dashboard · SharePoint Mirror |
 
 Lead is a role on a project, not a kind of account: each page follows your role
 on the **selected project**. On a project you lead you see the lead view
@@ -115,7 +115,7 @@ BU Head sees everyone's. Entries are kept for 30 days.
 
 ## 3. BU Head features
 
-### 3.1 Create a project (Create Project tab)
+### 3.1 Create a project (Project Kickoff tab)
 Fill in: project name, **unique** project code, client, target start date, a
 lead for each discipline the project needs (Electrical, Mechanical, BIM: each is
 optional, but at least one is required), contract currency and value, **target
@@ -189,7 +189,7 @@ pending approvals. Per engineer: assigned tasks, baseline, approved/logged/pendi
 hours, overall progress (Not Started / In Progress / Completed).
 
 ### 3.8 Read-only views
-WBS Structure and Timeline & Logs show the Leads' and Engineers' work for any
+WBS Structure and Gantt Chart & Logs show the Leads' and Engineers' work for any
 project, read-only. SharePoint Mirror shows the project's folder tree and files.
 
 ### 3.9 Audit Log
@@ -235,7 +235,7 @@ Click a task row. The Lead can move **subtasks** forward and **Approve Task**
 once the engineer has submitted it ("Submitted for Approval"). Main-task
 statuses are otherwise driven by the engineer; comments are added by engineers.
 
-### 4.4 Timeline & Logs (approve hours)
+### 4.4 Gantt Chart & Logs (approve hours)
 Hours are recorded **per subtask and per day**, and approved **per day** by the
 lead of the task they were worked on. There is no week submission: the week is
 just the sum of its days.
@@ -331,7 +331,7 @@ subtask are kept and still count.
   - **Done means no more time:** setting a subtask to **Done** logs out whoever is logged in to it (the time up to then is kept), and **Login** stays off on it. If more work turns up, ask your Lead to move it back to In-Progress.
   - Edge "sleeping tabs" and Chrome "Memory Saver" can freeze a background tab. Add the MAEC address under *Always keep these sites active* in the browser settings.
 
-### 5.3 Timeline & Logs
+### 5.3 Gantt Chart & Logs
 Your hours for the week, one row per subtask and day, each with its status:
 Pending review, Approved or Rejected. Nothing to submit: each day is reviewed by
 the task's lead once the day is over. Open your weekly log for the day-by-day
@@ -353,7 +353,7 @@ completed, schedule index, your monthly chart and **My Tasks by Status** (To Do,
 | BU Head **approves** the booking | "Approved" | Bell: approved | **The project appears** |
 | BU Head **rejects** (with reason) | Back to draft | Bell with the reason; can edit and resubmit | Nothing |
 | Lead **creates a task** assigned to an engineer | It in WBS (read-only) | It in WBS | It in their WBS |
-| Engineer **tracks time** (Logout) | Pending hours on the dashboard | Hours in Timeline & Logs | Hours in Timeline & Logs |
+| Engineer **tracks time** (Logout) | Pending hours on the dashboard | Hours in Gantt Chart & Logs | Hours in Gantt Chart & Logs |
 | Task lead **approves a day** (or the week's pending days) | **Usage, budget burn and SPI go up** | Same figures | "Approved"; Performance Dashboard updates |
 | Approved hours reach the **alert threshold** | Bell: threshold alert; ALERT on the card | Bell: threshold alert | — |
 | Approved hours reach **100% of the baseline** | Bell: locked; BASELINE REACHED | Bell: locked; approvals refused | Logging and tracking refused |
@@ -371,14 +371,14 @@ completed, schedule index, your monthly chart and **My Tasks by Status** (To Do,
 
 Use three windows: **BU** (BU Head), **LEAD** (the Electrical lead), **ENG** (an engineer).
 
-1. **BU:** Create Project: target effort **100 h**, threshold **80%**, contract **100,000 USD**, your three Leads. It appears on Projects.
+1. **BU:** Project Kickoff: target effort **100 h**, threshold **80%**, contract **100,000 USD**, your three Leads. It appears on Projects.
 2. **LEAD:** Resource Booking: the project is listed. Book **ENG** at 50% for this month. **Submit for Approval**.
 3. **BU:** bell shows the request. Resource Booking: **Reject** with a reason. **LEAD:** bell shows the reason; bookings are draft. Resubmit. **BU:** **Approve**.
 4. **ENG:** the project now appears in WBS Structure (empty until tasks exist).
 5. **LEAD:** WBS Structure: add a main task in *Space Planning* assigned to ENG, then **+** on its row to add a subtask.
 6. **ENG:** WBS shows the task and subtask. Open the subtask: **Login**, keep the tab active a few minutes, **Logout**.
-7. **ENG:** Timeline & Logs: the hours appear as Pending review (they can be reviewed from the next day).
-8. **LEAD:** the next day, Timeline & Logs: **Approve week** on ENG's row. **BU:** Executive Dashboard: approved hours and budget burn go up.
+7. **ENG:** Gantt Chart & Logs: the hours appear as Pending review (they can be reviewed from the next day).
+8. **LEAD:** the next day, Gantt Chart & Logs: **Approve week** on ENG's row. **BU:** Executive Dashboard: approved hours and budget burn go up.
 9. **Threshold and lock.** Hours come only from Login/Logout, so use a small target: **BU:** Edit the project → target effort **1 h**, threshold **50%**. **ENG:** Login on a subtask, wait about **35 minutes**, Logout; submit the week. **LEAD:** approve the week → **ALERT** (bell for BU and LEAD). **ENG:** another **30 minutes**, Logout, submit; **LEAD:** approve → at 100% the project **locks** (BASELINE REACHED, bell). **ENG:** Login on the subtask is refused.
 10. **LEAD:** Performance Dashboard: request an extension of, say, 10 h with a justification. **BU:** bell; dashboard: **Approve Extension**. If usage is now under 100%, the lock lifts automatically ("System" in the audit log); LEAD is notified.
 11. **BU:** **Stop the Execution** (comment, confirm) → locked; **Resume Execution** → reopened. Both in the audit log.
@@ -396,4 +396,4 @@ Use three windows: **BU** (BU Head), **LEAD** (the Electrical lead), **ENG** (an
 - **The Lead's WBS edit dialog** can set any status, skipping the engineer's steps (TODO C13).
 - **SPI** is not a real schedule index yet (TODO N4); "discipline" on the dashboard is the job title (N7).
 - **SharePoint** provisioning needs the Azure credentials; without them projects are still created and the failure is shown.
-- **Timeline & Logs** for the BU Head shows the weekly sheet but little schedule detail (TODO W1).
+- **Gantt Chart & Logs** for the BU Head shows the weekly sheet but little schedule detail (TODO W1).

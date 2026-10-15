@@ -162,7 +162,7 @@ export function EngineerWeeklyLogsPage() {
           <div className="breadcrumb">
             <span>Execution Tracking</span>
             <i>/</i>
-            <span>Timeline &amp; Logs</span>
+            <span>Gantt Chart &amp; Logs</span>
             <i>/</i>
             <strong>{project?.project_name || 'Select Project'}</strong>
           </div>
@@ -194,7 +194,7 @@ export function EngineerWeeklyLogsPage() {
               className="button button-secondary week-nav-btn"
               to={`/timeline-logs${projectId ? `?projectId=${projectId}` : ''}`}
             >
-              <ArrowLeft size={16} /> Back to Timeline &amp; Logs
+              <ArrowLeft size={16} /> Back to Gantt Chart &amp; Logs
             </Link>
             <span className="week-pill">{weekInfo.rangeStr}</span>
             <span className="week-pill">
@@ -361,7 +361,7 @@ export function EngineerWeeklyLogsPage() {
             <span>
               {isEngineer
                 ? 'You can only view your own logs. Hours are recorded per subtask from Login/Logout; each day is reviewed once it is over.'
-                : 'Rejected hours can be approved again for 7 days, by a lead of the project, from Rejected hours on Timeline & Logs.'}
+                : 'Rejected hours can be approved again for 7 days, by a lead of the project, from Rejected hours on Gantt Chart & Logs.'}
             </span>
           </div>
           <Link

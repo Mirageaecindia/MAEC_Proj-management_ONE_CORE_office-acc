@@ -294,7 +294,7 @@ export function TimelineLogsPage() {
             <i>/</i>
             <strong>{project?.project_name || 'Select Project'}</strong>
           </div>
-          <h1>Timeline Schedule &amp; Weekly Timesheet Logs</h1>
+          <h1>Gantt Chart &amp; Weekly Timesheet Logs</h1>
           <p>
             {isEngineer
               ? 'Your assigned WBS schedule, and the hours recorded from Login/Logout on your subtasks.'

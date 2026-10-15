@@ -1,4 +1,4 @@
-/** Contract currencies offered on Create Project. */
+/** Contract currencies offered on Project Kickoff. */
 export const CURRENCIES = [
   { code: 'USD', symbol: '$' },
   { code: 'INR', symbol: '₹' },

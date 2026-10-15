@@ -164,7 +164,7 @@ export function EditProjectPage() {
 const HEADER = {
   create: {
     breadcrumb: ['Projects', 'Commercial Setup', 'New Entry'],
-    title: 'Create Project & Commercial Baseline',
+    title: 'Project Kickoff & Commercial Baseline',
     description:
       'Define project parameters, commercial limits, and trigger automated SharePoint folder provisioning.',
   },

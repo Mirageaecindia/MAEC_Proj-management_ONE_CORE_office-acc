@@ -39,13 +39,13 @@ The core idea is **governance of effort**: hours are the unit of cost. Every hou
 
 ## 2. Roles and responsibilities
 
-There are two account roles, BU Head and engineer, and one role on a project: **lead**. The BU Head chooses any engineer as a project's Electrical, Mechanical or BIM lead (Create Project), so the same person can lead one project and work as an engineer on another. Roles come only from the logged-in account and the project's data, never from the URL or the browser.
+There are two account roles, BU Head and engineer, and one role on a project: **lead**. The BU Head chooses any engineer as a project's Electrical, Mechanical or BIM lead (Project Kickoff), so the same person can lead one project and work as an engineer on another. Roles come only from the logged-in account and the project's data, never from the URL or the browser.
 
 | Role | Responsibilities | Pages (tabs) |
 |---|---|---|
-| **BU Head** (Business Unit Head) | Creates projects and their commercial baseline. Owns SharePoint provisioning. Approves resource bookings. Monitors hours, budget and schedule. Approves or rejects extension requests. Can stop execution (soft-lock timesheets). Read-only view of WBS, tasks and timesheets. | Projects (Created Projects), Create Project, Resource Booking, WBS Structure, Timeline & Logs, Executive Dashboard, Work Summary, SharePoint Mirror |
+| **BU Head** (Business Unit Head) | Creates projects and their commercial baseline. Owns SharePoint provisioning. Approves resource bookings. Monitors hours, budget and schedule. Approves or rejects extension requests. Can stop execution (soft-lock timesheets). Read-only view of WBS, tasks and timesheets. | Projects (Created Projects), Project Kickoff, Resource Booking, WBS Structure, Gantt Chart & Logs, Executive Dashboard, Work Summary, SharePoint Mirror |
 | **Lead of a project** (an engineer chosen by the BU Head, with a period and a utilization %) | On that project: books engineers and submits bookings for approval. Builds the WBS (manually or by CSV/XLSX upload). Assigns engineers (and themselves) to subtasks. Approves submitted tasks. Approves or rejects engineers' hours (the BU Head approves the lead's own). Requests extra hours from the BU Head. | An engineer who leads any project also gets Resource Booking and Executive Dashboard; each page follows their role on the selected project |
-| **Engineer** | Works on assigned WBS tasks and subtasks. Plans own subtasks. Moves task status forward and submits tasks for approval. Adds comments. Working time on subtasks comes from Login/Logout. | WBS Structure, Timeline & Logs, Performance Dashboard, SharePoint Mirror |
+| **Engineer** | Works on assigned WBS tasks and subtasks. Plans own subtasks. Moves task status forward and submits tasks for approval. Adds comments. Working time on subtasks comes from Login/Logout. | WBS Structure, Gantt Chart & Logs, Performance Dashboard, SharePoint Mirror |
 
 **How identity connects to data**
 - A **User** is a login account (`users` table).
@@ -88,7 +88,7 @@ sequenceDiagram
 
 Step by step:
 
-1. **Project creation (BU Head).** Fill in the Create Project form: name, unique code, client, one lead per discipline, start date, currency and contract value, target effort hours, alert threshold, and the SharePoint discipline folders to create. The API saves the project, then calls Microsoft Graph to create `…/Project/<Project Name>/` plus a subfolder per selected discipline. If SharePoint fails, the project is still created and the error is returned.
+1. **Project creation (BU Head).** Fill in the Project Kickoff form: name, unique code, client, one lead per discipline, start date, currency and contract value, target effort hours, alert threshold, and the SharePoint discipline folders to create. The API saves the project, then calls Microsoft Graph to create `…/Project/<Project Name>/` plus a subfolder per selected discipline. If SharePoint fails, the project is still created and the error is returned.
 2. **Resource booking (Lead → BU Head).**
    - The Lead books engineers onto the project with a date range and a booking % (20–100).
    - Planned hours are calculated by the server: weekdays in the range × 8 × the booking % (20% is 1.6 h a day).
@@ -103,7 +103,7 @@ Step by step:
    - The engineer opens a subtask in Task Details and presses **Login**; **Logout** ends the work. Worked time is Logout − Login (idle time included), paused while the laptop is off, capped at 8 hours per day. This is the only source of hours: there is no manual timesheet.
    - On Logout, the hours are added to the day's row for the subtask (one row per subtask, engineer and day).
    - The engineer moves statuses forward. A task can be submitted only once all its subtasks are Done.
-5. **Review (Lead).** The Lead approves or rejects timesheet entries (Timeline & Logs), and approves submitted tasks (Task Details).
+5. **Review (Lead).** The Lead approves or rejects timesheet entries (Gantt Chart & Logs), and approves submitted tasks (Task Details).
 6. **Governance (BU Head).**
    - The Executive Dashboard shows budget burn, hours consumption against the baseline, the governance level (normal / alert / baseline reached), an SPI-style index and a monthly chart.
    - Reaching the alert threshold notifies the BU Head and the project's Leads. Reaching 100% of the baseline **locks timesheets automatically** and notifies them.
@@ -436,7 +436,7 @@ Signing in and out, passwords, deactivating and deleting people are MAEC One's.
 **Projects and SharePoint**
 | Method | Path | Roles | Purpose |
 |---|---|---|---|
-| GET | `/api/project-leads` | all | Everyone who can lead a project (active accounts with an employee record), for the Create Project dropdowns |
+| GET | `/api/project-leads` | all | Everyone who can lead a project (active accounts with an employee record), for the Project Kickoff dropdowns |
 | POST | `/api/projects` | BU Head | Create a project and provision SharePoint (returns `sharepoint_status`: provisioned/failed/error/not_requested) |
 | GET | `/api/projects[?include_archived=true]` | all (scoped) | Project list; archived projects only for the BU Head, on request |
 | GET | `/api/projects/{id}` | all (scoped) | Project detail |
@@ -538,7 +538,7 @@ Signing in and out, passwords, deactivating and deleting people are MAEC One's.
 **Current state:** no project has been provisioned successfully yet. Known defects (roadmap Phase 3):
 - The mirror finds the folder through its URL-encoded name, so names with spaces won't be found.
 - Files inside subfolders are never listed.
-- Provisioning blocks the Create Project request.
+- Provisioning blocks the Project Kickoff request.
 - There's no retry for a failed provisioning.
 - The "get child by name" Graph address needs to be verified against the live tenant.
 
@@ -621,8 +621,8 @@ Signing in and out, passwords, deactivating and deleting people are MAEC One's.
 - Budget burn is proportional to hours, not real cost. There's no rate card, and the resource summary returns hardcoded zeros for commercial figures.
 - "Discipline" in governance is the employee's designation, not Electrical, Mechanical or BIM.
 - Booking approval isn't reset when a booking is edited, and the Resource Booking page has no Reject button yet (the API exists).
-- Timeline & Logs is effectively empty for the BU Head (phase bars and approval states only load for Lead and Engineer). The Gantt viewport is fixed to Sep–Dec 2026 and leaves out the Submission phase.
-- A SharePoint failure message on Create Project is lost because the page redirects straight after saving.
+- Gantt Chart & Logs is effectively empty for the BU Head (phase bars and approval states only load for Lead and Engineer). The Gantt viewport is fixed to Sep–Dec 2026 and leaves out the Submission phase.
+- A SharePoint failure message on Project Kickoff is lost because the page redirects straight after saving.
 - There's no project edit, project status or archive.
 
 **SharePoint:** see §9.
