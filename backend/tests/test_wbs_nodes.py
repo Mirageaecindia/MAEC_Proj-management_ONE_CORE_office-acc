@@ -5,7 +5,7 @@ are no longer offered, and the work already filed under them keeps working.
 """
 
 import models
-from app.domain.wbs_nodes import node_phases
+from app.domain.wbs_nodes import OTHERS_NODE, node_phases
 from app.services.wbs_blueprints import BLUEPRINTS, blueprint_rows
 
 LIST = "/api/projects/{}/wbs-structure?include_ancestors=true"
@@ -113,3 +113,33 @@ def test_work_under_an_original_phase_stays_and_keeps_working(client, make, worl
         rows = {n["wbs_code"]: n for n in client.get(LIST.format(project_id), headers=headers).json()}
         assert rows["50"]["phase"] == "Space Planning"
         assert client.get(f"/api/wbs-nodes/{task.id}", headers=headers).status_code == 200
+
+
+def test_others_takes_the_leads_own_tasks_and_subtasks(client, db, world):
+    project_id = world.create_project()["id"]
+    assert node_phases()[-1] == OTHERS_NODE == "Others"  # after the DD nodes
+    assert "Others" not in {b["phase"] for b in client.get("/api/wbs-blueprints", headers=world.lead_h).json()}
+    assert client.post(ADD.format(project_id, "others"), headers=world.lead_h).status_code == 404  # no standard tasks
+
+    one_day = {"estimated_hours": 4, "start_date": "2026-09-15", "end_date": "2026-09-15"}  # a subtask's plan
+    tasks = []
+    for name in ("Client workshop", "Site visit report"):  # any number of tasks, named by the lead
+        created = client.post(
+            f"/api/projects/{project_id}/wbs-nodes", json={"task_name": name, "phase": "Others"}, headers=world.lead_h
+        )
+        assert created.status_code == 201, created.text
+        tasks.append(created.json())
+    for name in ("Prepare the agenda", "Send the minutes"):
+        sub = client.post(
+            f"/api/wbs-nodes/{tasks[0]['id']}/subtasks", json={"task_name": name, **one_day}, headers=world.lead_h
+        )
+        assert sub.status_code == 201, sub.text
+        assert sub.json()["phase"] == "Others"
+
+    listed = client.get(f"/api/projects/{project_id}/wbs-structure", headers=world.lead_h).json()
+    assert sorted(n["task_name"] for n in listed if n["phase"] == "Others") == [
+        "Client workshop",
+        "Prepare the agenda",
+        "Send the minutes",
+        "Site visit report",
+    ]

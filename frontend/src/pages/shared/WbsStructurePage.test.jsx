@@ -48,6 +48,7 @@ let blueprintAdds = [];
 let catalog = BLUEPRINTS; // the phases the server offers to add
 let present = { tasks: 0, subtasks: 0 }; // how much of a blueprint the fake project already has
 let deleted = [];
+let created = null; // the last node added by hand
 
 const ROUTES = [
   [/\/api\/wbs-blueprints$/, () => catalog],
@@ -83,6 +84,14 @@ const ROUTES = [
       deleted = JSON.parse(options.body).node_ids;
       nodes = nodes.filter((n) => !deleted.includes(n.id));
       return { tasks: 1, subtasks: 1, hours_kept: 0, deleted_nodes: deleted };
+    },
+  ],
+  [
+    /\/api\/projects\/1\/wbs-nodes$/,
+    (url, options) => {
+      created = JSON.parse(options.body);
+      nodes = [...nodes, { ...node(40, '15.', created.task_name), phase: created.phase }];
+      return nodes.at(-1);
     },
   ],
   [/\/api\/projects$/, () => [{ id: 1, project_name: 'test', project_code: 'MAEC-001', my_role: myRole }]],
@@ -228,8 +237,31 @@ describe('WBS phase cards (lead)', () => {
     expect(stages).toEqual([
       ['CD', PHASES.slice(0, 2)],
       ['SD', PHASES.slice(2)],
+      ['', ['Others']], // the lead's own node, below the last stage
     ]);
+    expect(screen.queryByRole('button', { name: 'Add the Others blueprint' })).toBeNull(); // no standard tasks
     expect(screen.queryByRole('button', { name: 'Upload WBS (Excel)' })).toBeNull(); // the five-phase workbook is gone
+  });
+
+  it("Others opens the Add WBS Node form for a task of the lead's own, under Others", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a task to Others' }, WAIT));
+
+    const form = screen.getByRole('heading', { name: 'Add WBS Node' }).closest('form');
+    const phaseSelect = within(form)
+      .getAllByRole('combobox')
+      .find((select) => [...select.options].some((option) => option.value === 'Others'));
+    expect(phaseSelect.value).toBe('Others');
+    fireEvent.change(screen.getByPlaceholderText('Enter task name'), {
+      target: { value: 'Client workshop' },
+    });
+    fireEvent.submit(form);
+
+    await vi.waitFor(
+      () => expect(created).toMatchObject({ task_name: 'Client workshop', phase: 'Others' }),
+      WAIT,
+    );
   });
 
   it('the phase name still adds a single task by hand, with the phase chosen', async () => {
@@ -302,7 +334,7 @@ describe('WBS rows (lead)', () => {
     expect(cell(phase, 'ACTUAL END DATE')).toBe(''); // its task is not finished yet
   });
 
-  it('offers no phase to add while the server lists none, and still shows work under an old phase', async () => {
+  it('offers only Others while the server lists no nodes, and still shows work under an old phase', async () => {
     catalog = []; // the five phases removed, the CD/SD/DD nodes not added yet
     nodes = [{ ...node(10, '1', 'Cable routing'), phase: 'Space Planning' }];
     try {
@@ -313,8 +345,9 @@ describe('WBS rows (lead)', () => {
         WAIT,
       );
 
-      expect(document.querySelector('.wbs-phase-toolbar')).toBeNull(); // no phase cards, upload or template
-      expect(screen.queryByRole('button', { name: '+ Add WBS Node' })).toBeNull();
+      fireEvent.click(await screen.findByRole('button', { name: 'WBS Nodes (1)' }, WAIT)); // Others only
+      expect(document.querySelectorAll('.wbs-phase-card-node')).toHaveLength(1);
+      expect(screen.queryByRole('button', { name: /blueprint$/ })).toBeNull(); // no node with standard tasks
       expect(screen.queryByRole('button', { name: 'Upload WBS (Excel)' })).toBeNull();
       expect(document.querySelector('tr.wbs-phase-row .wbs-phase-name').textContent).toBe('Space Planning');
       expect(screen.getByRole('button', { name: 'Add a subtask to Cable routing' })).toBeTruthy(); // its work goes on
@@ -327,7 +360,7 @@ describe('WBS rows (lead)', () => {
     localStorage.removeItem(NODES_OPEN);
     renderPage();
 
-    const toggle = await screen.findByRole('button', { name: 'WBS Nodes (5)' }, WAIT);
+    const toggle = await screen.findByRole('button', { name: 'WBS Nodes (6)' }, WAIT);
     expect(toggle.getAttribute('aria-expanded')).toBe('false'); // folded at first
     expect(screen.queryByRole('button', { name: 'Add the Space Planning blueprint' })).toBeNull();
 
@@ -340,7 +373,7 @@ describe('WBS rows (lead)', () => {
     expect(
       await screen.findByRole('button', { name: 'Add the Space Planning blueprint' }, WAIT),
     ).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'WBS Nodes (5)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'WBS Nodes (6)' }));
     expect(screen.queryByRole('button', { name: 'Add the Space Planning blueprint' })).toBeNull();
     expect(localStorage.getItem(NODES_OPEN)).toBe('false');
     localStorage.removeItem(NODES_OPEN);
@@ -358,7 +391,7 @@ describe('WBS rows (lead)', () => {
       ),
     ).toBeTruthy();
     expect(document.querySelectorAll('tr.wbs-phase-row')).toHaveLength(0);
-    expect(await screen.findByRole('button', { name: 'WBS Nodes (5)' }, WAIT)).toBeTruthy(); // the way to add
+    expect(await screen.findByRole('button', { name: 'WBS Nodes (6)' }, WAIT)).toBeTruthy(); // the way to add
     cleanup();
 
     nodes = [{ ...node(10, '1', 'Cable routing'), phase: 'Submission' }];

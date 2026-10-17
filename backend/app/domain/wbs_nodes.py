@@ -18,6 +18,9 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 BLUEPRINT_DIR = Path(__file__).resolve().parents[1] / "blueprints"
+# A node of the lead's own (decided 2026-10-16): no sheet and no standard tasks; the lead adds any
+# tasks and subtasks to it by hand. It comes after the DD nodes.
+OTHERS_NODE = "Others"
 # Stage workbooks, in order: the stage is the part of the file name after "wbs_".
 STAGE_WORKBOOKS = ("wbs_cd.xlsx", "wbs_sd.xlsx", "wbs_dd.xlsx")
 
@@ -71,5 +74,5 @@ def node_sheets() -> tuple[NodeSheet, ...]:
 
 
 def node_phases() -> tuple[str, ...]:
-    """The node names, in order."""
-    return tuple(node.phase for node in node_sheets())
+    """The node names, in order: the sheets', then Others."""
+    return (*(node.phase for node in node_sheets()), OTHERS_NODE)

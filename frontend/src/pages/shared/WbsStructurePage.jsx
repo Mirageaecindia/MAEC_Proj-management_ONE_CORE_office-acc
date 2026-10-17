@@ -35,6 +35,10 @@ function rememberNodesOpen(open) {
   }
 }
 
+// The lead's own node (2026-10-16): no standard tasks, any tasks and subtasks added by hand; after the DD
+// nodes. The server knows it too (app/domain/wbs_nodes.py, OTHERS_NODE).
+const OTHERS_NODE = 'Others';
+
 const LEGACY_PHASES = ['Space Planning', 'STR Coordination', 'ID - RCP Coordination', 'BoH Area RCP Coordination', 'Submission'];
 
 const EMPTY_NODE = {
@@ -462,8 +466,8 @@ export function WbsStructurePage() {
   // there is skipped). The node cards are how a WBS is added: the Excel upload was removed (2026-10-15).
   const { data: blueprints = [] } = useQuery({ queryKey: ['wbs-blueprints'], queryFn: wbsBlueprintsApi.list, staleTime: Infinity });
   const blueprintFor = (phase) => blueprints.find((blueprint) => blueprint.phase === phase);
-  // The WBS nodes (the sheets of the CD/SD/DD workbooks), in order: what a lead adds to.
-  const addablePhases = useMemo(() => blueprints.map((blueprint) => blueprint.phase), [blueprints]);
+  // The WBS nodes (the sheets of the CD/SD/DD workbooks), then Others, in order: what a lead adds to.
+  const addablePhases = useMemo(() => [...blueprints.map((blueprint) => blueprint.phase), OTHERS_NODE], [blueprints]);
   // The node cards, stage by stage (CD, SD, DD), folded into one bar until the lead opens them.
   const [nodesOpen, setNodesOpen] = useState(nodesOpenAtFirst);
   const toggleNodes = () => {
@@ -937,6 +941,16 @@ export function WbsStructurePage() {
                   </div>
                 </div>
               ))}
+              {/* Others, below DD: a node of the lead's own, to add any tasks to by hand (no standard tasks). */}
+              <div className="wbs-phase-stage wbs-phase-stage-others">
+                <span className="wbs-phase-stage-name" aria-hidden="true" />
+                <div className="wbs-phase-cards">
+                  <div className="wbs-phase-card">
+                    <button type="button" className="wbs-phase-card-node" onClick={() => openNodeForm(OTHERS_NODE)}>{OTHERS_NODE}</button>
+                    <button type="button" className="wbs-phase-card-plus" aria-label={`Add a task to ${OTHERS_NODE}`} title="Add a task of your own" onClick={() => openNodeForm(OTHERS_NODE)}>+</button>
+                  </div>
+                </div>
+              </div>
             </div>
             )}
           </div>
